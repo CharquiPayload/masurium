@@ -1357,11 +1357,11 @@ def think(who, text):
 THINKING = threading.Event()
 
 
-def drain(queue):
-    """Throws away what is left in the queue. If they asked to stop, it no longer counts."""
+def drain(inbox):
+    """Throws away what is left in the inbox. If they asked to stop, it no longer counts."""
     try:
         while True:
-            queue.get_nowait()
+            inbox.get_nowait()
     except queue.Empty:
         pass
 
@@ -1686,7 +1686,7 @@ def pending_notices(pending, state):
     return notices, remain
 
 
-def listen(since, queue):
+def listen(since, inbox):
     """Poll the chat, without ever stopping, in its own thread.
 
     Separate from thinking on purpose. They used to share one loop, and a
@@ -1722,7 +1722,7 @@ def listen(since, queue):
             for a in n.get("notices", []):
                 log(f"[body] {a['text']}")
                 note_stair_foot(a["text"])
-                queue.put((BODY, a["text"]))
+                inbox.put((BODY, a["text"]))
         except Exception:
             pass
         # One snapshot of the body per round: for the TAB icon and for the
@@ -1757,14 +1757,14 @@ def listen(since, queue):
                         PENDING_F.write_text(json.dumps(now))
                         for a in notices:
                             log(f"[body] {a}")
-                            queue.put((BODY, a))
+                            inbox.put((BODY, a))
         except Exception:
             pass
         try:
             new_ones, internal_since = internal_new(internal_since)
             for of_, text in new_ones:
                 log(f"[internal from {of_}] {text}")
-                queue.put((of_, INTERNAL + text))
+                inbox.put((of_, INTERNAL + text))
         except Exception as e:
             log(f"could not read the internal channel: {e}")
         try:
@@ -1803,7 +1803,7 @@ def listen(since, queue):
                 except Exception as e:
                     log(f"could not stop: {e}")
                 log("-> immediate stop (without going through the brain)")
-                drain(queue)        # what was queued no longer counts: they asked to stop
+                drain(inbox)        # what was queued no longer counts: they asked to stop
                 say(phrase("stop"))
                 continue
 
@@ -1855,9 +1855,9 @@ def listen(since, queue):
             # Staying quiet while thinking is what looked like a hang. One
             # notice and only one: to the first one waiting, not to every
             # message.
-            if THINKING.is_set() and queue.empty():
+            if THINKING.is_set() and inbox.empty():
                 say(phrase("busy"))
-            queue.put((who, text))
+            inbox.put((who, text))
 
 
 def last_note():
@@ -1952,11 +1952,11 @@ def main():
     since = request("/chat").get("last", 0)
     log(f"listening from id={since} as {NAME}")
 
-    queue = queue.Queue()
-    threading.Thread(target=listen, args=(since, queue), daemon=True).start()
+    inbox = queue.Queue()
+    threading.Thread(target=listen, args=(since, inbox), daemon=True).start()
 
     while True:
-        who, text = queue.get()
+        who, text = inbox.get()
         WITH_AI[0] = text.startswith(INTERNAL)
         THINKING.set()
         before = last_note()

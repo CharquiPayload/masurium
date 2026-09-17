@@ -231,7 +231,7 @@ public class MarionetteBot {
                     x -> attend(x, this::disconnect));
             http.setExecutor(null);
             http.start();
-            LOG.info("[marionette-bot] escuchando en http://127.0.0.1:{}", PORT);
+            LOG.info("[marionette-bot] listening on http://127.0.0.1:{}", PORT);
         } catch (IOException e) {
             // Loud: if this fails silently, the agent talks to a door that does not exist
             // and nothing gives it away.

@@ -128,7 +128,7 @@ public class MarionetteServer {
             http.createContext("/tab", x -> attend(x, this::tab));
             http.setExecutor(null);
             http.start();
-            LOG.info("[marionette] escuchando en http://{}:{}  (token: {})",
+            LOG.info("[marionette] listening on http://{}:{}  (token: {})",
                      host, port, token.isEmpty() ? "no" : "yes");
         } catch (IOException e) {
             LOG.error("[marionette] could NOT open {}:{}", host, port, e);
