@@ -1,5 +1,6 @@
 package marionette.bot;
 
+import marionette.common.Phrases;
 import marionette.common.Logbook;
 import marionette.common.Route;
 import net.minecraft.client.Minecraft;
@@ -475,8 +476,7 @@ final class Lookout {
         if (++ticksSinceRetreatPlan < EVERY) return true;
         ticksSinceRetreatPlan = 0;
         if (!moveAwayFrom(mc, p, hostile)) {
-            Voice.say("cornered", CORNERED_NOTICE,
-                    "badly hurt and with no way out");
+            Voice.say("cornered", CORNERED_NOTICE, Phrases.of("hurt_cornered"));
         }
         return true;
     }
@@ -700,8 +700,7 @@ final class Lookout {
         if (!moveAwayFrom(mc, p, creeper)) {
             // Cornered. Saying it is all that is left, and it is much more than before:
             // dying in silence helps nobody.
-            Voice.say("cornered", CORNERED_NOTICE,
-                    "creeper on top of me and no way out");
+            Voice.say("cornered", CORNERED_NOTICE, Phrases.of("creeper_cornered"));
         }
     }
 

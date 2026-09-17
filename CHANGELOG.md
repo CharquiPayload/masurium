@@ -35,6 +35,9 @@ First public release of Marionette.
   respawning and recovering items after death.
 - Per-server memory: places, a diary, people, placed blocks, staircases,
   standing orders, preferences, break whitelist, food blacklist and trash list.
+- What the body says by itself without waiting for the brain (a creeper next to
+  whoever it escorts, being cornered, what it found exploring) comes out in the
+  bot's own language and grammatical gender.
 - Body notices that wake the brain, with per-key cooldowns, and an in-memory
   logbook for diagnosis.
 

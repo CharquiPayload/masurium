@@ -1,5 +1,6 @@
 package marionette.bot;
 
+import marionette.common.Phrases;
 import marionette.common.Logbook;
 import marionette.common.Request;
 import marionette.common.Route;
@@ -213,9 +214,8 @@ final class Escort {
             // creepers just like I do, and warning it every fifteen seconds is noise for
             // everyone.
             if (!MarionetteBot.isMyBoss(toWhom)) {
-                Voice.say("escort-creeper", 15_000, String.format(
-                        "%s, creeper %d blocks from you", toWhom,
-                        (int) creeper.distanceTo(who)));
+                Voice.say("escort-creeper", 15_000, Phrases.of("escort_creeper",
+                        toWhom, (int) creeper.distanceTo(who)));
             }
             Logbook.note("escort_status", String.format(
                     "I warn %s of a creeper %d blocks from them",

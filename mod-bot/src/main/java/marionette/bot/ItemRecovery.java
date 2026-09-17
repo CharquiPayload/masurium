@@ -1,5 +1,6 @@
 package marionette.bot;
 
+import marionette.common.Phrases;
 import marionette.common.Logbook;
 import marionette.common.Request;
 import marionette.common.Route;
@@ -274,7 +275,7 @@ final class ItemRecovery {
         Logbook.note("recovery", "I respawned; going for my things to " + where
                 + " (attempt " + attempts + ")");
         Diary.note("I respawned and went out for my things to " + where);
-        Voice.say("recover", 60_000, "I respawned. Going for my things to " + where);
+        Voice.say("recover", 60_000, Phrases.of("recovered", where));
     }
 
     /**

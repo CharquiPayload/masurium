@@ -1,5 +1,6 @@
 package marionette.bot;
 
+import marionette.common.Phrases;
 import marionette.common.Logbook;
 import marionette.common.Route;
 import net.minecraft.client.Minecraft;
@@ -99,9 +100,8 @@ final class Routine {
                 shelter.label().isEmpty() ? shelter.type()
                         : "'" + shelter.label() + "'",
                 goal.x(), goal.y(), goal.z()));
-        Voice.say("routine", 300_000,
-                "night fell and I am out in the open; moving to "
-                + (shelter.label().isEmpty() ? "a known spot"
+        Voice.say("routine", 300_000, Phrases.of("shelter",
+                shelter.label().isEmpty() ? Phrases.of("known_spot")
                         : shelter.label()));
         return true;
     }

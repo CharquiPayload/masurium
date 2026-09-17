@@ -110,6 +110,15 @@ if port_in_use "$PORT"; then
   exit 1
 fi
 
+# What the body says on its own (a creeper next to whoever it escorts, being
+# cornered) does not go through the brain, so the mod needs the same language
+# and gender the bridge uses. Only clean values reach the JVM.
+LANGUAGE="$(tr -dc '[:alpha:]' < "$BASE/language" 2>/dev/null | cut -c1-8)"
+GENDER="$(tr -dc '[:alpha:]' < "$BASE/gender" 2>/dev/null | cut -c1-1)"
+SPEECH_FLAGS=""
+[ -n "$LANGUAGE" ] && SPEECH_FLAGS=" -Dmarionette.language=$LANGUAGE"
+[ -n "$GENDER" ] && SPEECH_FLAGS="$SPEECH_FLAGS -Dmarionette.gender=$GENDER"
+
 echo "==> starting $NAME (port $PORT)"
 rm -f "$PIPE" "$OUTPUT"
 mkfifo "$PIPE"
@@ -119,7 +128,7 @@ sleep 4
 # -Dmarionette.bot.port: the mod reads it when it opens its HTTP server. Without
 # it every bot would fight over 8478 and the second one would have no hands.
 echo "launch $VERSION -lwjgl$OFFLINE_FLAG -paulscode" \
-     "--jvm \"-Xmx$HEAP -Dmarionette.bot.port=$PORT\"" > "$PIPE"
+     "--jvm \"-Xmx$HEAP -Dmarionette.bot.port=$PORT$SPEECH_FLAGS\"" > "$PIPE"
 
 echo "==> loading the game"
 # The right signal is NOT that the process exists: it is that the mod has

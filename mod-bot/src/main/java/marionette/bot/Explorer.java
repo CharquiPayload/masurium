@@ -1,5 +1,6 @@
 package marionette.bot;
 
+import marionette.common.Phrases;
 import marionette.common.Fan;
 import marionette.common.Request;
 import marionette.common.Route;
@@ -563,16 +564,15 @@ final class Explorer {
                 toward, where.getX(), where.getY(), where.getZ(), biome));
         String whatsNext;
         if (!remaining) {
-            whatsNext = "Turning back";
+            whatsNext = Phrases.of("turning_back");
         } else if (soughtName != null || biomeSought != null) {
-            whatsNext = String.format("No %s here: on to segment %d of %d",
+            whatsNext = Phrases.of("nothing_here",
                     soughtName != null ? soughtName : biomeSought,
                     currentBranch + 1, branches);
         } else {
-            whatsNext = String.format("on to segment %d of %d",
-                    currentBranch + 1, branches);
+            whatsNext = Phrases.of("next_segment", currentBranch + 1, branches);
         }
-        Voice.say("explore", 60_000, String.format("I reached %d %d %d, %s. %s",
+        Voice.say("explore", 60_000, Phrases.of("explored",
                 where.getX(), where.getY(), where.getZ(), biome, whatsNext));
     }
 
