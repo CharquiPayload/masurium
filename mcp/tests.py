@@ -62,6 +62,47 @@ def with_response(payload):
     server.bt = fake
 
 
+# --- locks: who asks comes from the bridge, never from the brain ------------
+
+def tests_speaker():
+    seen = []
+
+    def record(route, **kw):
+        seen.append((route, kw))
+        if route == "/food":
+            return {"ok": True, "vetoed": ["salmon"]}
+        return {"ok": True, "commanders": ["Owner"], "can": False}
+    with_response(record)
+    os.environ["MARIONETTE_SPEAKER"] = "Stranger"
+    try:
+        server.t_add_admin({"who": "Owner", "name": "Stranger"})
+        check("admins: add uses who SPOKE, not the who the brain wrote",
+              seen[-1] == ("/admins", {"who": "Stranger", "add": "Stranger"}),
+              seen[-1])
+        server.t_remove_admin({"who": "Owner", "name": "Owner"})
+        check("admins: remove uses who SPOKE",
+              seen[-1][1].get("who") == "Stranger", seen[-1])
+        server.t_log_off({"who": "Owner"})
+        check("log_off: the body is asked with who SPOKE",
+              ("/disconnect", {"who": "Stranger"}) in seen, seen[-3:])
+        out = server.t_restart_me({"who": "Owner"})
+        check("restart_me: refused when who SPOKE is not an admin",
+              out.startswith("I only accept that"), out)
+        out = server.t_eat({"what": "salmon", "who": "Owner"})
+        check("eat: vetoed food refused when the brain names someone who did not speak",
+              "vetoed food list" in out, out)
+        os.environ["MARIONETTE_SPEAKER"] = ""
+        server.t_add_admin({"who": "Owner", "name": "Stranger"})
+        check("admins: a body notice (nobody spoke) asks with an empty name",
+              seen[-1][1].get("who") == "", seen[-1])
+    finally:
+        os.environ.pop("MARIONETTE_SPEAKER", None)
+    for name in ("add_admin", "remove_admin", "log_off", "restart_me"):
+        props = server.TOOLS[name][2]
+        check(f"{name}: offers no who parameter for the brain to fill",
+              "who" not in props, props)
+
+
 # --- what really matters: not lying -----------------------------------------
 
 def tests_honesty():
@@ -750,6 +791,7 @@ if __name__ == "__main__":
     tests_stairs()
     tests_protocol()
     tests_chat()
+    tests_speaker()
 
     print(f"\n{done - len(failures)}/{done} checks pass")
     if failures:
