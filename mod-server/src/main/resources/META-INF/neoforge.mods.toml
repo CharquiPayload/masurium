@@ -1,0 +1,27 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+
+[[mods]]
+modId = "marionette_server"
+version = "1.0.0"
+displayName = "Marionette (server)"
+description = "The source of truth for the bots: answers over HTTP what a client can only guess."
+authors = "CharquiPayload"
+
+# SIDE = SERVER, and this is what matters: it is only installed on the server and
+# registers NO mandatory network channel. Players without this mod join as usual
+# and never notice it.
+[[mods.dependencies.marionette_server]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1.0,)"
+ordering = "NONE"
+side = "SERVER"
+
+[[mods.dependencies.marionette_server]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1,1.22)"
+ordering = "NONE"
+side = "SERVER"

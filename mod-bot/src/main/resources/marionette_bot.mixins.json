@@ -1,0 +1,13 @@
+{
+  "minVersion": "0.8",
+  "package": "marionette.bot.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "injectors": {
+    "defaultRequire": 0
+  },
+  "client": [
+    "VeilRenderSystemMixin",
+    "GameRendererMixin",
+    "FishingHookAccessor"
+  ]
+}

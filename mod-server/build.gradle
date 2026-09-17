@@ -1,0 +1,48 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '2.0.78'
+}
+
+version = '1.0.0'
+group = 'marionette'
+base { archivesName = 'marionette-server' }
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+neoForge {
+    version = '21.1.248'
+
+    mods {
+        marionette_server {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+// Both mods compile the shared code from the same place: no copies.
+sourceSets.main.java.srcDir '../common/java'
+
+repositories { mavenCentral() }
+
+dependencies {
+    // Tests only. The logic under test (Request, ChatLog, Route...) does not
+    // touch Minecraft on purpose: `./gradlew test` runs in seconds without
+    // starting a server or joining a world.
+    testImplementation platform('org.junit:junit-bom:5.11.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        exceptionFormat 'full'
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}

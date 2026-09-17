@@ -1,0 +1,29 @@
+# Credentials. Never.
+*.env
+.env
+auth.json
+*.key
+
+# Build output
+build/
+.gradle/
+*.jar
+!**/gradle/wrapper/gradle-wrapper.jar
+
+# Heavy things that are not code: third-party mods and each bot's game folders.
+packs/
+bots/
+servers/
+shared/
+gamedir*/
+mods/
+
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+
+*.log
+*.bak
+*.swp
+.DS_Store
