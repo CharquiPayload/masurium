@@ -30,6 +30,9 @@ First public release of Marionette.
 - Chests, furnaces, armor, eating, sleeping and setting the spawn.
 - Filling areas and building layered blueprints with per-layer review.
 - Escorting players; guards that follow and protect a main bot.
+- Arrows are not given away: three that do not lower a target's health and that
+  target is left alone, by everything that shoots (escort, lookout and the
+  archer's errand), until it hurts the bot.
 - Reflexes that never wait for the model: defense, the creeper/phantom/archer
   lookout, retreating when badly hurt, surfacing to breathe, getting out of holes,
   respawning and recovering items after death.

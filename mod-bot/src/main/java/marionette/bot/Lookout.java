@@ -1,5 +1,6 @@
 package marionette.bot;
 
+import marionette.common.Misses;
 import marionette.common.Phrases;
 import marionette.common.Logbook;
 import marionette.common.Route;
@@ -7,6 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.monster.CrossbowAttackMob;
 import net.minecraft.world.entity.monster.RangedAttackMob;
@@ -309,6 +311,7 @@ final class Lookout {
             // the creeper is too close for the bow, already swelling on top of it, or
             // without a ready bow or without seeing it.
             boolean inRange = Preferences.is("shoot_creepers")
+                    && Misses.worthIt(creeper.getUUID())
                     && d >= BOW_MIN && !(enabled && d <= EXPLOSION)
                     && Bow.ready(p) == null && p.hasLineOfSight(creeper)
                     && !someoneInTheLine(mc, p, creeper) && !Bow.standingInWater(p);
@@ -320,6 +323,7 @@ final class Lookout {
                 if (walker.walking()) walker.stop("I shoot the creeper");
                 shootingUntil = System.currentTimeMillis() + 1_500;
                 if (draw(mc, p, creeper)) {
+                    Misses.arrow(creeper.getUUID(), healthOf(creeper));
                     Logbook.note("danger", String.format(
                             "arrow at the creeper at %d blocks", (int) d));
                 }
@@ -363,11 +367,13 @@ final class Lookout {
         // Now yes: nobody is hitting me, so the creeper left in range gets an arrow.
         if (creeperInRange != null && creeperInRange.isAlive()
                 && Preferences.is("shoot_creepers")
+                && Misses.worthIt(creeperInRange.getUUID())
                 && Bow.ready(p) == null && p.hasLineOfSight(creeperInRange)
                 && !Bow.standingInWater(p)) {
             if (walker.walking()) walker.stop("creeper in range");
             shootingUntil = System.currentTimeMillis() + 1_500;
             if (draw(mc, p, creeperInRange)) {
+                Misses.arrow(creeperInRange.getUUID(), healthOf(creeperInRange));
                 Logbook.note("danger", String.format("arrow at the creeper at "
                         + "%d blocks", (int) p.distanceTo(creeperInRange)));
             }
@@ -948,4 +954,13 @@ final class Lookout {
                 + "\"surfacing_to_breathe\":%b}",
                 fleeing, retreating, fighting(), breathing);
     }
+
+    /**
+     * The health of something alive, 0 for what has none. The miss count only needs a
+     * number that goes down when an arrow lands.
+     */
+    private static float healthOf(Entity e) {
+        return e instanceof LivingEntity alive ? alive.getHealth() : 0f;
+    }
+
 }

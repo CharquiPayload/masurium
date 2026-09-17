@@ -1,6 +1,7 @@
 package marionette.bot;
 
 import marionette.common.Logbook;
+import marionette.common.Misses;
 import marionette.common.Request;
 import marionette.common.Route;
 import net.minecraft.client.Minecraft;
@@ -23,9 +24,14 @@ import net.minecraft.world.phys.AABB;
  *
  * <p>Without a bow or arrows it refuses from the start, and if the quiver empties
  * mid-errand it gives up and says so; it does not finish with the sword, because that
- * would be hunting by another name. The allowed sword is the CHARGE: within {@value
- * #SWORD} blocks it runs in to finish in melee (standing still drawing the bow with the
- * target one step away looked absurd): the bow is for what is really far.
+ * would be hunting by another name. The one sword allowed is for what is already on top
+ * of it, within {@value #HIT} blocks: standing still drawing the bow with the target one
+ * step away looked absurd.
+
+ * <p>And it does not insist on what it cannot hit: {@value #ARROW_PATIENCE} arrows that do
+ * not lower a target's health and that target is left alone (see {@link Misses}), because
+ * behind that number there is almost always a block eating the shots. It gets arrows again
+ * if it hurts the bot, which proves it can be reached.
  *
  * <p>It does not live in the {@link Guard} either, for the usual reason: shooting from
  * afar is attacking on an errand, and the guard only answers what is already on top of
@@ -62,10 +68,7 @@ final class Archer {
     static final int COUNT_MAX = 8;
     /** At this distance no bow will do: finish it with the sword. */
     private static final double HIT = 3.0;
-    /**
-     * From here inwards it CHARGES with the sword instead of drawing: from 10 blocks on
-     * it charges. The bow is for what is really far.
-     */
+    /** Inside this distance it does not draw: the target is already on top of it. */
     private static final double SWORD = 10.0;
     /**
      * Arrows in a row without lowering the prey's health before assuming it is under
@@ -102,10 +105,6 @@ final class Archer {
     /** Ticks it has been flying, and the ones given to this particular shot. */
     private int flightTicks;
     private int shotWait;
-    /** With melee set, whether the prey got into sword range. */
-    private boolean wasNear;
-    /** The current prey proved to be under cover: go after it with the sword. */
-    private boolean melee;
     /** Accumulated ticks without finding a path to the current prey. */
     private int stuckTicks;
     /**
@@ -271,21 +270,6 @@ final class Archer {
 
         double d = p.distanceTo(prey);
 
-        // "Under cover" expires: if the prey entered sword range and left again (or went
-        // beyond bow range) the shot is retried with a fresh measurement. Being under
-        // cover up close does not mean being so far away.
-        if (melee) {
-            if (d <= SWORD) {
-                wasNear = true;
-            } else if (wasNear || d > SHOT_MAX) {
-                melee = false;
-                wasNear = false;
-                arrowsWithoutDamage = 0;
-                Logbook.note("archery",
-                        "the prey moved away again: retrying the bow");
-            }
-        }
-
         // When the target is relatively close the bot does not keep drawing still. The
         // bow is the ERRAND's weapon, but a mob on top of you is finished in melee, as
         // anyone with two hands would; what stays forbidden is hunting with the sword,
@@ -327,20 +311,23 @@ final class Archer {
                         "I missed the shot at the %s at %d blocks (%d in a row)",
                         type, (int) d, arrowsWithoutDamage));
                 if (arrowsWithoutDamage >= ARROW_PATIENCE) {
-                    melee = true;
+                    // Almost always a block eating the shots. Insisting only gives
+                    // arrows away, so this one is left alone until it hurts me.
                     Logbook.note("archery", String.format(
-                            "%d arrows without harming the %s: it is under "
-                            + "cover, going for it with the sword",
-                            arrowsWithoutDamage, type));
+                            "%d arrows without harming the %s: I leave it alone until "
+                            + "it hurts me", arrowsWithoutDamage, type));
+                    Misses.giveUp(prey.getUUID(), hpWhenReleased);
+                    unreachable.add(prey.getId());
+                    prey = null;
+                    arrowsWithoutDamage = 0;
+                    Bow.leave(p);
                 }
                 return;
             }
         }
 
-        // The bow is for what is really far: from SWORD inwards it runs to finish it, and
-        // a prey that proved to be under cover (melee) is sought with the sword at any
-        // distance; shooting at a wall is giving arrows away.
-        if (!melee && d > SWORD && d <= SHOT_MAX
+        // The bow is for what is really far: from SWORD inwards it runs to finish it.
+        if (d > SWORD && d <= SHOT_MAX
                 && p.hasLineOfSight(prey)) {
             if (walker.walking()) walker.stop("target in range");
             stuckTicks = 0;
@@ -439,8 +426,6 @@ final class Archer {
 
     /** Per-prey counters: every new target starts a fresh damage measurement. */
     private void newPrey() {
-        melee = false;
-        wasNear = false;
         arrowsWithoutDamage = 0;
         stuckTicks = 0;
         footsteps = null;
@@ -478,7 +463,10 @@ final class Archer {
                 new AABB(p.blockPosition()).inflate(VIEW),
                 x -> x instanceof LivingEntity && x.isAlive()
                      && (pvp || !(x instanceof Player)))) {
-            if (!isTheType(e) || unreachable.contains(e.getId())) continue;
+            if (!isTheType(e) || unreachable.contains(e.getId())
+                    || !Misses.worthIt(e.getUUID())) {
+                continue;     // what it could not hit is not chosen again either
+            }
             double dist = p.distanceTo(e);
             if (dist < bestDist) {
                 bestDist = dist;

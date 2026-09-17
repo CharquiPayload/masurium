@@ -1,5 +1,6 @@
 package marionette.bot;
 
+import marionette.common.Misses;
 import marionette.common.Logbook;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -133,6 +134,12 @@ final class Guard {
             alert = ALERT_TICKS;
             Logbook.note("damage", String.format(
                     "I was hit: %.1f -> %.1f hp", previousHp, hp));
+            // Whoever reaches me earns arrows again: an ignored target stops being
+            // ignored the moment it proves it can hurt me (see Misses). For an arrow
+            // or a fireball the source is whoever shot it, not the projectile.
+            var blow = p.getLastDamageSource();
+            Entity attacker = blow == null ? null : blow.getEntity();
+            if (attacker != null) Misses.hurtMe(attacker.getUUID());
             complainIfPlayer(p, inCrosshair);
         }
         if (hp <= HP_LOW && !warnedLowHealth) {

@@ -1,5 +1,6 @@
 package marionette.bot;
 
+import marionette.common.Misses;
 import marionette.common.Phrases;
 import marionette.common.Logbook;
 import marionette.common.Request;
@@ -274,6 +275,7 @@ final class Escort {
         //    arrow into whoever I came to protect.
         Vec3 aimTarget = hostile.position().add(0, hostile.getBbHeight() * 0.5, 0);
         if (toMe < SHOT_MIN || toMe > WATCH
+                || !Misses.worthIt(hostile.getUUID())   // three arrows, no damage: enough
                 || Bow.ready(p) != null
                 || Bow.immuneToArrows(hostile)     // breeze, enderman: with the sword
                 || !p.hasLineOfSight(hostile)
@@ -284,6 +286,7 @@ final class Escort {
             return;
         }
         if (Bow.drawAndRelease(mc, p, hostile)) {
+            Misses.arrow(hostile.getUUID(), healthOf(hostile));
             Logbook.note("escort_status", String.format(
                     "arrow at a %s %d blocks from %s",
                     BuiltInRegistries.ENTITY_TYPE.getKey(
@@ -402,4 +405,13 @@ final class Escort {
                         ? ",\"defending_her_from\":\"" + Request.escape(nameOf(attacker)) + "\""
                         : "");
     }
+
+    /**
+     * The health of something alive, 0 for what has none. The miss count only needs a
+     * number that goes down when an arrow lands.
+     */
+    private static float healthOf(Entity e) {
+        return e instanceof LivingEntity alive ? alive.getHealth() : 0f;
+    }
+
 }
