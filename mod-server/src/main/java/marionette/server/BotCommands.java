@@ -217,8 +217,10 @@ final class BotCommands {
         List<String> heard = access.hearList(bot);
         String names = heard.isEmpty() ? "nobody" : String.join(", ", heard);
         return access.onlyList(bot)
-                ? "only its list (on): " + names + ", plus its owner, admins and other bots"
-                : "everyone (off)" + (heard.isEmpty() ? "" : "; list kept for later: " + names);
+                ? "only its list (list on): " + names
+                  + ", plus its owner, its admins and other bots"
+                : "everyone (list off)"
+                  + (heard.isEmpty() ? "" : "; list kept for later: " + names);
     }
 
     private int hearList(CommandContext<CommandSourceStack> c) {
