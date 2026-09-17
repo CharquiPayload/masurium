@@ -37,8 +37,10 @@ import marionette.server.BotAccess.Action;
  *   <li>{@code info} (or nothing): owner, admins, who it hears, whether its bridge
  *       answers. Anyone may look.
  *   <li>{@code shutdown | restart | logoff}: the owner or an admin.
- *   <li>{@code hear everyone | list | add <player> | remove <player>}: the owner or an
- *       admin.
+ *   <li>{@code hear on | off | add <player> | remove <player>}: the owner or an admin.
+ *       Shaped like vanilla {@code /whitelist}, which every server admin already knows:
+ *       {@code on} = only its list, {@code off} = everyone.
+ *   <li>{@code hear list}: the list and whether it is on. Anyone may look.
  *   <li>{@code admins add <player> | remove <player>}: the owner only.
  * </ul>
  *
@@ -97,10 +99,12 @@ final class BotCommands {
                                 .then(Commands.literal("logoff")
                                         .executes(c -> order(c, Action.LOGOFF)))
                                 .then(Commands.literal("hear")
-                                        .then(Commands.literal("everyone")
+                                        .then(Commands.literal("on")
+                                                .executes(c -> hearMode(c, true)))
+                                        .then(Commands.literal("off")
                                                 .executes(c -> hearMode(c, false)))
                                         .then(Commands.literal("list")
-                                                .executes(c -> hearMode(c, true)))
+                                                .executes(this::hearList))
                                         .then(Commands.literal("add").then(player(online)
                                                 .executes(c -> hear(c, true))))
                                         .then(Commands.literal("remove").then(player(heard)
@@ -192,7 +196,6 @@ final class BotCommands {
         boolean inGame = s.getServer().getPlayerList().getPlayerByName(name) != null;
         boolean bridge = access.alive(bot, System.currentTimeMillis());
         List<String> admins = access.admins(bot);
-        List<String> heard = access.hearList(bot);
         String owner = access.owner(bot);
         MutableComponent m = Component.literal(name).withStyle(ChatFormatting.AQUA)
                 .append(Component.literal((inGame ? "  in the game" : "  not in the game")
@@ -203,14 +206,32 @@ final class BotCommands {
                 .append(Component.literal("\n  admins: "
                         + (admins.isEmpty() ? "none" : String.join(", ", admins)))
                         .withStyle(ChatFormatting.WHITE))
-                .append(Component.literal("\n  hears: " + (access.onlyList(bot)
-                        ? "only its owner, admins, other bots and: "
-                          + (heard.isEmpty() ? "nobody else" : String.join(", ", heard))
-                        : "everyone" + (heard.isEmpty() ? ""
-                          : " (list kept for later: " + String.join(", ", heard) + ")")))
+                .append(Component.literal("\n  hears: " + hearing(bot))
                         .withStyle(ChatFormatting.WHITE));
         s.sendSuccess(() -> m, false);
         return 1;
+    }
+
+    /** "everyone" or "only its list", with the names. */
+    private String hearing(String bot) {
+        List<String> heard = access.hearList(bot);
+        String names = heard.isEmpty() ? "nobody" : String.join(", ", heard);
+        return access.onlyList(bot)
+                ? "only its list (on): " + names + ", plus its owner, admins and other bots"
+                : "everyone (off)" + (heard.isEmpty() ? "" : "; list kept for later: " + names);
+    }
+
+    private int hearList(CommandContext<CommandSourceStack> c) {
+        String bot = bot(c);
+        CommandSourceStack s = c.getSource();
+        if (!access.knows(bot)) {
+            fail(s, "There is no bot called " + bot + " on this server. Known: "
+                    + (access.names().isEmpty() ? "none" : String.join(", ", access.names())));
+            return 0;
+        }
+        String line = access.display(bot) + " hears " + hearing(bot);
+        s.sendSuccess(() -> Component.literal(line).withStyle(ChatFormatting.AQUA), false);
+        return access.hearList(bot).size();
     }
 
     private int order(CommandContext<CommandSourceStack> c, Action action) {
@@ -267,7 +288,7 @@ final class BotCommands {
         done(c.getSource(), (add ? player + " added to the list of " + name
                                  : player + " removed from the list of " + name)
                 + (access.onlyList(bot) ? ""
-                   : ". The list applies once you run /marionette bot " + name + " hear list"));
+                   : ". The list applies once you run /marionette bot " + name + " hear on"));
         return 1;
     }
 

@@ -106,7 +106,7 @@ So everything that takes a bot out of the game is a **server command**:
   Permission nodes (`marionette.bot.*`) let a permissions mod grant more.
 - The brain has **no tool** for any of it. Asked in the chat, the bridge answers
   with the command, without a brain call.
-- With `hear list`, a stranger's message is dropped by the bridge before the
+- With `hear on`, a stranger's message is dropped by the bridge before the
   brain: no tokens spent, nothing to inject. The same filter covers `stop`.
 
 The only lock left that depends on who spoke is eating vetoed food, and there

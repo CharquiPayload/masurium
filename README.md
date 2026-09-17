@@ -226,8 +226,9 @@ server in the client's `config/` folder.
 | `/marionette bot <bot> shutdown` | owner, admins | stop the client and its bridge |
 | `/marionette bot <bot> restart` | owner, admins | restart the client and its bridge |
 | `/marionette bot <bot> logoff` | owner, admins | leave the server, keeping the client running |
-| `/marionette bot <bot> hear everyone\|list` | owner, admins | hear whoever names it, or only its list |
+| `/marionette bot <bot> hear on\|off` | owner, admins | hear only its list, or everyone |
 | `/marionette bot <bot> hear add\|remove <player>` | owner, admins | edit the hear list |
+| `/marionette bot <bot> hear list` | anyone | the hear list and whether it is on |
 | `/marionette bot <bot> admins add\|remove <player>` | owner | edit the admins |
 | `/marionette owners` | anyone | every bot with its owner |
 | `/marionette status` | anyone | what each bot is doing, with health and position |
@@ -244,9 +245,9 @@ a bot in the chat gets you the command, not the action, even from its owner:
 the server knows for sure who runs a command, while a name in the chat reaches
 the brain through words a player can fake.
 
-**Hear list.** By default a bot hears everyone who names it. With
-`hear list` it only hears its owner, its admins, other bots and the players on
-its list. Anyone else is ignored before the brain, so they cost no tokens and
+**Hear list.** It works like the vanilla `/whitelist`. By default it is off
+and a bot hears everyone who names it. With `hear on` it only hears its owner,
+its admins, other bots and the players on its list. Anyone else is ignored before the brain, so they cost no tokens and
 cannot inject anything.
 
 **Permission nodes.** Every action has a node for permission mods such as

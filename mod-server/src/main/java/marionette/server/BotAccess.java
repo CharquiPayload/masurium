@@ -41,8 +41,8 @@ import java.util.regex.Pattern;
  * Permission nodes (LuckPerms and the like) and the server console are checked by
  * {@link BotCommands}, on top of this.
  *
- * <p><b>Hearing.</b> In mode {@code everyone} the bot hears whoever names it. In mode
- * {@code list} it hears only its owner, its admins, the listed players and other bots:
+ * <p><b>Hearing.</b> With the list off the bot hears whoever names it. With it on
+ * ({@code hear on}) it hears only its owner, its admins, the listed players and other bots:
  * what anyone else says never reaches the brain, so it spends no tokens and injects
  * nothing.
  *
@@ -291,7 +291,7 @@ final class BotAccess {
         Bot b = find(bot);
         if (b == null) return "unknown bot";
         if (b.onlyList == onlyList) {
-            return onlyList ? "it already hears only its list" : "it already hears everyone";
+            return onlyList ? "the list is already on" : "the list is already off: it hears everyone";
         }
         b.onlyList = onlyList;
         save();
