@@ -279,6 +279,10 @@ request parsing and most of the bridge and MCP logic are tested in milliseconds.
 - A per-bot configuration file generated on first start, with the behaviour
   toggles as `true`/`false`.
 - Release builds of both jars.
+- **Launcher** (to do): one place to start, stop and watch bots, choosing the
+  bot, its mod pack, the server address and port, with groups of bots that share
+  one configuration. It must read the same lock the bridge takes, so a bot that
+  is already running is shown as running instead of started a second time.
 - **Pluggable brain** (to do): besides Claude Code, support other chat-completions
   backends, such as the Anthropic API and OpenAI-compatible APIs (OpenRouter,
   Ollama, LM Studio). Smaller or local models will likely need a reduced tool
