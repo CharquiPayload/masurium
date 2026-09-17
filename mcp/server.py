@@ -422,7 +422,7 @@ def _current_server():
     """Which server the bot is in: the launcher writes it in
     bots/<bot>/server (a slug such as my-survival, testing...)."""
     try:
-        with open(f"{HOME}/bots/{NAME.lower()}/server") as f:
+        with open(os.path.join(_bots_dir(), NAME.lower(), "server")) as f:
             return f.read().strip() or "unknown"
     except OSError:
         return "unknown"
@@ -1066,8 +1066,7 @@ def t_stop_escorting(_):
 def _boss_of_this_bot():
     """Whom this bot escorts by default (bots/<bot>/escort), or None."""
     try:
-        route = os.path.join(os.environ.get("MARIONETTE_BOTS", f"{HOME}/bots"),
-                             NAME.lower(), "escort")
+        route = os.path.join(_bots_dir(), NAME.lower(), "escort")
         with open(route) as f:
             return f.read().strip() or None
     except OSError:
@@ -1246,7 +1245,9 @@ def t_restart_me(a):
 
 
 def _bots_dir():
-    return os.environ.get("MARIONETTE_BOTS", f"{HOME}/bots")
+    """Where the bots live: the same variable the launchers use."""
+    return (os.environ.get("MARIONETTE_BOTS_DIR") or os.environ.get("MARIONETTE_BOTS")
+            or f"{HOME}/bots")
 
 
 def _mark(what):
@@ -1521,7 +1522,7 @@ _EMPTY_CHEST = ("the chest is empty", "el cofre esta vacio")
 
 def _gamedir():
     return os.environ.get("MARIONETTE_GAMEDIR",
-                          f"{HOME}/bots/{NAME.lower()}/gamedir")
+                          os.path.join(_bots_dir(), NAME.lower(), "gamedir"))
 
 
 def _chests_file():

@@ -39,6 +39,9 @@ NAME = (sys.argv[1] if len(sys.argv) > 1
         else os.environ.get("BOT_NAME", "Bot"))
 PIPE = f"/tmp/{NAME.lower()}_in"
 HOME = os.path.expanduser("~")
+# Where the bots live: the same variable the launchers use.
+BOTS_HOME = (os.environ.get("MARIONETTE_BOTS_DIR") or os.environ.get("MARIONETTE_BOTS")
+             or f"{HOME}/bots")
 CONFIG = os.environ.get("MARIONETTE_ENV", f"{HOME}/.marionette/server.env")
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The MCP server the brain gets, passed inline: no config file with absolute
@@ -70,7 +73,7 @@ def bot_address(name):
         return os.environ["MARIONETTE_BOT"].rstrip("/")
     try:
         port = int(pathlib.Path(
-            f"{HOME}/bots/{name.lower()}/port").read_text().strip())
+            f"{BOTS_HOME}/{name.lower()}/port").read_text().strip())
     except (OSError, ValueError):
         port = 8478
     return f"http://127.0.0.1:{port}"
@@ -180,7 +183,7 @@ def unescape(text):
     return re.sub(r"(?<![\w.])\.(\w+)", r"\1", text)
 
 
-BOTS_DIR = pathlib.Path(f"{HOME}/bots")
+BOTS_DIR = pathlib.Path(BOTS_HOME)
 
 
 def _bot_config(name, key, base=None):
@@ -459,7 +462,7 @@ def personality():
     file, a bland default: better than inheriting another bot's character by
     accident.
     """
-    f = pathlib.Path(f"{HOME}/bots/{NAME.lower()}/personality.txt")
+    f = pathlib.Path(f"{BOTS_HOME}/{NAME.lower()}/personality.txt")
     try:
         text = f.read_text(encoding="utf-8").strip()
         if text:
@@ -483,7 +486,7 @@ def favorite():
     outside the repo like the personality. Without a file, the server owner;
     and without an owner either, nobody: then every player is treated the same.
     """
-    f = pathlib.Path(f"{HOME}/bots/{NAME.lower()}/favorite")
+    f = pathlib.Path(f"{BOTS_HOME}/{NAME.lower()}/favorite")
     who = OWNER
     try:
         text = f.read_text(encoding="utf-8").strip().splitlines()
@@ -1375,7 +1378,7 @@ LAST_BOT_TIME = [0.0]
 def other_bots():
     """The names (lowercase) of the other bots in the bots folder."""
     try:
-        return {d.name.lower() for d in pathlib.Path(f"{HOME}/bots").iterdir()
+        return {d.name.lower() for d in pathlib.Path(BOTS_HOME).iterdir()
                 if d.is_dir() and d.name.lower() != NAME.lower()}
     except Exception:
         return set()

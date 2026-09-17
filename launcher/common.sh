@@ -15,6 +15,8 @@
 BOTS_DIR="${MARIONETTE_BOTS_DIR:-$HOME/bots}"
 SERVERS_DIR="${MARIONETTE_SERVERS_DIR:-$HOME/servers}"
 COMMON_DIR="${MARIONETTE_COMMON_DIR:-$HOME/shared}"
+# Exported so the bridge and the MCP server read the same folders.
+export MARIONETTE_BOTS_DIR="$BOTS_DIR" MARIONETTE_SERVERS_DIR="$SERVERS_DIR" MARIONETTE_COMMON_DIR="$COMMON_DIR"
 # A native Claude Code install (~/.local/bin, updates itself) goes first.
 export PATH="$HOME/.local/bin:$PATH"
 FIRST_PORT=8478   # 8477 belongs to the SERVER mod
