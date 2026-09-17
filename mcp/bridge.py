@@ -17,6 +17,7 @@ Decisions that come from history, not from taste:
   `new_session`): resuming re-reads the whole chat on every message, and what
   the bot knows no longer lives there but in files.
 """
+import fcntl
 import json
 import os
 import pathlib
@@ -1206,6 +1207,33 @@ RECONNECTED = ["[bridge note: your client has just been reconnected and you are 
                "state instead of trusting memory.] "]
 
 
+def only_one_bridge(file=None):
+    """One bridge per bot, and the second one refuses to start.
+
+    Two bridges on the same bot both poll the chat, so everything said is
+    answered twice, and they fight over the session file ("No conversation
+    found with session ID"). It happened for real: a launcher was cut halfway,
+    a bridge was started by hand, and the launcher's own bridge came up later.
+
+    A pidfile would outlive a crash and lock the bot out of starting again. A
+    lock held on an open file is released by the kernel however the process
+    ends, so it can never be stale.
+    """
+    f = pathlib.Path(file or f"{HOME}/.marionette/bridge_{NAME.lower()}.lock")
+    f.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(f, "w")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        log(f"another bridge for {NAME} is already running: this one stops "
+            f"(the lock is {f})")
+        raise SystemExit(1)
+    handle.write(f"{os.getpid()}\n")
+    handle.flush()
+    return handle        # kept open on purpose: closing it frees the lock
+
+
 def new_session():
     """Every start of the bridge begins a new conversation.
 
@@ -1368,6 +1396,11 @@ def think(who, text):
         log("brain out of time (%ss): staying quiet" % BRAIN_TIMEOUT)
         return None
 
+
+# The lock that keeps this bridge the only one for this bot; see
+# only_one_bridge. It lives here so it is not closed by the garbage collector,
+# which would free the lock with the bridge still running.
+LOCK = []
 
 # Set while a brain call is in progress. The listening thread reads it to know
 # whether to warn that the bot is busy.
@@ -2046,6 +2079,10 @@ def silence_last(since_id, since_byte):
 
 
 def main():
+    # Before anything that writes: the session file is shared, and a second
+    # bridge starting would leave the first one resuming a session that is no
+    # longer its own.
+    LOCK.append(only_one_bridge())
     new_session()
     # Start from the last id: the previous history is not the bridge's business.
     since = request("/chat").get("last", 0)

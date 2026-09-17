@@ -117,6 +117,20 @@ def tests_speaker():
     check("control poll: carries the bot, its owner and since",
           route.startswith("/control?") and "bot=" in route and "since=5" in route
           and "owner=" in route, route)
+    lock = pathlib.Path(tempfile.mkdtemp()) / "bridge.lock"
+    held = bridge.only_one_bridge(lock)
+    try:
+        crashed = False
+        try:
+            bridge.only_one_bridge(lock)
+        except SystemExit:
+            crashed = True
+        check("one bridge per bot: the second one refuses to start", crashed)
+    finally:
+        held.close()
+    check("one bridge per bot: with the first one gone, another may start",
+          bridge.only_one_bridge(lock).close() is None)
+
     check("chat: asking to shut down points to the command, in both languages",
           all("/marionette bot {name} {what}" in bridge.L10N[k]["by_command"]
               for k in ("en", "es")))

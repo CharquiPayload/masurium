@@ -47,6 +47,8 @@ First public release of Marionette.
 - Nothing that takes a bot out of the game can be asked through the chat, and
   the one lock the brain still touches (vetoed food) checks the name the bridge
   read in the chat, never one written by the brain.
+- One bridge per bot: a second one on the same bot refuses to start instead of
+  answering everything twice.
 - Internal channel between a bot and its guards.
 
 ### Launchers and tests
