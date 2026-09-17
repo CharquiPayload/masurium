@@ -110,15 +110,6 @@ if port_in_use "$PORT"; then
   exit 1
 fi
 
-# Who the bot's admin list is born with: its favorite person, else the server
-# owner. Only a valid Minecraft name is passed on to the JVM.
-OWNER="$(tr -d '[:space:]' < "$BASE/favorite" 2>/dev/null || true)"
-OWNER="${OWNER:-${MARIONETTE_OWNER:-}}"
-case "$OWNER" in
-  ''|*[!A-Za-z0-9_]*) OWNER_FLAG="" ;;
-  *) OWNER_FLAG=" -Dmarionette.owner=$OWNER" ;;
-esac
-
 echo "==> starting $NAME (port $PORT)"
 rm -f "$PIPE" "$OUTPUT"
 mkfifo "$PIPE"
@@ -128,7 +119,7 @@ sleep 4
 # -Dmarionette.bot.port: the mod reads it when it opens its HTTP server. Without
 # it every bot would fight over 8478 and the second one would have no hands.
 echo "launch $VERSION -lwjgl$OFFLINE_FLAG -paulscode" \
-     "--jvm \"-Xmx$HEAP -Dmarionette.bot.port=$PORT$OWNER_FLAG\"" > "$PIPE"
+     "--jvm \"-Xmx$HEAP -Dmarionette.bot.port=$PORT\"" > "$PIPE"
 
 echo "==> loading the game"
 # The right signal is NOT that the process exists: it is that the mod has

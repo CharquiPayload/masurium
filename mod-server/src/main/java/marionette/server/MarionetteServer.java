@@ -85,14 +85,21 @@ public class MarionetteServer {
     private final ChatLog chat = new ChatLog(200);
     /** The state icon of each bot in the TAB list (see {@link Tab}). */
     private final Tab tab = new Tab();
-    /** Who owns each bot and the hotbar notice (see {@link Owners}). */
-    private final Owners owners = new Owners(tab);
+    /**
+     * Who owns, administers and is heard by each bot, and the orders given by command
+     * (see {@link BotAccess}).
+     */
+    private final BotAccess access = new BotAccess(Path.of("marionette_bots.properties"));
+    private final BotCommands botCommands = new BotCommands(access);
+    /** The owners as players see them, and the hotbar notice (see {@link Owners}). */
+    private final Owners owners = new Owners(tab, access);
     private final StatusBoard statusBoard = new StatusBoard(tab, owners);
 
     public MarionetteServer(IEventBus bus) {
         NeoForge.EVENT_BUS.register(this);
         NeoForge.EVENT_BUS.register(tab);
         NeoForge.EVENT_BUS.register(owners);
+        NeoForge.EVENT_BUS.register(botCommands);
         NeoForge.EVENT_BUS.register(statusBoard);
     }
 
@@ -105,6 +112,7 @@ public class MarionetteServer {
         int port = Integer.parseInt(cfg.getProperty("port", "8477").trim());
         token = cfg.getProperty("token", "").trim();
         bots = PickupRule.bots(cfg.getProperty("bots", DEFAULT_BOTS));
+        access.declare(bots);
         LOG.info("[marionette] bots: {}", bots);
 
         if (!host.equals("127.0.0.1") && token.isEmpty()) {
@@ -126,6 +134,8 @@ public class MarionetteServer {
             http.createContext("/inventory", x -> attend(x, this::inventory));
             http.createContext("/craft", x -> attend(x, this::craft));
             http.createContext("/tab", x -> attend(x, this::tab));
+            http.createContext("/control", x -> attend(x, this::control));
+            http.createContext("/access", x -> attend(x, this::access));
             http.setExecutor(null);
             http.start();
             LOG.info("[marionette] listening on http://{}:{}  (token: {})",
@@ -171,6 +181,25 @@ public class MarionetteServer {
     private String seeChat(Map<String, String> q) {
         String from = q.get("since");
         return chat.json(from == null ? null : Long.parseLong(from));
+    }
+
+    /**
+     * /control?bot=Alice&owner=Bob&since=N: the bridge's poll. It says the bot is alive and
+     * who owns it (from the bot's own config), and gets back its admins, who it hears and
+     * the orders given with {@code /marionette bot} after N. Without 'since', only the
+     * last order id, to start from there.
+     */
+    private String control(Map<String, String> q) {
+        String bot = q.getOrDefault("bot", "").trim();
+        long now = System.currentTimeMillis();
+        access.report(bot, q.getOrDefault("owner", ""), now);
+        String since = q.get("since");
+        return access.controlJson(bot, since == null ? null : Long.parseLong(since.trim()), now);
+    }
+
+    /** /access?bot=Alice: owner, admins and who it hears, read only. */
+    private String access(Map<String, String> q) {
+        return access.accessJson(q.getOrDefault("bot", "").trim());
     }
 
     // --- the part that really matters ------------------------------------------
@@ -514,7 +543,8 @@ public class MarionetteServer {
                         port=8477
                         token=
                         # Players that are bots, comma separated: what they toss on
-                        # the ground is not picked up again by themselves.
+                        # the ground is not picked up again by themselves, and
+                        # /marionette bot knows them before their bridge connects.
                         bots=
                         """);
                 LOG.info("[marionette] wrote {} with defaults", CONFIG.toAbsolutePath());

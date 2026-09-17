@@ -110,14 +110,15 @@ goes at the start of the prompt, before the body's instructions.
 For now: you talk plainly, correct and direct, without flourishes.
 TEXT
 
-# The favorite person: whose delicate orders the bot accepts. It is born with
-# the server owner, if the environment names one; to give the bot to someone
-# else, write their EXACT player name here and restart the bridge.
+# The owner: whose delicate orders the bot accepts, and who can shut it down,
+# restart it and manage its lists with /marionette bot on any server. It is
+# born with the server owner, if the environment names one; to give the bot to
+# someone else, write their EXACT player name here and restart the bridge.
 OWNER=""
 if [ -f "${MARIONETTE_ENV:-$HOME/.marionette/server.env}" ]; then
   OWNER="$( . "${MARIONETTE_ENV:-$HOME/.marionette/server.env}"; printf '%s' "${MARIONETTE_OWNER:-}")"
 fi
-[ -n "$OWNER" ] && echo "$OWNER" > "$BASE/favorite"
+[ -n "$OWNER" ] && echo "$OWNER" > "$BASE/owner"
 
 if ! n="$(sync_mods "$BASE/gamedir" "$PACK")"; then
   echo "could not link the mods of the $SRV pack."
@@ -131,7 +132,7 @@ printf '==> this bot alone: %s (the jars are hard links, not copies)\n' \
        "$(du -sh --exclude='*.jar' "$BASE" | cut -f1)"
 echo
 echo "files you may want to edit in $BASE: personality.txt, language (en/es),"
-echo "favorite (a player name), model, escort (makes it a guard of that bot)."
+echo "owner (a player name), model, escort (makes it a guard of that bot)."
 echo
 if [ "$ACCOUNT" = "online" ]; then
   echo "log in its Minecraft account once:  $HERE/login_bot.sh $NAME"

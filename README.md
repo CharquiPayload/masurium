@@ -68,11 +68,14 @@ because fighting is measured in ticks and a model round trip takes seconds.
   each person has done with the bot, standing orders by category, behaviour
   preferences.
 - **In-game integration**: state icons in the TAB list, an optional sidebar
-  with every bot, a hotbar notice for owners, `/marionette` admin commands.
+  with every bot, a hotbar notice for owners, and `/marionette bot` commands to
+  shut down, restart or log off a bot and choose who it listens to.
 - **Safety by construction**: the brain has no shell or file access, only the
-  bot's tools; shutting a bot down requires its admin list; breaking blocks to
-  move is limited to a whitelist; building and digging are expensive in the
-  path finder so they only happen when there is no way on foot.
+  bot's tools; shutting down, restarting and logging off are server commands,
+  never chat orders, so nobody can talk the brain into them; a hear list keeps
+  strangers from reaching the brain at all; breaking blocks to move is limited
+  to a whitelist; building and digging are expensive in the path finder so they
+  only happen when there is no way on foot.
 - **Languages**: bots talk in English or Spanish (`language` file per bot);
   the brain and tools always work in English.
 
@@ -150,7 +153,8 @@ comments on their own lines.
 MARIONETTE_HOST=192.168.1.10
 MARIONETTE_PORT=8477
 MARIONETTE_TOKEN=the-same-token
-# optional: the player who administers the bots
+# optional: the player who runs the bots; also the owner of any bot
+# without an owner file
 MARIONETTE_OWNER=YourPlayerName
 ```
 
@@ -197,7 +201,7 @@ and `server`, which the launcher writes:
 | `personality.txt` | who the bot is, in second person; goes at the start of its prompt |
 | `language` | `en` or `es`: the language it speaks in the chat |
 | `account` | `online` (a logged-in Minecraft account) or `offline` (private servers only) |
-| `favorite` | the player whose delicate orders it accepts; also seeds its admin list |
+| `owner` | the player the bot belongs to: it accepts their delicate orders, and they control it with `/marionette bot` on any server. It cannot be changed from inside the game |
 | `model` | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`) |
 | `escort` | the name of another bot: this bot becomes that bot's **guard** |
 | `gender` | `m` or `f`, for languages with grammatical gender |
@@ -218,12 +222,37 @@ server in the client's `config/` folder.
 
 | command | who | what |
 |---|---|---|
-| `/marionette owner <bot>` | anyone | who owns a bot |
-| `/marionette owner <bot> <player\|none>` | operators | assign or remove the owner |
-| `/marionette owners` | anyone | the whole list |
+| `/marionette bot <bot>` | anyone | owner, admins, who it hears, and whether its bridge answers |
+| `/marionette bot <bot> shutdown` | owner, admins | stop the client and its bridge |
+| `/marionette bot <bot> restart` | owner, admins | restart the client and its bridge |
+| `/marionette bot <bot> logoff` | owner, admins | leave the server, keeping the client running |
+| `/marionette bot <bot> hear everyone\|list` | owner, admins | hear whoever names it, or only its list |
+| `/marionette bot <bot> hear add\|remove <player>` | owner, admins | edit the hear list |
+| `/marionette bot <bot> admins add\|remove <player>` | owner | edit the admins |
+| `/marionette owners` | anyone | every bot with its owner |
 | `/marionette status` | anyone | what each bot is doing, with health and position |
 | `/marionette hud on\|off` | players | your bots' state icons above your hotbar |
 | `/marionette scoreboard on\|off` | operators | a sidebar with every bot's state |
+
+**Who controls a bot.** Its **owner** comes from the bot's own `owner` file,
+so it follows the bot to any server. The owner names **admins** on each server.
+Being a server operator gives no control over someone else's bot. The server
+console can always run these commands, and command blocks never can.
+
+Shutting down, restarting and logging off are **only** server commands. Asking
+a bot in the chat gets you the command, not the action, even from its owner:
+the server knows for sure who runs a command, while a name in the chat reaches
+the brain through words a player can fake.
+
+**Hear list.** By default a bot hears everyone who names it. With
+`hear list` it only hears its owner, its admins, other bots and the players on
+its list. Anyone else is ignored before the brain, so they cost no tokens and
+cannot inject anything.
+
+**Permission nodes.** Every action has a node for permission mods such as
+LuckPerms: `marionette.bot.shutdown`, `marionette.bot.restart`,
+`marionette.bot.logoff`, `marionette.bot.hear` and `marionette.bot.admins`.
+Nobody has them by default. Granting one lets that player use it on every bot.
 
 ## Tests
 

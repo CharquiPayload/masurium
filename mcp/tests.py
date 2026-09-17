@@ -31,6 +31,7 @@ os.environ["MARIONETTE_ENV"] = str(_cfg)
 sys.path.insert(0, str(HERE))
 import server  # noqa: E402
 from bridge import drawable  # noqa: E402
+import bridge  # noqa: E402
 
 
 # --- minimal harness --------------------------------------------------------
@@ -62,45 +63,63 @@ def with_response(payload):
     server.bt = fake
 
 
-# --- locks: who asks comes from the bridge, never from the brain ------------
+# --- locks: who asks comes from the server, never from the brain ------------
 
 def tests_speaker():
+    print("\nLocks: who asks comes from the server, never from the brain")
     seen = []
 
     def record(route, **kw):
         seen.append((route, kw))
         if route == "/food":
             return {"ok": True, "vetoed": ["salmon"]}
-        return {"ok": True, "commanders": ["Owner"], "can": False}
+        if route == "/eat":
+            return {"ok": False, "error": "not in a test"}   # no 3 s wait
+        if route == "/access":
+            return {"ok": True, "bot": "Bot", "owner": "Owner", "admins": ["Helper"],
+                    "hear": {"mode": "list", "players": ["Friend"]}}
+        return {"ok": True}
     with_response(record)
     os.environ["MARIONETTE_SPEAKER"] = "Stranger"
     try:
-        server.t_add_admin({"who": "Owner", "name": "Stranger"})
-        check("admins: add uses who SPOKE, not the who the brain wrote",
-              seen[-1] == ("/admins", {"who": "Stranger", "add": "Stranger"}),
-              seen[-1])
-        server.t_remove_admin({"who": "Owner", "name": "Owner"})
-        check("admins: remove uses who SPOKE",
-              seen[-1][1].get("who") == "Stranger", seen[-1])
-        server.t_log_off({"who": "Owner"})
-        check("log_off: the body is asked with who SPOKE",
-              ("/disconnect", {"who": "Stranger"}) in seen, seen[-3:])
-        out = server.t_restart_me({"who": "Owner"})
-        check("restart_me: refused when who SPOKE is not an admin",
-              out.startswith("I only accept that"), out)
         out = server.t_eat({"what": "salmon", "who": "Owner"})
         check("eat: vetoed food refused when the brain names someone who did not speak",
               "vetoed food list" in out, out)
-        os.environ["MARIONETTE_SPEAKER"] = ""
-        server.t_add_admin({"who": "Owner", "name": "Stranger"})
-        check("admins: a body notice (nobody spoke) asks with an empty name",
-              seen[-1][1].get("who") == "", seen[-1])
+        before = len(seen)
+        server.t_eat({"what": "salmon", "who": "stranger"})
+        check("eat: vetoed food allowed when the one who spoke asked for it",
+              ("/eat", {"what": "salmon"}) in seen[before:], seen[before:])
     finally:
         os.environ.pop("MARIONETTE_SPEAKER", None)
+
+    # Taking the bot out of the game is a server command, not a tool: a brain
+    # that has no such tool cannot be talked into using it.
     for name in ("add_admin", "remove_admin", "log_off", "restart_me"):
-        props = server.TOOLS[name][2]
-        check(f"{name}: offers no who parameter for the brain to fill",
-              "who" not in props, props)
+        check(f"{name}: is not a tool any more (it is /marionette bot)",
+              name not in server.TOOLS)
+        check(f"{name}: the bridge does not allow it either",
+              f"mcp__bot__{name}" not in bridge.TOOLS.split())
+    out = server.t_who_commands({})
+    check("who_commands: owner, admins and hearing come from the server",
+          "Owner: Owner" in out and "Helper" in out and "Friend" in out, out)
+    check("who_commands: it points to the server command, not to the chat",
+          "/marionette bot" in out and "shutdown" in out, out)
+
+    access = {"owner": "Owner", "admins": ["Helper"],
+              "hear": {"mode": "list", "players": ["Friend"]}}
+    check("hear list: the owner, an admin and a listed player are heard",
+          all(bridge.hears(w, access) for w in ("owner", "HELPER", "Friend")))
+    check("hear list: a stranger and an empty name are not",
+          not bridge.hears("Stranger", access) and not bridge.hears("", access))
+    check("hear everyone: a stranger is heard",
+          bridge.hears("Stranger", {"hear": {"mode": "everyone"}}))
+    route = bridge.control_route(5)
+    check("control poll: carries the bot, its owner and since",
+          route.startswith("/control?") and "bot=" in route and "since=5" in route
+          and "owner=" in route, route)
+    check("chat: asking to shut down points to the command, in both languages",
+          all("/marionette bot {name} {what}" in bridge.L10N[k]["by_command"]
+              for k in ("en", "es")))
 
 
 # --- what really matters: not lying -----------------------------------------
@@ -698,14 +717,13 @@ def tests_protocol():
                "escort", "stop_escorting", "trash",
                "explore", "stop_exploring",
                "write_in_diary", "note_about_someone",
-               "add_admin", "remove_admin", "restart_me",
                "veto_food", "remind_me",
                "smelt", "take_from_furnace",
                "verbose",
                "remember_place", "forget_place",
                "put_in_chest", "take_from_chest", "annotate_chest",
                "hunt", "shear", "kill", "fish",
-               "tame", "breed", "pets", "wait_for_item", "log_off",
+               "tame", "breed", "pets", "wait_for_item",
                "add_order", "delete_order",
                "equip_armor", "remove_armor",
                "mark_corner", "fill", "build_blueprint",

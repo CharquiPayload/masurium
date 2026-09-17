@@ -1,6 +1,6 @@
 #!/bin/bash
 # Puts back on the server a bot whose client is ALIVE at the title screen
-# (after log_off, or a failed connect). It starts nothing: if the client is not
+# (after /marionette bot <bot> logoff, or a failed connect). It starts nothing: if the client is not
 # running, this is not what you want; use start_bot.sh.
 #
 #   ./connect_bot.sh <name>

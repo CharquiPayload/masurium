@@ -11,6 +11,9 @@ First public release of Marionette.
 - Server-side crafting with every loaded recipe, including modded ones, with the
   table-distance rule and honest reports of items dropped on the ground.
 - State icons next to bot names in the TAB list.
+- `/marionette bot <bot>` commands to shut down, restart or log off a bot and
+  to manage its admins and hear list, allowed to its owner, its admins, the
+  server console, or players granted permission nodes (LuckPerms and the like).
 - `/marionette` commands: bot owners, status, an optional sidebar with every bot,
   and a hotbar notice for owners.
 - Bots do not pick up again what they tossed themselves.
@@ -38,8 +41,12 @@ First public release of Marionette.
 ### Brain and bridge
 - MCP server with the bot's tools; Claude Code sessions per bot with no shell or
   file access.
-- Chat bridge with instant stop words, admin-checked restart and shutdown,
-  per-bot personality, model and language (English or Spanish).
+- Chat bridge with instant stop words, a hear list that keeps strangers away
+  from the brain, orders from `/marionette bot` carried out without the model,
+  per-bot owner, personality, model and language (English or Spanish).
+- Nothing that takes a bot out of the game can be asked through the chat, and
+  the one lock the brain still touches (vetoed food) checks the name the bridge
+  read in the chat, never one written by the brain.
 - Internal channel between a bot and its guards.
 
 ### Launchers and tests

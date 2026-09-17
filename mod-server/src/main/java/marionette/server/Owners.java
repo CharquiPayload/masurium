@@ -1,6 +1,5 @@
 package marionette.server;
 
-import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
@@ -25,35 +24,28 @@ import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Who OWNS each bot, and the state notice on the action bar.
+ * The owners of the bots as seen by players, and the state notice on the action bar.
  *
- * <p>Admins get a command to assign an owner to each bot, remembered in the server
- * config, and players get a way to see their bots' state icon above their hotbar.
+ * <p>Who owns a bot is not set here: it comes from the bot's own config, reported by its
+ * bridge (see {@link BotAccess}). An operator used to assign owners by hand with a
+ * command, and that list could say one thing while the bot believed another.
  *
  * <p>Everything hangs from a single root command, {@code /marionette}, named after the
  * project:
  * <ul>
- *   <li>{@code /marionette owner <bot>}: who owns that bot (anyone);
- *   <li>{@code /marionette owner <bot> <player>}: assign it (admins only, level 2);
- *   <li>{@code /marionette owner <bot> none}: remove it (admins only);
- *   <li>{@code /marionette owners}: the whole list;
+ *   <li>{@code /marionette owners}: every bot with its owner;
+ *   <li>{@code /marionette status}: what each bot is doing, with hp and position;
  *   <li>{@code /marionette hud on|off}: turn on or off, for oneself, the state icon of
- *       one's bots above the hotbar.
+ *       one's bots above the hotbar;
+ *   <li>{@code /marionette bot <bot> ...}: see {@link BotCommands}.
  * </ul>
  *
- * <p>Owners are saved in {@code marionette_owners.properties} and who wants the hotbar
- * notice in {@code marionette_hud.properties}, both next to the mod config: they are
- * settings made once, not on every start.
+ * <p>Who wants the hotbar notice is saved in {@code marionette_hud.properties}, next to
+ * the mod config: it is a setting made once, not on every start.
  */
 public final class Owners {
 
     private static final Logger LOG = LogUtils.getLogger();
-    private static final Path FILE = Path.of("marionette_owners.properties");
-    /**
-     * The previous file name: read once and rewritten under the new one, so owners
-     * already assigned are not lost.
-     */
-    private static final Path OLD_FILE = Path.of("marionette_owners_old.properties");
     /**
      * Who wants the notice on the hotbar. Saved: it is a setting made once, not on every
      * start.
@@ -65,40 +57,25 @@ public final class Owners {
      */
     private static final int EVERY = 20;
 
-    /** bot -> owner. Sorted so the list always comes out the same. */
-    private final Map<String, String> owners = new ConcurrentHashMap<>();
+    /** Where the owners come from. */
+    private final BotAccess access;
     /** Who wants the notice on the hotbar. Saved in {@link #HUD_FILE}. */
     private final Set<String> withNotice = ConcurrentHashMap.newKeySet();
     private final Tab tab;
     private int ticks;
 
-    Owners(Tab tab) {
+    Owners(Tab tab, BotAccess access) {
         this.tab = tab;
-        load();
+        this.access = access;
         loadHud();
     }
 
-    // ------------------------------------------------------------ persistence
-
-    private void load() {
-        Path of = Files.exists(FILE) ? FILE
-                : Files.exists(OLD_FILE) ? OLD_FILE : null;
-        if (of == null) return;
-        boolean migrating = of == OLD_FILE;
-        Properties p = new Properties();
-        try (var in = Files.newInputStream(of)) {
-            p.load(in);
-        } catch (IOException e) {
-            LOG.error("[marionette] could not read {}", of, e);
-            return;
-        }
-        for (String bot : p.stringPropertyNames()) {
-            String who = p.getProperty(bot, "").trim();
-            if (!who.isEmpty()) owners.put(bot, who);
-        }
-        LOG.info("[marionette] {} owner(s) read from {}", owners.size(), of);
-        if (migrating) save();
+    /** bot -> owner, sorted so the list always comes out the same. */
+    private Map<String, String> owners() {
+        return new TreeMap<>(access.owners());
     }
+
+    // ------------------------------------------------------------ persistence
 
     private void loadHud() {
         if (!Files.exists(HUD_FILE)) return;
@@ -129,25 +106,16 @@ public final class Owners {
         }
     }
 
-    private void save() {
-        Properties p = new Properties();
-        owners.forEach(p::setProperty);
-        try (var out = Files.newOutputStream(FILE)) {
-            p.store(out, "Owner of each Marionette bot. Written by /marionette owner.");
-        } catch (IOException e) {
-            LOG.error("[marionette] could not write {}", FILE, e);
-        }
-    }
-
-    /** The owner of a bot, or null. Public because the HTTP side may want it. */
+    /** The owner of a bot, or null. */
     public String of(String bot) {
-        return owners.get(bot);
+        String who = access.owner(bot);
+        return who.isEmpty() ? null : who;
     }
 
     /** A player's bots, in order. */
     private List<String> botsOf(String player) {
         List<String> ownedByMeList = new ArrayList<>();
-        new TreeMap<>(owners).forEach((bot, who) -> {
+        owners().forEach((bot, who) -> {
             if (who.equalsIgnoreCase(player)) ownedByMeList.add(bot);
         });
         return ownedByMeList;
@@ -155,7 +123,7 @@ public final class Owners {
 
     /** The bots with an owner, sorted: the list the scoreboard shows. */
     Set<String> bots() {
-        return new java.util.TreeSet<>(owners.keySet());
+        return new java.util.TreeSet<>(owners().keySet());
     }
 
     // ---------------------------------------------------------------- commands
@@ -165,12 +133,6 @@ public final class Owners {
         event.getDispatcher().register(Commands.literal("marionette")
                 .then(Commands.literal("owners")
                         .executes(this::seeAll))
-                .then(Commands.literal("owner")
-                        .then(Commands.argument("bot", StringArgumentType.word())
-                                .executes(this::see)
-                                .then(Commands.argument("player", StringArgumentType.word())
-                                        .requires(s -> s.hasPermission(2))
-                                        .executes(this::place))))
                 .then(Commands.literal("status")
                         .executes(this::state))
                 .then(Commands.literal("hud")
@@ -188,7 +150,8 @@ public final class Owners {
         var list = c.getSource().getServer().getPlayerList().getPlayers();
         MutableComponent m = Component.literal("Bots:").withStyle(ChatFormatting.AQUA);
         int quantity = 0;
-        for (String bot : new TreeMap<>(owners).keySet()) {
+        Map<String, String> owners = owners();
+        for (String bot : owners.keySet()) {
             ServerPlayer p = list.stream()
                     .filter(j -> j.getGameProfile().getName().equalsIgnoreCase(bot))
                     .findFirst().orElse(null);
@@ -222,8 +185,8 @@ public final class Owners {
         }
         if (quantity == 0) {
             c.getSource().sendSuccess(() -> Component.literal(
-                    "No bot has an owner yet, so I do not know which ones "
-                    + "to watch. Assign them with /marionette owner <bot> <player>")
+                    "No bot has reported an owner yet, so I do not know which ones "
+                    + "to watch. The owner is set in each bot's config.")
                     .withStyle(ChatFormatting.GRAY), false);
             return 0;
         }
@@ -232,44 +195,19 @@ public final class Owners {
     }
 
     private int seeAll(com.mojang.brigadier.context.CommandContext<CommandSourceStack> c) {
+        Map<String, String> owners = owners();
         if (owners.isEmpty()) {
             c.getSource().sendSuccess(() -> Component.literal(
-                    "No bot has an owner yet. Assign it with "
-                    + "/marionette owner <bot> <player>").withStyle(ChatFormatting.GRAY), false);
+                    "No bot has reported an owner yet. The owner is set in each bot's "
+                    + "config and arrives when its bridge connects.")
+                    .withStyle(ChatFormatting.GRAY), false);
             return 0;
         }
         MutableComponent m = Component.literal("Owners:").withStyle(ChatFormatting.AQUA);
-        new TreeMap<>(owners).forEach((bot, who) -> m.append(Component.literal(
+        owners.forEach((bot, who) -> m.append(Component.literal(
                 "\n  " + bot + " -> " + who).withStyle(ChatFormatting.WHITE)));
         c.getSource().sendSuccess(() -> m, false);
         return owners.size();
-    }
-
-    private int see(com.mojang.brigadier.context.CommandContext<CommandSourceStack> c) {
-        String bot = StringArgumentType.getString(c, "bot");
-        String who = owners.get(bot);
-        c.getSource().sendSuccess(() -> who == null
-                ? Component.literal(bot + " has no owner").withStyle(ChatFormatting.GRAY)
-                : Component.literal("The owner of " + bot + " is " + who)
-                        .withStyle(ChatFormatting.AQUA), false);
-        return who == null ? 0 : 1;
-    }
-
-    private int place(com.mojang.brigadier.context.CommandContext<CommandSourceStack> c) {
-        String bot = StringArgumentType.getString(c, "bot");
-        String who = StringArgumentType.getString(c, "player");
-        if (who.equalsIgnoreCase("none") || who.equalsIgnoreCase("nobody")) {
-            owners.remove(bot);
-            save();
-            c.getSource().sendSuccess(() -> Component.literal(
-                    bot + " is left without an owner").withStyle(ChatFormatting.YELLOW), true);
-            return 1;
-        }
-        owners.put(bot, who);
-        save();
-        c.getSource().sendSuccess(() -> Component.literal(
-                "Now " + who + " commands " + bot).withStyle(ChatFormatting.GREEN), true);
-        return 1;
     }
 
     private int notice(com.mojang.brigadier.context.CommandContext<CommandSourceStack> c,
@@ -307,7 +245,7 @@ public final class Owners {
     public void onTick(ServerTickEvent.Post event) {
         if (++ticks < EVERY) return;
         ticks = 0;
-        if (withNotice.isEmpty() || owners.isEmpty()) return;
+        if (withNotice.isEmpty() || access.owners().isEmpty()) return;
         for (ServerPlayer p : event.getServer().getPlayerList().getPlayers()) {
             String name = p.getGameProfile().getName();
             if (!withNotice.contains(name)) continue;

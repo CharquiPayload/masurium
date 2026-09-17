@@ -188,7 +188,6 @@ public class MarionetteBot {
             http.createContext("/pending",
                     x -> attend(x, this::pending));
             http.createContext("/light", x -> attend(x, this::light));
-            http.createContext("/admins", x -> attend(x, this::authority));
             http.createContext("/explore", x -> attend(x, this::explore));
             http.createContext("/diary", x -> attend(x, this::diary));
             http.createContext("/people", x -> attend(x, this::people));
@@ -811,29 +810,6 @@ public class MarionetteBot {
             return "{\"ok\":true,\"noted\":true}";
         }
         return People.asJson(who);
-    }
-
-    /**
-     * Who may shut me down, restart me or take me off the server. Looking at it is free;
-     * changing it, only for someone already on it.
-     */
-    private String authority(Map<String, String> q) throws Exception {
-        String who = q.getOrDefault("who", "").trim();
-        String add = q.getOrDefault("add", "").trim();
-        String remove = q.getOrDefault("remove", "").trim();
-        if (!add.isEmpty() || !remove.isEmpty()) {
-            String failure = !add.isEmpty()
-                    ? Admins.add(who, add)
-                    : Admins.remove(who, remove);
-            if (failure != null) {
-                return String.format("{\"ok\":false,\"error\":\"%s\"}",
-                        Request.escape(failure));
-            }
-            Logbook.note("admins", (add.isEmpty() ? "removing " + remove + " from"
-                    : "adding " + add + " to") + " the admin list, at "
-                    + "the request of " + who);
-        }
-        return Admins.asJson(who);
     }
 
     /**
@@ -3581,23 +3557,14 @@ public class MarionetteBot {
      * Leaves the server keeping the client ALIVE at the title screen, ready for a {@code
      * connect}. It is the exact sequence of the "Disconnect" button of the pause menu.
      * Outside the world there is no voice nor ears, so coming back is not asked for in
-     * the chat: whoever runs the bot uses {@code launcher/connect_bot.sh}. WHO may ask
-     * for it is checked against the admin list, like the break permissions.
+     * the chat: whoever runs the bot uses {@code launcher/connect_bot.sh}.
+     *
+     * <p>No lock here on purpose: the brain has no tool that reaches this. Only the bridge
+     * calls it, when the server passes on a {@code /marionette bot <bot> logoff}, and the
+     * server is what knows for sure who ran that command. A lock here used to check a name
+     * that the brain wrote, which a player could talk it into faking.
      */
     private String disconnect(Map<String, String> q) throws Exception {
-        // The real lock, not the prompt's rule. Taking the bot off the server is one of
-        // the few orders that leave it useless, so WHO asks is checked against the admin
-        // list, and without a name nobody commands: an anonymous order to shut it down is
-        // exactly the one not to obey.
-        String who = q.getOrDefault("who", "").trim();
-        if (!Admins.can(who)) {
-            return String.format("{\"ok\":false,\"error\":\"logging off: "
-                    + "only someone on my admin list can ask me that "
-                    + "(%s)%s\"}",
-                    String.join(", ", Admins.list()),
-                    who.isEmpty() ? "; besides I was not told who asks"
-                            : "");
-        }
         return inGame(() -> {
             String negative = noGame();
             if (negative != null) return "{\"ok\":true,\"note\":\"I was already out\"}";
