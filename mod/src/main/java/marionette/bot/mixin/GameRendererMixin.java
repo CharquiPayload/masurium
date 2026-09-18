@@ -1,6 +1,7 @@
 package marionette.bot.mixin;
 
 import marionette.bot.Bot;
+import marionette.bot.BotScreen;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
@@ -28,6 +29,10 @@ public abstract class GameRendererMixin {
         // asks what this client is for, so the question is asked here instead: without
         // the guard, anyone who installs the jar to play gets a black screen.
         if (!Bot.isBot()) {
+            return;
+        }
+        // Someone pressed R and is looking at the bot. Their keypress, their frames.
+        if (BotScreen.drawing()) {
             return;
         }
         // A screen is open, so a person is looking at this window. Bots have windows

@@ -189,6 +189,7 @@ public class MarionetteBot {
         BOSS = defaultEscort;
         NeoForge.EVENT_BUS.register(this);
         NeoForge.EVENT_BUS.register(AutoJoin.class);
+        NeoForge.EVENT_BUS.register(BotScreen.class);
 
         // Said here and not on the title screen: with one bot the default is the right
         // answer, and a warning about a correct setup is noise. It matters when there
