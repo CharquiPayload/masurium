@@ -26,14 +26,70 @@ that order. The rest can wait until you have a bot in the game.
 **Bot machine** (can be the same machine)
 - Linux with Java **21**, Python **3.9+** (standard library only), `curl` and
   `ss` (iproute2).
-- [Claude Code](https://claude.com/claude-code), installed and logged in for the
-  user that runs the bots.
+- [Claude Code](https://claude.com/claude-code), installed for the user that runs
+  the bots, with a way to pay for it — see **The brain** below. A Claude
+  subscription is **not** required.
 - [HeadlessMC](https://github.com/headlesshq/headlessmc) launcher jar and the
   [hmc-specifics](https://github.com/headlesshq/hmc-specifics) mod for 1.21.1
   NeoForge.
 - About **3 GB of RAM per bot** (each bot is a full Java client; `HEAP` sets it).
 - Network access from the bot machine to the server's game port and to the
   server mod's HTTP port (8477 by default).
+
+## The brain
+
+Every bot thinks through [Claude Code](https://claude.com/claude-code), which the
+bridge runs once per turn. It has to be installed on the **same machine as the
+bot client**, because the bot mod listens only on `127.0.0.1` and the bridge
+talks to it there. The brain lives where the hands live.
+
+**A subscription is not required.** Claude Code checks that it has credentials,
+not that you pay monthly. There are four ways to give it some, and any one is
+enough:
+
+| How | What it needs |
+|---|---|
+| Claude subscription | a Pro or Max plan, logged in with `/login` |
+| Anthropic API key | pay-as-you-go, no plan |
+| Amazon Bedrock | `CLAUDE_CODE_USE_BEDROCK=1` and AWS credentials |
+| Google Vertex | `CLAUDE_CODE_USE_VERTEX=1` and GCP credentials |
+
+**Do not put the key in a settings file.** Claude Code takes `apiKeyHelper`, a
+command that prints the key when it is needed, so the key itself stays in one
+file you control:
+
+```json
+{
+  "apiKeyHelper": "cat ~/.marionette/api.key"
+}
+```
+
+```bash
+printf '%s' 'sk-ant-...' > ~/.marionette/api.key
+chmod 600 ~/.marionette/api.key
+```
+
+Rotating a key is then overwriting that one file, with nothing else to change.
+
+**If it says "Not logged in", that message is about credentials in general, not
+about the subscription.** A dead API key and an expired session produce the same
+sentence, and it sends you to `/login` when what is missing may be the key.
+
+### Other providers
+
+`ANTHROPIC_BASE_URL` points Claude Code at something other than Anthropic, and
+gateways exist that speak the Anthropic protocol and route onward to other
+models. It works — the agentic loop and the tool calls survive the trip.
+
+Two things to weigh before relying on it. **Check the terms of the tools you are
+using**: this project does not tell you whether running Claude Code against
+somebody else's model is allowed, because it does not know. And a model that
+merely supports tool calls is not the same as a model that can run a bot: there
+are over a hundred tools here, and using them well means chaining several in a
+row — look, decide, move, check. Smaller models are likely to need a reduced
+catalog, which does not exist yet.
+
+The documented path is the table above. Anything else is yours to verify.
 
 ## Quick start
 
