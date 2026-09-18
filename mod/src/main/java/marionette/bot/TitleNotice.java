@@ -36,6 +36,7 @@ public final class TitleNotice {
     private static final int ERROR = 0xFFFF6B6B;
     private static final int WARNING = 0xFFFFC96B;
     private static final int INFO = 0xFFAAAAAA;
+    private static final int SUCCESS = 0xFF7FD67F;
     private static final int HINT = 0xFF999999;
     private static final int LINK = 0xFF7FB3FF;
     private static final int SHADE = 0x90000000;
@@ -102,7 +103,7 @@ public final class TitleNotice {
     private static List<Notice> showing() {
         return NoticeText.notSilenced(
                 NoticeText.noticesFor(Bot.isBot(), Bot.misconfigured(),
-                        Bot.server() != null, Bot.portSpecified()),
+                        Bot.server() != null, Bot.name(), Bot.server()),
                 hidden());
     }
 
@@ -111,6 +112,7 @@ public final class TitleNotice {
             case ERROR -> ERROR;
             case WARNING -> WARNING;
             case INFO -> INFO;
+            case SUCCESS -> SUCCESS;
         };
     }
 

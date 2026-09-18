@@ -31,7 +31,7 @@ public final class NoticeText {
                   boolean dismissible) {
     }
 
-    enum Severity { ERROR, WARNING, INFO }
+    enum Severity { ERROR, WARNING, INFO, SUCCESS }
 
     static final String URL =
             "https://github.com/CharquiPayload/marionette/blob/main/docs/setup.md";
@@ -48,10 +48,11 @@ public final class NoticeText {
      * @param isBot      whether a usable bot name was given
      * @param blankName  the name flag is present and empty
      * @param hasServer  an address to join on start was given
-     * @param hasPort    the bot port was chosen rather than defaulted
+     * @param name       the bot's name, for the line that confirms it
+     * @param server     the address it will join, or {@code null}
      */
     static List<Notice> noticesFor(boolean isBot, boolean blankName,
-                                   boolean hasServer, boolean hasPort) {
+                                   boolean hasServer, String name, String server) {
         List<Notice> out = new ArrayList<>();
 
         if (blankName) {
@@ -73,20 +74,24 @@ public final class NoticeText {
             return out;
         }
 
-        // From here on it IS a bot, and anything said is seen only while it sits at
-        // this screen — which is exactly the situation the first of these explains.
+        // From here on it IS a bot. The good news goes first and is not conditional:
+        // someone who set this up wants to see that it worked, and "nothing appeared"
+        // is indistinguishable from "the mod did not load".
+        out.add(new Notice("ready",
+                "Marionette: this instance is the bot " + name,
+                hasServer ? "Joining " + server + " now"
+                          : "Loaded and waiting — it will not join a server by itself",
+                Severity.SUCCESS, true));
+
         if (!hasServer) {
             out.add(new Notice("no-server",
                     "-Dmarionette.server is missing, so this bot will not join on its own",
                     "Add -Dmarionette.server=192.168.1.10:25565, or pick a server below",
                     Severity.ERROR, true));
         }
-        if (!hasPort) {
-            out.add(new Notice("default-port",
-                    "-Dmarionette.bot.port is missing: using the default, 8478",
-                    "Fine for one bot. Give each bot its own port if you run several",
-                    Severity.WARNING, true));
-        }
+        // The defaulted port is NOT mentioned here on purpose. With one bot the default
+        // is correct, and warning someone about a correct setup teaches them to ignore
+        // this box. It goes to the log, where the person with two bots will look.
         return out;
     }
 

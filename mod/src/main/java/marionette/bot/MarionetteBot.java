@@ -164,11 +164,12 @@ public class MarionetteBot {
     public MarionetteBot(IEventBus bus) {
         // A client that was not told to be a bot is left alone. Not a disabled mod: no
         // listener, no port, nothing to notice. See Bot.
+        // Whatever this client turns out to be, it says so on the title screen: a bot
+        // that is missing a flag has to be able to say that, and for a while it could
+        // not, because this line lived inside the branch below.
+        NeoForge.EVENT_BUS.register(TitleNotice.class);
+
         if (!Bot.isBot()) {
-            // The ONE listener a non-bot registers. It draws on the title screen and
-            // nowhere else, so a person who installed this jar is told what it is doing
-            // instead of having to guess from a log they will never open.
-            NeoForge.EVENT_BUS.register(TitleNotice.class);
             if (Bot.misconfigured()) {
                 // Loud, because someone MEANT to start a bot here.
                 LOG.error("[marionette-bot] -D{} is set but empty: this client is not "
@@ -182,6 +183,15 @@ public class MarionetteBot {
         BOSS = defaultEscort;
         NeoForge.EVENT_BUS.register(this);
         NeoForge.EVENT_BUS.register(AutoJoin.class);
+
+        // Said here and not on the title screen: with one bot the default is the right
+        // answer, and a warning about a correct setup is noise. It matters when there
+        // are two bots on a machine, and then this line is what explains it.
+        if (!Bot.portSpecified()) {
+            LOG.info("[marionette-bot] no -{}{}, using the default {}: give each bot its "
+                    + "own port if you run more than one on this machine",
+                    "D", Bot.PORT_PROPERTY, PORT);
+        }
         try {
             http = HttpServer.create(new InetSocketAddress("127.0.0.1", PORT), 0);
             http.createContext("/state", x -> attend(x, this::state));
