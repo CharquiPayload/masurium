@@ -102,7 +102,8 @@ public final class TitleNotice {
 
     private static List<Notice> showing() {
         return NoticeText.notSilenced(
-                NoticeText.noticesFor(Bot.isBot(), Bot.misconfigured(),
+                NoticeText.noticesFor(Bot.isBot(), Bot.blank(),
+                        Bot.badName() ? Bot.rejected() : null,
                         Bot.server() != null, Bot.name(), Bot.server()),
                 hidden());
     }

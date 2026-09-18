@@ -37,9 +37,29 @@ public final class Bot {
     /** Which port this bot's hands listen on. Read by the mod itself, checked here. */
     public static final String PORT_PROPERTY = "marionette.bot.port";
 
+    /**
+     * What a bot may be called: Minecraft's own username rules.
+     *
+     * <p>Enforced here for a reason that has nothing to do with Minecraft. This name
+     * becomes a directory, part of several file names, and the word the bridge looks
+     * for in the chat. It is not just text.
+     *
+     * <p>{@code ../../etc} arrives from the command line intact — the JVM has no
+     * opinion about it — and would be used as a path. {@code Bot Alice} arrives intact
+     * too when the launcher quoted it, and would be a directory with a space in it and
+     * a chat token matching half of what people say. Both are refused here, loudly,
+     * rather than found later as a file somewhere it should not be.
+     *
+     * <p>Declared BEFORE the fields that use it: a static field initialised further
+     * down the file would still be null while NAME was being worked out.
+     */
+    private static final java.util.regex.Pattern ALLOWED =
+            java.util.regex.Pattern.compile("[A-Za-z0-9_]{1,16}");
+
     private static final String RAW = System.getProperty(NAME_PROPERTY);
     private static final String SERVER = nameFrom(System.getProperty(SERVER_PROPERTY));
-    private static final String NAME = nameFrom(RAW);
+    private static final String TRIMMED = nameFrom(RAW);
+    private static final String NAME = usable(TRIMMED) ? TRIMMED : null;
 
     private Bot() {
     }
@@ -71,6 +91,31 @@ public final class Bot {
      */
     public static boolean misconfigured() {
         return RAW != null && NAME == null;
+    }
+
+    /**
+     * Whether this is a name a bot can actually carry.
+     *
+     * <p>Visible for tests: everything dangerous about a name is decided here, and the
+     * whole list of nasty ones has to be throwable at it without a JVM in the middle.
+     */
+    static boolean usable(String name) {
+        return name != null && ALLOWED.matcher(name).matches();
+    }
+
+    /** The flag is present and empty, as opposed to present and wrong. */
+    public static boolean blank() {
+        return RAW != null && TRIMMED == null;
+    }
+
+    /** The flag is present and holds something that is not a usable name. */
+    public static boolean badName() {
+        return RAW != null && TRIMMED != null && NAME == null;
+    }
+
+    /** What was given and refused, so the message can quote it back. */
+    public static String rejected() {
+        return TRIMMED;
     }
 
     /** Whether this client was told to be a bot. */

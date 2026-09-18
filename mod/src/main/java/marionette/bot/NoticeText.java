@@ -47,13 +47,24 @@ public final class NoticeText {
      *
      * @param isBot      whether a usable bot name was given
      * @param blankName  the name flag is present and empty
+     * @param badName    what the name flag holds when it is not usable, else null
      * @param hasServer  an address to join on start was given
      * @param name       the bot's name, for the line that confirms it
      * @param server     the address it will join, or {@code null}
      */
-    static List<Notice> noticesFor(boolean isBot, boolean blankName,
+    static List<Notice> noticesFor(boolean isBot, boolean blankName, String badName,
                                    boolean hasServer, String name, String server) {
         List<Notice> out = new ArrayList<>();
+
+        if (badName != null) {
+            // Quoted back, because the whole point is that they cannot see what the
+            // launcher actually passed: a space eaten, a quote left in, a path.
+            out.add(new Notice("bad-name",
+                    "-Dmarionette.name=" + badName + " is not a name a bot can use",
+                    "Letters, digits and _ only, up to 16 — like a Minecraft username",
+                    Severity.ERROR, false));
+            return out;
+        }
 
         if (blankName) {
             // Fatal and not dismissible: someone meant to make a bot and this client

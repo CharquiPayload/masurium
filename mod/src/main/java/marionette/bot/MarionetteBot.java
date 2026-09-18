@@ -170,7 +170,13 @@ public class MarionetteBot {
         NeoForge.EVENT_BUS.register(TitleNotice.class);
 
         if (!Bot.isBot()) {
-            if (Bot.misconfigured()) {
+            if (Bot.badName()) {
+                // Loud, and quoting it back: from inside the game there is no way to
+                // see what the launcher actually passed.
+                LOG.error("[marionette-bot] -D{}={} is not a usable name (letters, "
+                        + "digits and _ only, up to 16). This client is NOT a bot.",
+                        Bot.NAME_PROPERTY, Bot.rejected());
+            } else if (Bot.blank()) {
                 // Loud, because someone MEANT to start a bot here.
                 LOG.error("[marionette-bot] -D{} is set but empty: this client is not "
                         + "going to be a bot. Give it a name.", Bot.NAME_PROPERTY);

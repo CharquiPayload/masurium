@@ -21,7 +21,7 @@ class NoticeTextTest {
     @Test
     @DisplayName("a bot with everything set is TOLD it worked, not left in silence")
     void successIsSaidOutLoud() {
-        List<Notice> n = NoticeText.noticesFor(true, false, true, "Alice", "10.0.0.5:25565");
+        List<Notice> n = NoticeText.noticesFor(true, false, null, true, "Alice", "10.0.0.5:25565");
         assertEquals(List.of("ready"), ids(n));
         assertEquals(Severity.SUCCESS, n.get(0).severity());
         // The name has to be in it: "a bot is ready" does not tell you WHICH, and with
@@ -33,7 +33,7 @@ class NoticeTextTest {
     @Test
     @DisplayName("an empty name is fatal, says so alone, and cannot be silenced")
     void blankNameIsFatalAndAlone() {
-        List<Notice> n = NoticeText.noticesFor(false, true, false, null, null);
+        List<Notice> n = NoticeText.noticesFor(false, true, null, false, null, null);
         // Alone on purpose: nothing else matters when this client is not a bot at all,
         // and a second line would bury the one that has to be fixed first.
         assertEquals(List.of("blank-name"), ids(n));
@@ -42,9 +42,21 @@ class NoticeTextTest {
     }
 
     @Test
+    @DisplayName("a name that is not a name is fatal, alone, and quoted back")
+    void aBadNameIsFatalAndQuoted() {
+        List<Notice> n = NoticeText.noticesFor(false, false, "../../etc", false, null, null);
+        assertEquals(List.of("bad-name"), ids(n));
+        assertEquals(Severity.ERROR, n.get(0).severity());
+        // Not dismissible, and it repeats what was given: from inside the game there
+        // is no other way to see what the launcher actually passed.
+        assertFalse(n.get(0).dismissible());
+        assertTrue(n.get(0).text().contains("../../etc"), n.get(0).text());
+    }
+
+    @Test
     @DisplayName("a player is told the mod is idle, calmly, and can silence it")
     void aPlayerIsReassured() {
-        List<Notice> n = NoticeText.noticesFor(false, false, false, null, null);
+        List<Notice> n = NoticeText.noticesFor(false, false, null, false, null, null);
         assertEquals(List.of("not-a-bot"), ids(n));
         assertEquals(Severity.INFO, n.get(0).severity());
         assertTrue(n.get(0).dismissible());
@@ -53,7 +65,7 @@ class NoticeTextTest {
     @Test
     @DisplayName("good news first, then what is wrong")
     void successComesBeforeTheProblem() {
-        List<Notice> n = NoticeText.noticesFor(true, false, false, "Alice", null);
+        List<Notice> n = NoticeText.noticesFor(true, false, null, false, "Alice", null);
         assertEquals(List.of("ready", "no-server"), ids(n));
         assertEquals(Severity.SUCCESS, n.get(0).severity());
         assertEquals(Severity.ERROR, n.get(1).severity());
@@ -68,8 +80,8 @@ class NoticeTextTest {
         // With one bot the default is the right answer, and warning someone about a
         // correct setup teaches them to ignore this box entirely.
         for (List<Notice> n : List.of(
-                NoticeText.noticesFor(true, false, true, "Alice", "10.0.0.5:25565"),
-                NoticeText.noticesFor(true, false, false, "Alice", null))) {
+                NoticeText.noticesFor(true, false, null, true, "Alice", "10.0.0.5:25565"),
+                NoticeText.noticesFor(true, false, null, false, "Alice", null))) {
             assertFalse(ids(n).contains("default-port"), ids(n).toString());
         }
     }
@@ -79,7 +91,7 @@ class NoticeTextTest {
     void everyNoticeCarriesItsFix() {
         for (boolean bot : new boolean[] {true, false}) {
             for (boolean blank : new boolean[] {true, false}) {
-                for (Notice n : NoticeText.noticesFor(bot, blank, false, "Alice", null)) {
+                for (Notice n : NoticeText.noticesFor(bot, blank, null, false, "Alice", null)) {
                     assertFalse(n.hint().isBlank(), n.id());
                     assertFalse(n.text().isBlank(), n.id());
                 }
@@ -90,13 +102,13 @@ class NoticeTextTest {
     @Test
     @DisplayName("silencing one leaves the others, and never silences an error")
     void silencingIsPerNotice() {
-        List<Notice> both = NoticeText.noticesFor(true, false, false, "Alice", null);
+        List<Notice> both = NoticeText.noticesFor(true, false, null, false, "Alice", null);
         assertEquals(List.of("no-server"),
                 ids(NoticeText.notSilenced(both, List.of("ready"))));
         assertEquals(List.of("ready"),
                 ids(NoticeText.notSilenced(both, List.of("no-server"))));
 
-        List<Notice> fatal = NoticeText.noticesFor(false, true, false, null, null);
+        List<Notice> fatal = NoticeText.noticesFor(false, true, null, false, null, null);
         // Even asked to hide it, the one that cannot be dismissed stays.
         assertEquals(List.of("blank-name"),
                 ids(NoticeText.notSilenced(fatal, List.of("blank-name"))));
