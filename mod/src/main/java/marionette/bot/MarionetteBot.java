@@ -162,6 +162,19 @@ public class MarionetteBot {
     private final ItemRecovery itemRecovery = new ItemRecovery(traveler, walker);
 
     public MarionetteBot(IEventBus bus) {
+        // A client that was not told to be a bot is left alone. Not a disabled mod: no
+        // listener, no port, nothing to notice. See Bot.
+        if (!Bot.isBot()) {
+            if (Bot.misconfigured()) {
+                // Loud, because someone MEANT to start a bot here.
+                LOG.error("[marionette-bot] -D{} is set but empty: this client is not "
+                        + "going to be a bot. Give it a name.", Bot.NAME_PROPERTY);
+            } else {
+                LOG.info("[marionette-bot] no -D{}, staying out of the way",
+                        Bot.NAME_PROPERTY);
+            }
+            return;
+        }
         BOSS = defaultEscort;
         NeoForge.EVENT_BUS.register(this);
         try {

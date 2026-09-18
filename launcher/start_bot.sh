@@ -125,10 +125,13 @@ mkfifo "$PIPE"
 cd "$BASE/hmc" || exit 1
 nohup sh -c "tail -f $PIPE | java -jar headlessmc-launcher.jar" > "$OUTPUT" 2>&1 &
 sleep 4
+# -Dmarionette.name is what makes this client a bot at all: without it the mod
+# stays out of the way and never opens a port (see marionette/bot/Bot.java).
 # -Dmarionette.bot.port: the mod reads it when it opens its HTTP server. Without
 # it every bot would fight over 8478 and the second one would have no hands.
 echo "launch $VERSION -lwjgl$OFFLINE_FLAG -paulscode" \
-     "--jvm \"-Xmx$HEAP -Dmarionette.bot.port=$PORT$SPEECH_FLAGS\"" > "$PIPE"
+     "--jvm \"-Xmx$HEAP -Dmarionette.name=$NAME" \
+     "-Dmarionette.bot.port=$PORT$SPEECH_FLAGS\"" > "$PIPE"
 
 echo "==> loading the game"
 # The right signal is NOT that the process exists: it is that the mod has

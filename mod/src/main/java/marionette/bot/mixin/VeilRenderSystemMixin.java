@@ -1,5 +1,6 @@
 package marionette.bot.mixin;
 
+import marionette.bot.Bot;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -20,6 +21,10 @@ public abstract class VeilRenderSystemMixin {
 
     @Inject(method = "unbindSamplers", at = @At("HEAD"), cancellable = true)
     private static void marionette$noGpuNoSamplers(int first, int count, CallbackInfo ci) {
-        ci.cancel();
+        // Same guard as GameRendererMixin: a player has a GPU, and their samplers are
+        // not ours to leave bound.
+        if (Bot.isBot()) {
+            ci.cancel();
+        }
     }
 }
