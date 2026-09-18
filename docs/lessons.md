@@ -94,6 +94,32 @@ The same family, again and again: a faked key must be released on **every**
 exit of a behaviour, not only on the ones that remembered to. The use key is
 shared by eating and the bow; the jump key by swimming and towers.
 
+## Carry the state, do not queue the change
+
+**If a reader is told "you are up to date as of N", anything you queue in the
+same breath is already behind N.** The settings a command decides were queued as
+orders when a bridge reported back after being away. The report and the answer
+happen in ONE request: by the time it said "start from id N", N was past the
+orders just queued, so the bridge asked for what came after them and never saw
+one. Every unit test passed — each half was right on its own.
+
+The fix is not a smarter id. It is to **send the state instead of the change**:
+the settings now ride in every answer of the poll. There is no race to get
+wrong, and a lost order corrects itself on the next one. Queue an event when
+missing it is acceptable; carry the state when it is not.
+
+**A saved objective outlives the code that drew it.** A scoreboard redrew only
+when its contents changed, which is right — except that the objective and its
+lines live in the world save. Start the server with no bot connected and the
+footprint was empty, the previous one was empty too, so the redraw was skipped,
+and with it the cleanup: last session's "⇄ Alice  idle" stayed on everyone's
+screen for a bot that was not in the game. **The first pass of a session must
+never be the one you skip**, because it is the only one that knows what the
+previous session left behind.
+
+And when there is nothing to show, take the thing away: an empty board with a
+title is worse than no board.
+
 ## A predicate never mutates state
 
 `hasBow()` moved the bow to the hotbar. It was called from a combat condition,

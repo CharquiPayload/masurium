@@ -1787,29 +1787,28 @@ def apply_settings(settings):
     Quiet when there is nothing to do, which is the usual case."""
     if not settings:
         return
-    done = 0
+    done = {}
     for key, value in (settings.get("prefs") or {}).items():
         try:
             apply_setting("pref", f"{key}={'true' if value else 'false'}")
-            done += 1
+            done["pref"] = done.get("pref", 0) + 1
         except Exception as e:
             log(f"[control] could not apply {key}: {e}")
-    for verb, ids in (settings.get("food") or {}).items():
-        for what in ids:
-            try:
-                apply_setting("food", f"{verb}:{what}")
-                done += 1
-            except Exception as e:
-                log(f"[control] could not apply food {verb} {what}: {e}")
-    for verb, ids in (settings.get("break") or {}).items():
-        for what in ids:
-            try:
-                apply_setting("break", f"{verb}:{what}")
-                done += 1
-            except Exception as e:
-                log(f"[control] could not apply break {verb} {what}: {e}")
+    for family, route in (("food", "food"), ("break", "break")):
+        for verb, ids in (settings.get(family) or {}).items():
+            for what in ids:
+                try:
+                    apply_setting(route, f"{verb}:{what}")
+                    done[family] = done.get(family, 0) + 1
+                except Exception as e:
+                    log(f"[control] could not apply {family} {verb} {what}: {e}")
     if done:
-        log(f"[control] {done} setting(s) from the server applied")
+        # "re-applied", and what of: most of the time NOTHING changed here, because
+        # the body already agreed. A line that reads like activity when there was
+        # none is what costs an hour three months later, looking for a change that
+        # never happened.
+        log("[control] settings from the server re-applied: "
+            + ", ".join(f"{n} {family}" for family, n in sorted(done.items())))
 
 
 def apply_setting(action, argument):

@@ -138,6 +138,36 @@ def tests_speaker():
               "allow=dirt" in asked[-1], asked[-1])
         check("a settings order says nothing in the chat: it is housekeeping",
               all("/say" not in r for r in asked), asked)
+
+        # The whole state at once, as it arrives in every /control answer.
+        asked.clear()
+        lines = []
+        real_log = bridge.log
+        bridge.log = lambda text: lines.append(text)
+        try:
+            bridge.apply_settings({"prefs": {"bunny_hop": True},
+                                   "food": {"ban": ["salmon"], "allow": []},
+                                   "break": {"allow": ["dirt"], "forbid": []}})
+        finally:
+            bridge.log = real_log
+        check("the whole state is applied: pref, food and break in one pass",
+              len(asked) == 3, asked)
+        # It says RE-APPLIED and what of: usually nothing changed, because the body
+        # already agreed. A line that reads like activity when there was none sends
+        # you hunting for a change that never happened.
+        said = " ".join(lines)
+        check("the log says it re-applied, not that something happened",
+              "re-applied" in said, said)
+        check("the log says what it re-applied, by family",
+              "1 pref" in said and "1 food" in said and "1 break" in said, said)
+        lines.clear()
+        bridge.log = lambda text: lines.append(text)
+        try:
+            bridge.apply_settings({})
+            bridge.apply_settings(None)
+        finally:
+            bridge.log = real_log
+        check("nothing set: it stays quiet instead of logging a zero", not lines, lines)
     finally:
         bridge.request_bot = real_request_bot
     out = server.t_who_commands({})
