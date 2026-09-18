@@ -116,6 +116,27 @@ public class MarionetteBot {
     private int consecutiveDeaths;
     private long firstDeath;
 
+    /** When the bridge last asked for anything. Zero means never. */
+    private static volatile long LAST_ORDER;
+
+    /** When this client opened its port, so "never" can be told from "not yet". */
+    private static volatile long LISTENING_SINCE;
+
+    /**
+     * Seconds since the brain last said anything, or -1 if it never has.
+     *
+     * <p>Used to tell someone their bot has hands and no head. The bridge polls often,
+     * so a long silence means it is not running — which from inside the game looks
+     * exactly like a bot that is ignoring everyone.
+     */
+    public static long silence() {
+        if (LAST_ORDER == 0) {
+            return LISTENING_SINCE == 0 ? -1
+                    : -(System.currentTimeMillis() - LISTENING_SINCE) / 1000 - 1;
+        }
+        return (System.currentTimeMillis() - LAST_ORDER) / 1000;
+    }
+
     private HttpServer http;
     private final Walker walker = new Walker();
     private final Miner miner = new Miner();
@@ -266,6 +287,7 @@ public class MarionetteBot {
                     x -> attend(x, this::disconnect));
             http.setExecutor(null);
             http.start();
+            LISTENING_SINCE = System.currentTimeMillis();
             LOG.info("[marionette-bot] listening on http://127.0.0.1:{}", PORT);
         } catch (IOException e) {
             // Loud: if this fails silently, the agent talks to a door that does not exist
@@ -3696,6 +3718,11 @@ public class MarionetteBot {
             "/people", "/selection", "/look", "/version");
 
     private void attend(HttpExchange x, RouteHandler m) throws IOException {
+        // Any request at all means something is on the other end of that port. It is
+        // the only evidence the client has that it HAS a brain: the bridge is another
+        // process, on the same machine but outside the game, and nothing else here
+        // would ever notice it was missing.
+        LAST_ORDER = System.currentTimeMillis();
         if (!LOOK_ONLY.contains(x.getRequestURI().getPath())) {
             Activity.markPlace();
         }

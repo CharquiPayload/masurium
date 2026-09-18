@@ -27,6 +27,30 @@ public final class BotHud {
     private BotHud() {
     }
 
+    /** How long a brain may say nothing before it is treated as absent. */
+    static final long PATIENCE = 60;
+
+    /**
+     * What to say about the brain.
+     *
+     * <p>Never having spoken is not the same as having gone quiet, and the second is
+     * not the same as being new. A bot that has been up for ten seconds with no bridge
+     * has not got a problem yet; one that has been up for two minutes has.
+     */
+    static String brainLine(long silence) {
+        if (silence >= 0 && silence <= PATIENCE) {
+            return "Brain connected";
+        }
+        if (silence < 0) {
+            long up = -silence - 1;
+            if (up <= PATIENCE) {
+                return "Waiting for the brain to connect (" + up + "s)";
+            }
+            return "NO BRAIN: start the bridge, or this bot obeys nobody";
+        }
+        return "BRAIN LOST: nothing for " + silence + "s. Is the bridge still running?";
+    }
+
     /**
      * The lines to write over the black.
      *
@@ -34,9 +58,10 @@ public final class BotHud {
      * @param server    where it was told to join, or {@code null}
      * @param connected whether it is in a world right now
      * @param rendering whether the world is being drawn at this moment
+     * @param silence   seconds since the brain last spoke; negative means it never has
      */
     static List<String> lines(String name, String server, boolean connected,
-                              boolean rendering) {
+                              boolean rendering, long silence) {
         List<String> out = new ArrayList<>();
         out.add("Marionette — " + name);
 
@@ -47,6 +72,12 @@ public final class BotHud {
         } else {
             out.add("Not in a world");
         }
+
+        // The brain is a separate program that the person has to start themselves. A
+        // bot without one has hands, joins, defends itself and obeys nobody, which
+        // from the outside is indistinguishable from a broken bot. So it is said here,
+        // and it is said as the problem it is.
+        out.add(brainLine(silence));
 
         // Said plainly, because a black screen is the one symptom everybody reads as a
         // crash. Whoever is looking at this needs to know it is deliberate before they

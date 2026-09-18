@@ -72,7 +72,8 @@ public final class BotScreen {
         GuiGraphics g = event.getGuiGraphics();
 
         var lines = BotHud.lines(Bot.name(), Bot.server(),
-                mc.level != null && mc.player != null, rendering);
+                mc.level != null && mc.player != null, rendering,
+                MarionetteBot.silence());
 
         int step = mc.font.lineHeight + 3;
         int width = 0;
