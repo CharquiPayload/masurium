@@ -39,12 +39,15 @@ ideally with a whitelist.
 |---|---|---|
 | **Server half** | the source of truth: what is where, who is online, did it happen; server-side crafting | `mod/src/main/java/marionette/server/` |
 | **Bot half** | the hands, inside a headless client: walk, dig, place, fight, eat, use chests and furnaces | `mod/src/main/java/marionette/bot/` |
+| **Shared half** | what both need and neither owns: the path finder, the logbook, the settings and the phrases | `mod/src/main/java/marionette/common/` |
 | **MCP server** | the catalog of tools the brain can call | `mcp/server.py` |
 | **Bridge** | reads the chat, wakes the brain when the bot is named, relays body notices | `mcp/bridge.py` |
 | **Claude Code** | thinking, only when needed | — |
 
 The split is strict: **a question goes to the server, an action goes to the
-bot.** Each bot is a real Minecraft client without a screen
+bot.** A dedicated server loads only the server and shared halves; the bot half
+is `@Mod(dist = Dist.CLIENT)` and is never constructed there. Each bot is a real
+Minecraft client without a screen
 ([HeadlessMC](https://github.com/headlesshq/headlessmc)), so what it does goes
 through the normal game rules.
 
@@ -295,12 +298,20 @@ Nobody has them by default. Granting one lets that player use it on every bot.
 ## Tests
 
 ```bash
-./test.sh              # Python checks, server-mod JUnit tests, bot mod build
+./test.sh              # the MCP layer in Python, then the mod: JUnit tests and the jar
 mcp/test_brain.sh      # the thinking layer against a fake bot (spends model calls)
 ```
 
 None of the tests need Minecraft running. The path finder, the logbook, the
 request parsing and most of the bridge and MCP logic are tested in milliseconds.
+
+One of them is worth knowing about before changing anything: `BotSideTest` fails
+the build if anything in `marionette.server` or `marionette.common` so much as
+names a client class or the bot's half. Those two are all a dedicated server
+loads, and a client class touched there does not fail politely — it kills the
+startup, on the server of whoever downloaded the mod. It reads the **compiled**
+classes rather than the source, so it also catches a fully qualified name written
+inline, a lambda, or a return type that no `import` would reveal.
 
 ## Documentation
 
@@ -315,7 +326,7 @@ request parsing and most of the bridge and MCP logic are tested in milliseconds.
 - `create_bot.sh --role main|guard` instead of editing `escort` by hand.
 - A per-bot configuration file generated on first start, with the behaviour
   toggles as `true`/`false`.
-- Release builds of both jars.
+- Release builds of the jar.
 - **Launcher** (to do): one place to start, stop and watch bots, choosing the
   bot, its mod pack, the server address and port, with groups of bots that share
   one configuration. It must read the same lock the bridge takes, so a bot that
