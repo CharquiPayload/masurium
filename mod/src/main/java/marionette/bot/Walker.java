@@ -3,7 +3,6 @@ package marionette.bot;
 import marionette.common.Logbook;
 import marionette.common.Request;
 import marionette.common.Route;
-import marionette.common.Segments;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.Input;
 import net.minecraft.client.player.LocalPlayer;
@@ -53,19 +52,6 @@ final class Walker {
     private static final double MIN_PROGRESS = 0.35;
     private static final int JUMPS_MAX = 6;
 
-    /**
-     * Hunger below which it does not jump while sprinting.
-     *
-     * <p>Sprinting costs 0.1 exhaustion per block and jumping while sprinting adds 0.2
-     * per jump: in total, half again as much food per block in exchange for going 27%
-     * faster (5.6 to ~7.1 blocks per second). The trade pays off on a long trip and is
-     * very expensive with an empty pantry: a bot died exploring with no food on it, and
-     * without food health does not regenerate either. At 12 there are six drumsticks of
-     * margin and the game does not cut sprinting yet (it does below 6).
-     */
-    private static final int HUNGER_TO_JUMP = 12;
-    /** Points ahead that must continue straight and flat to jump. */
-    private static final int MIN_STRAIGHT = 2;
     private static final int TICKS_MAX = 20 * 90;
 
     private List<Route.Point> route;
@@ -220,40 +206,6 @@ final class Walker {
     }
 
     /**
-     * Time to jump while sprinting? The good old "bunny hop".
-     *
-     * <p>With spiral exploration the bot walks thousands of blocks, and 27% less travel
-     * time is minutes saved per outing.
-     *
-     * <p>The conditions are not decoration. It only jumps where it ALREADY sprints (flat,
-     * with flat ground ahead, no tower nor half-dug block), and also:
-     * <ul>
-     *   <li><b>in a straight line</b>: a jump is four blocks without brakes, and on a
-     *       curve that means overshooting the point and having to come back;</li>
-     *   <li><b>with two blocks of air above</b>: under a roof the jump only bumps the
-     *       head and loses the run;</li>
-     *   <li><b>with hunger to spare</b> ({@value #HUNGER_TO_JUMP}), because of what it
-     *       costs;</li>
-     *   <li><b>on the ground and out of water</b>: in water the jump key already means
-     *       something else (floating), and that one rules there.</li>
-     * </ul>
-     *
-     * <p>And only with the {@code bunny_hop} switch on: off by default, turned on through
-     * the chat when the pantry is full and nobody minds watching it bounce.
-     */
-    private boolean bunnyHopDue(LocalPlayer p, Route.Point goal) {
-        if (!Preferences.is("bunny_hop")) return false;
-        if (!p.onGround() || p.isInWater()) return false;
-        if (p.getFoodData().getFoodLevel() < HUNGER_TO_JUMP) return false;
-        if (!canRun(p, goal)) return false;
-        if (!Segments.flatStraight(route, index, MIN_STRAIGHT)) return false;
-        // Two free blocks above the head: one is where the head already is.
-        BlockPos feet = p.blockPosition();
-        return p.level().getBlockState(feet.above(2)).isAir()
-                && p.level().getBlockState(feet.above(3)).isAir();
-    }
-
-    /**
      * Time to sprint?
      *
      * <p>Only on flat ground with flat ground ahead. The extra speed is paid in control,
@@ -378,10 +330,7 @@ final class Walker {
             ownEntry.jumping = jumps > 0
                     || goal.y() > floorY(p)
                     || (p.horizontalCollision && p.onGround())
-                    || (p.isInWater() && goal.y() >= floorY(p))
-                    // And the bunny hop, last on the list on purpose: it is the only jump
-                    // that solves nothing, it only goes faster.
-                    || bunnyHopDue(p, goal);
+                    || (p.isInWater() && goal.y() >= floorY(p));
         }
     }
 

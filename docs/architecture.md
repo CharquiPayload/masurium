@@ -130,7 +130,7 @@ is mislabel a chest.
 
 The settings the server decided are kept in `marionette_bots.properties` and
 travel as orders in the same `/control` poll that carries shutdown — with an
-argument, `pref bunny_hop=true` or `food ban:rotten_flesh`. Only what a command
+argument, `pref hunt_players=true` or `food ban:rotten_flesh`. Only what a command
 touched is stored: anything else keeps the body's own default, from
 `common/Settings.java`, which **both sides read** so a key cannot exist on one
 and not the other. When a bridge reports after a silence it is taken as a new

@@ -53,10 +53,6 @@ public final class Settings {
         // causes of death. Turning it off leaves only fleeing.
         toggle("shoot_creepers", true,
                 "shoot creepers in range with a bow on its own initiative");
-        // Faster on long trips, but running in jumps spends half again as much food per
-        // block.
-        toggle("bunny_hop", false,
-                "travel hopping, which is faster and eats considerably more food");
         toggle("tame_wolves", true,
                 "tame wild wolves on its own when it sees them and carries bones");
         toggle("dress_alone", true,

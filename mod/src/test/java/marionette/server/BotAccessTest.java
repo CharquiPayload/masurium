@@ -178,15 +178,15 @@ class BotAccessTest {
     @DisplayName("a setting is stored, travels as an order and refuses a key that does not exist")
     void settingsTravelAsOrders(@TempDir Path dir) {
         BotAccess a = withAlice(dir);
-        assertNull(a.pref("alice", "BUNNY_HOP", true, "Owner", NOW));
-        assertEquals(Map.of("bunny_hop", true), a.prefs("Alice"));
+        assertNull(a.pref("alice", "HUNT_PLAYERS", true, "Owner", NOW));
+        assertEquals(Map.of("hunt_players", true), a.prefs("Alice"));
         String json = a.controlJson("Alice", NOW - 1, NOW);
         assertTrue(json.contains("\"action\":\"pref\""), json);
-        assertTrue(json.contains("\"argument\":\"bunny_hop=true\""), json);
+        assertTrue(json.contains("\"argument\":\"hunt_players=true\""), json);
         // A typo must not become a setting that reads as saved and governs nothing.
-        assertNotNull(a.pref("Alice", "buny_hop", true, "Owner", NOW));
+        assertNotNull(a.pref("Alice", "hunt_playerz", true, "Owner", NOW));
         assertEquals(1, a.prefs("Alice").size());
-        assertNotNull(a.pref("Nobody", "bunny_hop", true, "Owner", NOW));
+        assertNotNull(a.pref("Nobody", "hunt_players", true, "Owner", NOW));
     }
 
     @Test
@@ -225,13 +225,13 @@ class BotAccessTest {
         Path file = dir.resolve("bots.properties");
         BotAccess a = new BotAccess(file);
         a.report("Alice", "Owner", "1.0.0", NOW);
-        a.pref("Alice", "bunny_hop", true, "Owner", NOW);
+        a.pref("Alice", "hunt_players", true, "Owner", NOW);
         a.food("Alice", "salmon", true, "Owner", NOW);
         a.breaking("Alice", "dirt", true, "Owner", NOW);
 
         // Read back from the file by a brand new instance, as after a restart.
         BotAccess back = new BotAccess(file);
-        assertEquals(Map.of("bunny_hop", true), back.prefs("Alice"));
+        assertEquals(Map.of("hunt_players", true), back.prefs("Alice"));
         assertEquals(List.of("salmon"), back.foodList("Alice", true));
         assertEquals(List.of("dirt"), back.breakList("Alice", true));
 
@@ -244,13 +244,13 @@ class BotAccessTest {
         back.report("Alice", "Owner", "1.0.0", later);
         String first = back.controlJson("Alice", null, later);
         assertTrue(first.contains("\"settings\":"), first);
-        assertTrue(first.contains("\"bunny_hop\":true"), first);
+        assertTrue(first.contains("\"hunt_players\":true"), first);
         assertTrue(first.contains("\"ban\":[\"salmon\"]"), first);
         assertTrue(first.contains("\"allow\":[\"dirt\"]"), first);
         // And no orders are invented for them: a fresh bridge must not be handed a
         // queue it cannot see.
         assertFalse(first.contains("\"action\":\"pref\""), first);
-        assertFalse(back.controlJson("Alice", later - 1, later).contains("bunny_hop=true"));
+        assertFalse(back.controlJson("Alice", later - 1, later).contains("hunt_players=true"));
     }
 
     @Test
@@ -269,10 +269,10 @@ class BotAccessTest {
         java.nio.file.Files.write(file, List.of(
                 "alice.name=Alice",
                 "alice.owner=Owner",
-                "alice.pref.bunny_hop=true",
+                "alice.pref.hunt_players=true",
                 "alice.pref.fly_to_the_moon=true"));
         BotAccess a = new BotAccess(file);
-        assertEquals(Map.of("bunny_hop", true), a.prefs("Alice"));
+        assertEquals(Map.of("hunt_players", true), a.prefs("Alice"));
     }
 
     @Test

@@ -34,12 +34,12 @@ class SettingsTest {
     @Test
     @DisplayName("an unknown key is unknown, whatever it looks like")
     void unknownKeysAreRefused() {
-        assertTrue(Settings.known("bunny_hop"));
-        assertFalse(Settings.known("buny_hop"));
+        assertTrue(Settings.known("hunt_players"));
+        assertFalse(Settings.known("hunt_playerz"));
         assertFalse(Settings.known(""));
         assertFalse(Settings.known(null));
         // Case is the caller's business: the command lowercases before asking.
-        assertFalse(Settings.known("BUNNY_HOP"));
+        assertFalse(Settings.known("HUNT_PLAYERS"));
     }
 
     @Test
