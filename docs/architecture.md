@@ -233,6 +233,38 @@ boundary; permissions are.
 it back, so the saving would be imaginary, and available RAM would depend on the
 moment: exactly the failure that invites the OOM killer.
 
+**Bots living on the server instead of in a client.** The pattern exists and
+works: give a `ServerPlayer` a dummy connection, let it in through the same door
+a joining player uses, and drive it with the server-side methods a packet would
+have reached anyway (`destroyBlock`, `useItemOn`, `attack`, `openMenu`). It is
+what Carpet's `/player` does, and what SiliconeDolls and PuppetPlayers do on
+NeoForge 1.21. It would remove the launcher, the purchased account and the ~3 GB
+per bot at a stroke, which is why it was looked at seriously.
+
+Three things sank it, and none of them is difficulty:
+
+*The cost moves to the wrong machine.* A client bot spends the RAM and CPU of
+whoever runs it. A server bot spends the server's, on the tick thread, and this
+project's whole navigation is an A\* search. Carpet's fake players already count
+for chunk loading, mob caps and random ticks with no path finding at all; adding
+a search to that is how a server loses its TPS for everyone on it.
+
+*Hosting forbids it.* Not a guess: a build of Carpet **with `/player` removed**
+exists precisely so hosts will accept it. Most people do not self-host, and a
+bot that only works on your own machine is not a product.
+
+*It buys one loader and one version at a time.* Prism already solves "this
+instance is 1.20.1 Fabric, that one 1.21.1 NeoForge", and solves it for free. A
+server-side bot inherits that problem instead: one build per loader per version,
+maintained here.
+
+So the bot stays a client, configured through the JVM properties of an ordinary
+launcher instance. The one thing the discarded path did better is the account:
+on an `online-mode=true` server every client bot costs a purchased copy of the
+game. On the private, offline-mode servers this is meant for — the only ones
+where running bots is acceptable at all, see the README — it costs nothing, and
+a bot can take any name.
+
 ## Where it runs
 
 Each bot is a real Java client with a ~3 GB heap. The launcher refuses to start
