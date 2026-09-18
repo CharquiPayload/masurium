@@ -1778,6 +1778,40 @@ def control_route(since=None):
     return "/control?" + urllib.parse.urlencode(q)
 
 
+def apply_settings(settings):
+    """Everything the server decided for this bot, applied to the body at
+    start. It comes in EVERY /control answer, not as orders: a body that
+    restarted came back with its own files and knows nothing of what was
+    decided while it was away.
+
+    Quiet when there is nothing to do, which is the usual case."""
+    if not settings:
+        return
+    done = 0
+    for key, value in (settings.get("prefs") or {}).items():
+        try:
+            apply_setting("pref", f"{key}={'true' if value else 'false'}")
+            done += 1
+        except Exception as e:
+            log(f"[control] could not apply {key}: {e}")
+    for verb, ids in (settings.get("food") or {}).items():
+        for what in ids:
+            try:
+                apply_setting("food", f"{verb}:{what}")
+                done += 1
+            except Exception as e:
+                log(f"[control] could not apply food {verb} {what}: {e}")
+    for verb, ids in (settings.get("break") or {}).items():
+        for what in ids:
+            try:
+                apply_setting("break", f"{verb}:{what}")
+                done += 1
+            except Exception as e:
+                log(f"[control] could not apply break {verb} {what}: {e}")
+    if done:
+        log(f"[control] {done} setting(s) from the server applied")
+
+
 def apply_setting(action, argument):
     """A setting decided by command. The server holds what it decided and
     sends it again whenever a bridge reports fresh, so a bot that restarts
@@ -1950,6 +1984,7 @@ def listen(since, inbox, control_since=None):
                     control_since = c.get("last", 0)
                     ACCESS.update({k: c[k] for k in ("owner", "admins", "hear") if k in c})
                     log("server commands on (late)")
+                    apply_settings(c.get("settings"))
                 except Exception:
                     pass
         else:
@@ -2134,6 +2169,7 @@ def main():
         ACCESS.update({k: c[k] for k in ("owner", "admins", "hear") if k in c})
         log(f"server commands on; owner {bot_owner() or 'none'}, "
             f"hears {ACCESS['hear'].get('mode', 'everyone')}")
+        apply_settings(c.get("settings"))
     except Exception as e:
         # An older server mod: no commands, and everyone is heard.
         control_since = None

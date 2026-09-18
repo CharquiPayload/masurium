@@ -213,29 +213,12 @@ final class BotAccess {
             throw new IllegalArgumentException("the owner is not a valid name");
         }
         Bot b = bots.computeIfAbsent(bot.toLowerCase(), k -> new Bot(bot));
-        // A bridge that was not alive a moment ago is a NEW bridge: the body may have
-        // restarted and come back with its own files, which know nothing of what was
-        // decided here. Everything this server has set is queued again so the bot ends
-        // up as the commands left it, without anyone having to remember to redo them.
-        boolean freshBridge = b.lastPoll == 0 || now - b.lastPoll > ALIVE_MS;
         b.lastPoll = now;
         if (!b.owner.equals(who) || !b.name.equals(bot)) {
             b.owner = who;
             b.name = bot;
             save();
         }
-        if (freshBridge) resend(b, now);
-    }
-
-    /** Queues every setting this server holds for that bot, as orders. */
-    private void resend(Bot b, long now) {
-        b.prefs.forEach((k, v) -> queue(b.name, Action.PREF, k + "=" + v, "server", now));
-        b.foodBan.forEach(id -> queue(b.name, Action.FOOD, "ban:" + id, "server", now));
-        b.foodAllow.forEach(id -> queue(b.name, Action.FOOD, "allow:" + id, "server", now));
-        b.breakAllow.forEach(
-                id -> queue(b.name, Action.BREAK, "allow:" + id, "server", now));
-        b.breakForbid.forEach(
-                id -> queue(b.name, Action.BREAK, "forbid:" + id, "server", now));
     }
 
     /**
@@ -271,10 +254,36 @@ final class BotAccess {
     private String accessFields(String bot) {
         return String.format(
                 "\"bot\":\"%s\",\"owner\":\"%s\",\"admins\":%s,"
-                + "\"hear\":{\"mode\":\"%s\",\"players\":%s}",
+                + "\"hear\":{\"mode\":\"%s\",\"players\":%s},\"settings\":%s",
                 Request.escape(display(bot)), Request.escape(owner(bot)),
                 jsonList(admins(bot)), onlyList(bot) ? "list" : "everyone",
-                jsonList(hearList(bot)));
+                jsonList(hearList(bot)), settingsJson(bot));
+    }
+
+    /**
+     * Everything this server decided for that bot, in EVERY answer rather than as
+     * orders. A bridge applies it when it starts, so a body that came back with its own
+     * files ends up as the commands left it.
+     *
+     * <p>It was orders at first, queued when a bridge reported after a silence. That
+     * cannot work: the report happens in the same request that answers "start from id
+     * N", and N was already past the orders just queued, so the bridge asked for what
+     * came after them and never saw one. Carrying the state has no such race, and it
+     * self-heals if an order is ever missed.
+     */
+    private String settingsJson(String bot) {
+        Bot b = find(bot);
+        if (b == null) return "{}";
+        List<String> prefs = new ArrayList<>();
+        b.prefs.forEach((k, v) -> prefs.add("\"" + k + "\":" + v));
+        return String.format(
+                "{\"prefs\":{%s},\"food\":{\"ban\":%s,\"allow\":%s},"
+                + "\"break\":{\"allow\":%s,\"forbid\":%s}}",
+                String.join(",", prefs),
+                jsonList(new ArrayList<>(b.foodBan)),
+                jsonList(new ArrayList<>(b.foodAllow)),
+                jsonList(new ArrayList<>(b.breakAllow)),
+                jsonList(new ArrayList<>(b.breakForbid)));
     }
 
     private static String jsonList(List<String> names) {

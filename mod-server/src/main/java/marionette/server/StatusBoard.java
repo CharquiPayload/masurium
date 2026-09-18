@@ -36,10 +36,15 @@ import java.util.TreeSet;
  * on with {@code /marionette scoreboard on} (an operator) and saved in {@code
  * marionette_scoreboard.properties}, next to the owners.
  *
- * <p>One line per bot: those with an owner and those that have sent a state. Each bot is
- * a fixed scoreboard holder ({@code marionette_<bot>}) whose text changes, so a line does
- * not flicker when the state changes. Numbers are hidden. It refreshes every second, and
- * only if something changed.
+ * <p>One line per bot IN THE GAME: a bot that is not connected has nothing to show. With
+ * no bot connected at all the board is taken away entirely, rather than leaving an empty
+ * "Bots" title on everyone's screen, and it comes back on its own when one joins.
+ *
+ * <p>Each bot is a fixed scoreboard holder ({@code marionette_<bot>}) whose text changes,
+ * so a line does not flicker when the state changes. Numbers are hidden. It refreshes
+ * every second, and only if something changed — except for the first pass of each
+ * session, which always runs: the objective is saved in the world, and skipping that pass
+ * left the previous session's lines on screen for bots that were no longer there.
  */
 public final class StatusBoard {
 
@@ -53,6 +58,8 @@ public final class StatusBoard {
     private volatile boolean enabled;
     private int ticks;
     private String lastOne = "";
+    /** Whether this session has drawn once. Its first pass must never be skipped. */
+    private boolean drawn;
     private final Set<String> headlines = new HashSet<>();
 
     StatusBoard(Tab tab, Owners owners) {
@@ -135,8 +142,21 @@ public final class StatusBoard {
             footprint.append(bot).append('=').append(states.get(bot)).append(';');
         }
         String now = footprint.toString();
-        if (now.equals(lastOne)) return;
+        // The FIRST pass of a session always runs, even when nothing seems to have
+        // changed. The objective and its lines are saved in the world, so after a
+        // restart with no bot online the footprint was "" and so was lastOne: this
+        // return fired, the saved lines were never cleaned, and the sidebar kept
+        // showing the previous session's "⇄ Alice  idle" for a bot that was not there.
+        if (drawn && now.equals(lastOne)) return;
         lastOne = now;
+        drawn = true;
+
+        // No bot in the game: take the board away instead of leaving an empty "Bots"
+        // title on everyone's screen. It comes back by itself when one connects.
+        if (bots.isEmpty()) {
+            remove(server);
+            return;
+        }
 
         ServerScoreboard sb = server.getScoreboard();
         Objective obj = sb.getObjective(TARGET);

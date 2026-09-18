@@ -220,8 +220,8 @@ class BotAccessTest {
     }
 
     @Test
-    @DisplayName("settings survive a restart of the server and are re-sent to a fresh bridge")
-    void settingsSurviveAndAreResent(@TempDir Path dir) {
+    @DisplayName("settings survive a restart and ride in EVERY answer, not as orders")
+    void settingsSurviveAndRideInTheAnswer(@TempDir Path dir) {
         Path file = dir.resolve("bots.properties");
         BotAccess a = new BotAccess(file);
         a.report("Alice", "Owner", NOW);
@@ -235,20 +235,31 @@ class BotAccessTest {
         assertEquals(List.of("salmon"), back.foodList("Alice", true));
         assertEquals(List.of("dirt"), back.breakList("Alice", true));
 
-        // A bridge reporting after a silence is a NEW bridge: the body may have come
-        // back with its own files, so everything decided here is queued again.
+        // THE BUG THIS TEST EXISTS FOR. The settings were queued as orders when a
+        // bridge reported fresh, and a live test showed the bridge never carried one
+        // out: report() runs in the same request that answers "start from id N", and N
+        // was already past the orders just queued. So they ride in the answer instead,
+        // in EVERY answer, including the first one a bridge makes with no `since`.
         long later = NOW + BotAccess.ALIVE_MS + 1;
         back.report("Alice", "Owner", later);
-        String json = back.controlJson("Alice", later - 1, later);
-        assertTrue(json.contains("bunny_hop=true"), json);
-        assertTrue(json.contains("ban:salmon"), json);
-        assertTrue(json.contains("allow:dirt"), json);
+        String first = back.controlJson("Alice", null, later);
+        assertTrue(first.contains("\"settings\":"), first);
+        assertTrue(first.contains("\"bunny_hop\":true"), first);
+        assertTrue(first.contains("\"ban\":[\"salmon\"]"), first);
+        assertTrue(first.contains("\"allow\":[\"dirt\"]"), first);
+        // And no orders are invented for them: a fresh bridge must not be handed a
+        // queue it cannot see.
+        assertFalse(first.contains("\"action\":\"pref\""), first);
+        assertFalse(back.controlJson("Alice", later - 1, later).contains("bunny_hop=true"));
+    }
 
-        // A bridge that keeps polling is not sent the same thing over and over.
-        long soon = later + 1000;
-        back.report("Alice", "Owner", soon);
-        assertFalse(back.controlJson("Alice", soon - 1, soon).contains("bunny_hop"),
-                "a live bridge must not be re-sent its settings");
+    @Test
+    @DisplayName("a bot with nothing set says so, instead of leaving the field out")
+    void nothingSetIsStillAnAnswer(@TempDir Path dir) {
+        BotAccess a = withAlice(dir);
+        String json = a.controlJson("Alice", null, NOW);
+        assertTrue(json.contains("\"settings\":{\"prefs\":{}"), json);
+        assertTrue(json.contains("\"ban\":[]"), json);
     }
 
     @Test
