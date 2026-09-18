@@ -159,7 +159,7 @@ every few seconds; the key carries the detail that makes two events different
 
 ## Navigation
 
-The path finder (`common/java/marionette/common/Route.java`) is A* over the
+The path finder (`mod/src/main/java/marionette/common/Route.java`) is A* over the
 tiles where a player can stand, and it knows nothing about Minecraft: it asks a
 `World` interface two or three questions. That makes it testable against worlds
 drawn with text (`TextWorld`), in milliseconds.

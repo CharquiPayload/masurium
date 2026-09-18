@@ -4,7 +4,15 @@
 
 First public release of Marionette.
 
-### Server mod
+**One jar for both sides.** The same `marionette-*.jar` goes in the Minecraft
+server's `mods/` folder and in each bot client's. The bot half is
+`@Mod(dist = Dist.CLIENT)`, so a dedicated server never constructs it, and a test
+over the compiled classes fails the build if anything the server loads ever names a
+client class. It was two jars during development, which meant a bot and the server
+it joined could run different versions and the half that did not understand a
+setting ignored it without a word.
+
+### Server half
 - HTTP API (token-protected) that answers what a client can only guess: online
   players, entities and dropped items near a point, blocks, chunks, the
   server-side inventory, where an entity is by uuid, the chat with incremental ids.
@@ -25,7 +33,7 @@ First public release of Marionette.
   the bot mod than the server's, and `/marionette bot <bot>` shows both.
 - Bots do not pick up again what they tossed themselves.
 
-### Bot mod
+### Bot half
 - A* path finder with tick-based costs, partial routes, goal conditions, anti-
   dithering, doors, swimming, bridges, towers and optional tunnelling.
 - Long trips in segments, open-water swimming and travel between dimensions

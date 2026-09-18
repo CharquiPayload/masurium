@@ -37,8 +37,8 @@ ideally with a whitelist.
 
 | layer | what it does | where |
 |---|---|---|
-| **Server mod** | the source of truth: what is where, who is online, did it happen; server-side crafting | `mod-server/` |
-| **Bot mod** | the hands, inside a headless client: walk, dig, place, fight, eat, use chests and furnaces | `mod-bot/` |
+| **Server half** | the source of truth: what is where, who is online, did it happen; server-side crafting | `mod/src/main/java/marionette/server/` |
+| **Bot half** | the hands, inside a headless client: walk, dig, place, fight, eat, use chests and furnaces | `mod/src/main/java/marionette/bot/` |
 | **MCP server** | the catalog of tools the brain can call | `mcp/server.py` |
 | **Bridge** | reads the chat, wakes the brain when the bot is named, relays body notices | `mcp/bridge.py` |
 | **Claude Code** | thinking, only when needed | — |
@@ -83,7 +83,7 @@ because fighting is measured in ticks and a model round trip takes seconds.
 
 **Minecraft server**
 - Minecraft **1.21.1** with **NeoForge 21.1.x**.
-- The server mod: `marionette-server-<version>.jar`.
+- The mod: `marionette-<version>.jar`, the same file the bots use.
 
 **Accounts: bots work online or offline**
 - **Online (recommended):** each bot uses its own purchased Minecraft Java
@@ -109,16 +109,24 @@ because fighting is measured in ticks and a model round trip takes seconds.
 
 ## Quick start
 
-### 1. Build the mods
+### 1. Build the mod
 
 ```bash
-(cd mod-server && ./gradlew build)   # mod-server/build/libs/marionette-server-*.jar
-(cd mod-bot && ./gradlew build)      # mod-bot/build/libs/marionette-bot-*.jar
+(cd mod && ./gradlew build)   # mod/build/libs/marionette-*.jar
 ```
 
-### 2. Install the server mod
+**One jar, both halves.** The same file goes in the Minecraft server's `mods/`
+folder and in each bot client's. On a dedicated server the bot half is never
+constructed (it is `@Mod(dist = Dist.CLIENT)`), and on a client the server half
+stays asleep unless you open a single-player or LAN world.
 
-Put `marionette-server-*.jar` in the server's `mods/` folder and start the
+If you are updating from a version that shipped two jars, take
+`marionette-server-*.jar` and `marionette-bot-*.jar` **out** of the folder: two
+jars declaring the same mod and the game will not start.
+
+### 2. Install it on the server
+
+Put `marionette-*.jar` in the server's `mods/` folder and start the
 server once. It writes `marionette.properties` next to the server jar:
 
 ```properties
@@ -140,7 +148,7 @@ comments on their own lines.
 ```text
 ~/.marionette/server.env        connection to the server mod
 ~/shared/headlessmc-launcher.jar
-~/shared/mods/                  marionette-bot-*.jar and hmc-specifics-*.jar
+~/shared/mods/                  marionette-*.jar and hmc-specifics-*.jar
 ~/servers/<slug>/server.conf    one folder per server you connect to
 ~/servers/<slug>/mods/          client-side mods that server requires (may be empty)
 ~/bots/                         created by the launcher, one folder per bot
@@ -171,7 +179,8 @@ DESCRIPTION="My survival server"
 
 The folders can be moved with `MARIONETTE_BOTS_DIR`, `MARIONETTE_SERVERS_DIR`,
 `MARIONETTE_COMMON_DIR` and `MARIONETTE_ENV`. After building, `launcher/deploy_mod.sh`
-copies the bot mod into `shared/mods` safely, even with bots running.
+copies the mod into `shared/mods` safely, even with bots running, and
+clears out any older jar that would declare the same mod twice.
 
 ### 4. Create and start a bot
 

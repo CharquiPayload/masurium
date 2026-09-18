@@ -5,7 +5,7 @@ plugins {
 
 version = '1.0.0'
 group = 'marionette'
-base { archivesName = 'marionette-server' }
+base { archivesName = 'marionette' }
 
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(21)
@@ -14,22 +14,28 @@ java {
 neoForge {
     version = '21.1.248'
 
+    // TWO mods, ONE jar: the same file goes in a server's mods folder and in a bot
+    // client's. They were two jars, and a bot is a separate installation from the
+    // server it joins, so the halves drifted apart and the one that did not
+    // understand a setting ignored it without a word. One file cannot drift.
+    //
+    // marionette_server needs both sides: on a dedicated server it is the whole mod,
+    // and on a client it is what an integrated world answers. marionette_bot is
+    // @Mod(dist = Dist.CLIENT), so a dedicated server never constructs it and never
+    // loads a client class through it — which BotSideTest keeps true.
     mods {
         marionette_server {
+            sourceSet sourceSets.main
+        }
+        marionette_bot {
             sourceSet sourceSets.main
         }
     }
 }
 
-// Both mods compile the shared code from the same place: no copies.
-sourceSets.main.java.srcDir '../common/java'
-
 repositories { mavenCentral() }
 
 dependencies {
-    // Tests only. The logic under test (Request, ChatLog, Route...) does not
-    // touch Minecraft on purpose: `./gradlew test` runs in seconds without
-    // starting a server or joining a world.
     testImplementation platform('org.junit:junit-bom:5.11.3')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

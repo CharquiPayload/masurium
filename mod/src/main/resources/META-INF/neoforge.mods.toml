@@ -1,0 +1,64 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+
+# ONE jar, two mods. The same file goes in a server's mods folder and in a bot
+# client's, and each half only wakes up where it belongs:
+#
+#   marionette_server  needs BOTH sides. On a dedicated server it is the whole mod;
+#                      on a client it is what an integrated (single-player or LAN)
+#                      world answers, which is what lets a bot work in one.
+#   marionette_bot     is @Mod(dist = Dist.CLIENT): a dedicated server never
+#                      constructs it, so none of its client classes are ever loaded
+#                      there. Its mixins are declared under "client" for the same
+#                      reason, and BotSideTest fails the build if a server or common
+#                      class ever reaches into either.
+#
+# Two files were a mistake waiting to happen: a bot is a separate installation from
+# the server it joins, so deploying one half without the other left the other
+# silently ignoring what it did not understand.
+
+[[mods]]
+modId = "marionette_server"
+version = "1.0.0"
+displayName = "Marionette"
+description = "Minecraft bots driven by an AI over HTTP: the server's answers and, on a client, the bot's hands."
+authors = "CharquiPayload"
+
+[[mods.dependencies.marionette_server]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1.0,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[mods.dependencies.marionette_server]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1,1.22)"
+ordering = "NONE"
+side = "BOTH"
+
+[[mods]]
+modId = "marionette_bot"
+version = "1.0.0"
+displayName = "Marionette (bot)"
+description = "The hands of the bot: look and act in the world, driven over HTTP by the agent. Client side only."
+authors = "CharquiPayload"
+
+[[mods.dependencies.marionette_bot]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1.0,)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[mods.dependencies.marionette_bot]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1,1.22)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[mixins]]
+config = "marionette_bot.mixins.json"

@@ -701,7 +701,7 @@ def tests_tab():
 
     check("tab: the server mod knows the seven states",
           {"idle", "working", "thinking", "combat", "error", "dead", "stuck"}
-          <= set(re.findall(r'"(\w+)", new Icon', (HERE.parent / "mod-server/src/main/java/marionette/server/Tab.java").read_text())))
+          <= set(re.findall(r'"(\w+)", new Icon', (HERE.parent / "mod/src/main/java/marionette/server/Tab.java").read_text())))
 
 
 def tests_stairs():

@@ -23,8 +23,10 @@ echo "═══ MCP layer (python) ═══"
 python3 mcp/tests.py || failures=$((failures + 1))
 
 echo
-echo "═══ server mod (java) ═══"
-output=$(cd mod-server && ./gradlew test --rerun --console=plain 2>&1)
+echo "═══ the mod (java): one jar, server and bot ═══"
+# `build` and not just `test`: the jar has to come out, and BotSideTest reads the
+# COMPILED classes to check that nothing the server loads names a client class.
+output=$(cd mod && ./gradlew build --rerun-tasks --console=plain 2>&1)
 code=$?
 echo "$output" | grep -E 'PASSED|FAILED|SKIPPED' | sed 's/^/  /'
 seen=$(echo "$output" | grep -cE 'PASSED|FAILED')
@@ -39,16 +41,13 @@ elif [ "$seen" -eq 0 ]; then
   echo "$output" | tail -8 | sed 's/^/  /'
 else
   echo "  $seen java tests"
-fi
-
-echo
-echo "═══ bot mod (java, compile only) ═══"
-output=$(cd mod-bot && ./gradlew build --console=plain 2>&1)
-if [ $? -ne 0 ]; then
-  failures=$((failures + 1))
-  echo "$output" | grep -A4 'error:' | head -25
-else
-  echo "  builds"
+  jar=$(ls mod/build/libs/marionette-*.jar 2>/dev/null | grep -v sources | head -1)
+  if [ -z "$jar" ]; then
+    failures=$((failures + 1))
+    echo "  NO JAR CAME OUT of mod/build/libs"
+  else
+    echo "  $(basename "$jar")  ($(stat -c%s "$jar") bytes)"
+  fi
 fi
 
 echo
