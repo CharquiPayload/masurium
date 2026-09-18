@@ -283,6 +283,11 @@ request parsing and most of the bridge and MCP logic are tested in milliseconds.
   bot, its mod pack, the server address and port, with groups of bots that share
   one configuration. It must read the same lock the bridge takes, so a bot that
   is already running is shown as running instead of started a second time.
+- **Add-ons** (to do): separate jars that teach the bots one mod each
+  (`marionette-create`, `marionette-watut`...). The core offers them a place to
+  register their own `/marionette bot <bot> <add-on> ...` subcommands and their own
+  per-bot settings, kept where the rest of the per-bot settings live and handed to
+  the bridge in the same poll, so an add-on needs no server of its own.
 - **Pluggable brain** (to do): besides Claude Code, support other chat-completions
   backends, such as the Anthropic API and OpenAI-compatible APIs (OpenRouter,
   Ollama, LM Studio). Smaller or local models will likely need a reduced tool
