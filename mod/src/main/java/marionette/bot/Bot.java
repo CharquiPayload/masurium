@@ -34,6 +34,9 @@ public final class Bot {
     /** Where to go on start, so a bot never waits at the menu for a click. */
     public static final String SERVER_PROPERTY = "marionette.server";
 
+    /** Which port this bot's hands listen on. Read by the mod itself, checked here. */
+    public static final String PORT_PROPERTY = "marionette.bot.port";
+
     private static final String RAW = System.getProperty(NAME_PROPERTY);
     private static final String SERVER = nameFrom(System.getProperty(SERVER_PROPERTY));
     private static final String NAME = nameFrom(RAW);
@@ -89,5 +92,16 @@ public final class Bot {
      */
     public static String server() {
         return SERVER;
+    }
+
+    /**
+     * Whether the bot port was chosen rather than defaulted.
+     *
+     * <p>Worth saying out loud, because the failure it leads to does not look like a
+     * configuration problem: two bots on one machine both taking the default both try
+     * to open 8478, and the second one comes up with no hands and no obvious reason.
+     */
+    public static boolean portSpecified() {
+        return nameFrom(System.getProperty(PORT_PROPERTY)) != null;
     }
 }

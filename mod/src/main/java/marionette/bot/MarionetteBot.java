@@ -61,7 +61,7 @@ public class MarionetteBot {
     private static final Logger LOG = LogUtils.getLogger();
 
     /** Its own port: 8477 belongs to the server mod, possibly on another machine. */
-    private static final int PORT = Integer.getInteger("marionette.bot.port", 8478);
+    private static final int PORT = Integer.getInteger(Bot.PORT_PROPERTY, 8478);
 
     /**
      * Reach of a melee hit in 1.21. Farther, the server rejects it and the bot keeps
