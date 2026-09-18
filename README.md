@@ -15,24 +15,6 @@ them play alongside you.
 > tools answer when they *know*, not when they launched an order, and every
 > failure says *what happened*, with numbers.
 
-## Where to use it
-
-**Only on private servers, or on servers whose owners explicitly allowed your
-bots.** Never take a Marionette bot to a public server such as Hypixel:
-
-- **You break their rules.** Public networks forbid bots and automated clients;
-  the account gets banned, and you are the one breaking the rules.
-- **Unbounded consumption.** Every message that names the bot can wake its
-  brain. Strangers can spam it on purpose and burn your AI quota or your API
-  bill.
-- **Prompt injection.** The chat is untrusted input. The brain has no shell or
-  file access, but other players can still try to talk the bot into tossing
-  your items, breaking blocks it is allowed to break, or following them away.
-- **Privacy.** What players say near the bot is sent to the AI provider.
-
-Use it with people you trust, on a server you run or have permission for,
-ideally with a whitelist.
-
 ## How it works
 
 | layer | what it does | where |
@@ -336,10 +318,37 @@ inline, a lambda, or a return type that no `import` would reveal.
   register their own `/marionette bot <bot> <add-on> ...` subcommands and their own
   per-bot settings, kept where the rest of the per-bot settings live and handed to
   the bridge in the same poll, so an add-on needs no server of its own.
+- **Asleep in a normal client** (to do): the bot half assumes the client it runs
+  in is always a bot, so dropping the jar into a client you play on makes it eat
+  your food and respawn you. It should stay asleep unless it finds a bot's
+  configuration, and only then open its port.
+- A documented way to **try a bot without HeadlessMC**, launching the client from
+  a normal launcher, so the first bot does not require the whole setup.
+- Consecutive notices from the body sent in **one turn** instead of one per turn,
+  which reads as the bot answering twice and spends turns.
+- Emptying into a **chest** instead of dropping items on the ground.
 - **Pluggable brain** (to do): besides Claude Code, support other chat-completions
   backends, such as the Anthropic API and OpenAI-compatible APIs (OpenRouter,
   Ollama, LM Studio). Smaller or local models will likely need a reduced tool
   catalog.
+
+## Where to use it
+
+**Only on private servers, or on servers whose owners explicitly allowed your
+bots.** Never take a Marionette bot to a public server such as Hypixel:
+
+- **You break their rules.** Public networks forbid bots and automated clients;
+  the account gets banned, and you are the one breaking the rules.
+- **Unbounded consumption.** Every message that names the bot can wake its
+  brain. Strangers can spam it on purpose and burn your AI quota or your API
+  bill.
+- **Prompt injection.** The chat is untrusted input. The brain has no shell or
+  file access, but other players can still try to talk the bot into tossing
+  your items, breaking blocks it is allowed to break, or following them away.
+- **Privacy.** What players say near the bot is sent to the AI provider.
+
+Use it with people you trust, on a server you run or have permission for,
+ideally with a whitelist.
 
 ## Acknowledgements
 
