@@ -165,6 +165,10 @@ public class MarionetteBot {
         // A client that was not told to be a bot is left alone. Not a disabled mod: no
         // listener, no port, nothing to notice. See Bot.
         if (!Bot.isBot()) {
+            // The ONE listener a non-bot registers. It draws on the title screen and
+            // nowhere else, so a person who installed this jar is told what it is doing
+            // instead of having to guess from a log they will never open.
+            NeoForge.EVENT_BUS.register(TitleNotice.class);
             if (Bot.misconfigured()) {
                 // Loud, because someone MEANT to start a bot here.
                 LOG.error("[marionette-bot] -D{} is set but empty: this client is not "
