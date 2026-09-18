@@ -8,21 +8,22 @@ import java.util.List;
 import java.util.TreeMap;
 
 /**
- * The bot's behaviour preferences, in a file its own AI manages through the chat: asking
- * the AI is enough for it to toggle them.
+ * The bot's behaviour preferences, as this body holds them.
+ *
+ * <p><b>It no longer changes them by itself.</b> They used to be toggled by asking the AI,
+ * and the tool that did it said "only on the owner's order" — a sentence in a prompt, with
+ * nothing enforcing it. Now they are switched with
+ * {@code /marionette bot <bot> pref <key> on|off} and arrive here as an order through the
+ * bridge; the brain keeps a tool that only READS them. This file is what the body reads
+ * every tick and what a bot falls back on when no command ever touched a key.
  *
  * <p>It is a file SEPARATE from the permissions on purpose: the whitelist is SAFETY (what
  * it may touch) and this is TASTE (how it behaves). Mixing them would invite a "change
  * how you follow me" to end up touching what it may break.
  *
- * <p>Only KNOWN keys: a typo does not create ghost preferences that look saved and do
- * nothing. For example:
- * <ul>
- *   <li>{@code build_while_following}: when following a player, whether it may place
- *       blocks (tower, bridge) to reach them ({@code true}) or waits where the path ends
- *       ({@code false}, the conservative choice). The cost of true is known and accepted:
- *       scaffolding pillars stay where they are.</li>
- * </ul>
+ * <p>The keys, their defaults and what each one does live in {@link
+ * marionette.common.Settings}, which the server reads too. Only KNOWN keys: a typo does
+ * not create ghost preferences that look saved and do nothing.
  */
 final class Preferences {
 
@@ -33,66 +34,13 @@ final class Preferences {
         return ServerIdentity.file("preferences");
     }
 
-    /** The keys that exist, with their default value. */
-    private static final TreeMap<String, Boolean> DEFAULTS = new TreeMap<>();
-    static {
-        // true by default: it should know it may build to move. The high cost of bridges
-        // and towers in the Route table is the real brake; the preference stays to forbid
-        // it through the chat.
-        DEFAULTS.put("build_while_following", true);
-        // With this set to true, the search may go through WHITELISTED blocks by paying
-        // for the digging (expensive: it only tunnels when there is no way on foot).
-        // false by default on purpose: breaking destroys other people's world; building
-        // only adds.
-        DEFAULTS.put("break_to_advance", false);
-        // Whether hunting may target PLAYERS. It was born as an absolute lock in the code
-        // and became a toggle: the owner's bot, the owner's world, the owner's explicit
-        // decision. false by default is the safe state, and the brain only accepts
-        // changing it from the owner.
-        DEFAULTS.put("hunt_players", false);
-        // Automatically shooting creepers in range with a bow. true by default because it
-        // is DEFENSE, not hunting: the creeper nobody sees coming is one of the two usual
-        // causes of death. Turning it off leaves only fleeing.
-        DEFAULTS.put("shoot_creepers", true);
-        // Bunny hopping goes faster on long trips, but running in jumps spends half again
-        // as much food per block, and there are times (tight pantry, terrain full of
-        // holes, lag, or simply wanting to watch the bot walk without bouncing) when it
-        // does not pay off. Off by default; whoever wants it turns it on as a preference.
-        DEFAULTS.put("bunny_hop", false);
-        // Taming wild wolves on its own when it sees them and carries bones.
-        DEFAULTS.put("tame_wolves", true);
-        // It puts on armor by itself if it carries something better.
-        DEFAULTS.put("dress_alone", true);
-        // Harvesting and resowing its own farms by itself.
-        DEFAULTS.put("harvest_alone", true);
-        // Going to bed by itself when phantoms prowl at night.
-        DEFAULTS.put("sleep_alone", true);
-        // Torches only while mining or when a player asks, never all over the overworld.
-        // The "only while mining" is not guaranteed by this preference but by WHO checks
-        // it: the Miner, and nobody else. This is the switch to turn it off entirely.
-        DEFAULTS.put("torches_while_mining", true);
-        // Staying close to light or home when it has no errand, instead of standing in
-        // the open field. It is one of the few things it does on its own initiative
-        // without being asked, so it has its switch, but true by default, because the
-        // alternative is spending the night outdoors surrounded by mobs.
-        DEFAULTS.put("night_routine", true);
-        // Otherwise the Miner and the FillWorker kept digging with two hearts until
-        // something finished them off. true by default: it is survival, not taste, and
-        // whoever wants to watch it die working has to turn it off by hand.
-        DEFAULTS.put("retreat_when_hurt", true);
-        // Bots go for their items automatically after dying. Without keepInventory
-        // dropped items last five minutes, and the brain does not wake up in time. true
-        // by default: it is not losing the gear, not taste. See ItemRecovery.
-        DEFAULTS.put("recover_on_death", true);
-        // After taming or breeding, one pass standing up its own pets that were left
-        // sitting. true by default: a sitting pet neither follows nor fights.
-        DEFAULTS.put("stand_when_done", true);
-        // While escorting, it answers EVERYTHING that hurts whoever it escorts, like a
-        // wolf, except PLAYERS, which go with this toggle: false by default, like
-        // hunt_players, and for the same reason (hitting a person is the owner's
-        // decision).
-        DEFAULTS.put("defend_from_players", false);
-    }
+    /**
+     * The keys that exist, with their default value. They come from {@link
+     * marionette.common.Settings}, shared with the server: the command that switches
+     * them has to offer the same list, and two copies drift.
+     */
+    private static final TreeMap<String, Boolean> DEFAULTS =
+            new TreeMap<>(marionette.common.Settings.defaults());
 
     private static TreeMap<String, Boolean> valueList;
 
@@ -128,7 +76,8 @@ final class Preferences {
         try {
             Files.createDirectories(file().getParent());
             List<String> lines = new ArrayList<>();
-            lines.add("# Behaviour preferences. Managed by the AI through the chat.");
+            lines.add("# Behaviour preferences. Switched with /marionette bot "
+                    + "<bot> pref <key> on|off, on the server.");
             for (var e : valueList.entrySet()) {
                 lines.add(e.getKey() + "=" + e.getValue());
             }

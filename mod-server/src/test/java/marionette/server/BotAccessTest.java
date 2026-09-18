@@ -173,4 +173,94 @@ class BotAccessTest {
         assertTrue(a.accessJson("Nobody").contains("\"ok\":false"));
         assertEquals(Map.of("Alice", "Owner"), a.owners());
     }
+
+    @Test
+    @DisplayName("a setting is stored, travels as an order and refuses a key that does not exist")
+    void settingsTravelAsOrders(@TempDir Path dir) {
+        BotAccess a = withAlice(dir);
+        assertNull(a.pref("alice", "BUNNY_HOP", true, "Owner", NOW));
+        assertEquals(Map.of("bunny_hop", true), a.prefs("Alice"));
+        String json = a.controlJson("Alice", NOW - 1, NOW);
+        assertTrue(json.contains("\"action\":\"pref\""), json);
+        assertTrue(json.contains("\"argument\":\"bunny_hop=true\""), json);
+        // A typo must not become a setting that reads as saved and governs nothing.
+        assertNotNull(a.pref("Alice", "buny_hop", true, "Owner", NOW));
+        assertEquals(1, a.prefs("Alice").size());
+        assertNotNull(a.pref("Nobody", "bunny_hop", true, "Owner", NOW));
+    }
+
+    @Test
+    @DisplayName("banning a food and allowing it back are two sides of one list")
+    void banningAndAllowingFood(@TempDir Path dir) {
+        BotAccess a = withAlice(dir);
+        assertNull(a.food("Alice", "Rotten_Flesh", true, "Owner", NOW));
+        assertEquals(List.of("rotten_flesh"), a.foodList("Alice", true));
+        // The same decision twice says so instead of piling up.
+        assertNotNull(a.food("Alice", "rotten_flesh", true, "Owner", NOW));
+        // The opposite decision REPLACES it: it cannot be banned and allowed at once.
+        assertNull(a.food("Alice", "rotten_flesh", false, "Owner", NOW));
+        assertEquals(List.of(), a.foodList("Alice", true));
+        assertEquals(List.of("rotten_flesh"), a.foodList("Alice", false));
+        // Player names are not item ids, and neither are namespaces.
+        assertNotNull(a.food("Alice", "minecraft:dirt", true, "Owner", NOW));
+        assertNotNull(a.food("Alice", "", true, "Owner", NOW));
+    }
+
+    @Test
+    @DisplayName("the break list works the same way, with its own verbs")
+    void breakListWorksTheSameWay(@TempDir Path dir) {
+        BotAccess a = withAlice(dir);
+        assertNull(a.breaking("Alice", "dirt", true, "Owner", NOW));
+        assertEquals(List.of("dirt"), a.breakList("Alice", true));
+        assertNull(a.breaking("Alice", "dirt", false, "Owner", NOW));
+        assertEquals(List.of("dirt"), a.breakList("Alice", false));
+        assertEquals(List.of(), a.breakList("Alice", true));
+        String json = a.controlJson("Alice", NOW - 1, NOW);
+        assertTrue(json.contains("\"argument\":\"forbid:dirt\""), json);
+    }
+
+    @Test
+    @DisplayName("settings survive a restart of the server and are re-sent to a fresh bridge")
+    void settingsSurviveAndAreResent(@TempDir Path dir) {
+        Path file = dir.resolve("bots.properties");
+        BotAccess a = new BotAccess(file);
+        a.report("Alice", "Owner", NOW);
+        a.pref("Alice", "bunny_hop", true, "Owner", NOW);
+        a.food("Alice", "salmon", true, "Owner", NOW);
+        a.breaking("Alice", "dirt", true, "Owner", NOW);
+
+        // Read back from the file by a brand new instance, as after a restart.
+        BotAccess back = new BotAccess(file);
+        assertEquals(Map.of("bunny_hop", true), back.prefs("Alice"));
+        assertEquals(List.of("salmon"), back.foodList("Alice", true));
+        assertEquals(List.of("dirt"), back.breakList("Alice", true));
+
+        // A bridge reporting after a silence is a NEW bridge: the body may have come
+        // back with its own files, so everything decided here is queued again.
+        long later = NOW + BotAccess.ALIVE_MS + 1;
+        back.report("Alice", "Owner", later);
+        String json = back.controlJson("Alice", later - 1, later);
+        assertTrue(json.contains("bunny_hop=true"), json);
+        assertTrue(json.contains("ban:salmon"), json);
+        assertTrue(json.contains("allow:dirt"), json);
+
+        // A bridge that keeps polling is not sent the same thing over and over.
+        long soon = later + 1000;
+        back.report("Alice", "Owner", soon);
+        assertFalse(back.controlJson("Alice", soon - 1, soon).contains("bunny_hop"),
+                "a live bridge must not be re-sent its settings");
+    }
+
+    @Test
+    @DisplayName("a setting whose key disappeared from the code is dropped on load")
+    void unknownSettingIsDroppedOnLoad(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("bots.properties");
+        java.nio.file.Files.write(file, List.of(
+                "alice.name=Alice",
+                "alice.owner=Owner",
+                "alice.pref.bunny_hop=true",
+                "alice.pref.fly_to_the_moon=true"));
+        BotAccess a = new BotAccess(file);
+        assertEquals(Map.of("bunny_hop", true), a.prefs("Alice"));
+    }
 }

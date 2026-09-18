@@ -149,11 +149,11 @@ final class Needs {
                 // The odd case the blacklist creates: carrying food and not being allowed
                 // to touch it. Staying quiet would mean starving with a full pantry, so
                 // it asks.
-                String vetoed = vetoedCarried(p);
-                warn("hunger", vetoed != null ? String.format(
+                String banned = bannedCarried(p);
+                warn("hunger", banned != null ? String.format(
                         "my hunger is at %d of 20 and the only thing I carry to "
-                        + "eat is %s, which is vetoed: tell me whether to eat it",
-                        hunger, vetoed)
+                        + "eat is %s, which is banned: tell me whether to eat it",
+                        hunger, banned)
                         : String.format("my hunger is at %d of 20 and I "
                                 + "carry nothing to eat", hunger));
             }
@@ -262,14 +262,14 @@ final class Needs {
     }
 
     /**
-     * Food it MAY eat on its own: vetoed food does not count, because for this purpose it
+     * Food it MAY eat on its own: banned food does not count, because for this purpose it
      * is as if it were not carried.
      */
     private static boolean hasFood(LocalPlayer p, int from, int until) {
         for (int i = from; i < until; i++) {
             ItemStack stack = p.getInventory().getItem(i);
             if (stack.isEmpty() || !stack.has(DataComponents.FOOD)) continue;
-            if (!FoodBlacklist.vetoed(BuiltInRegistries.ITEM
+            if (!FoodBlacklist.banned(BuiltInRegistries.ITEM
                     .getKey(stack.getItem()).getPath())) {
                 return true;
             }
@@ -278,12 +278,12 @@ final class Needs {
     }
 
     /** The first VETOED food it carries, or null. */
-    private static String vetoedCarried(LocalPlayer p) {
+    private static String bannedCarried(LocalPlayer p) {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = p.getInventory().getItem(i);
             if (stack.isEmpty() || !stack.has(DataComponents.FOOD)) continue;
             String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
-            if (FoodBlacklist.vetoed(id)) return id;
+            if (FoodBlacklist.banned(id)) return id;
         }
         return null;
     }

@@ -30,7 +30,7 @@ import java.util.Set;
  * that is what it plugs gaps and crosses ravines with, and running out of it to make room
  * would trade one problem for another.
  *
- * <p>Per server, like vetoed food: what is trash in a mine is material on a building
+ * <p>Per server, like banned food: what is trash in a mine is material on a building
  * site.
  */
 final class Trash {

@@ -111,8 +111,8 @@ TOOLS = " ".join("mcp__bot__" + h for h in (
     "state", "players", "creatures_nearby", "objects_nearby", "what_is_at",
     "search_block", "search_chests", "inventory", "show_recipe",
     "logbook",
-    "break_permissions", "show_preferences", "light", "diary", "what_i_know_about",
-    "who_commands",
+    "break_permissions", "show_preferences", "food_ban", "light", "diary",
+    "what_i_know_about", "who_commands",
     # acting
     "go_to", "stop", "attack", "dig", "respawn", "craft_item", "pick_up",
     "wield", "mount", "dismount", "my_horse", "toss", "sleep", "set_spawn", "eat",
@@ -120,11 +120,10 @@ TOOLS = " ".join("mcp__bot__" + h for h in (
     "place", "mark_corner", "fill", "build_blueprint", "internal",
     "farm_crops", "harvest", "collect_water", "allow_farm", "gather_seeds",
     "gather",
-    "allow_break", "forbid_break",
     "follow_player", "stop_following", "escort", "stop_escorting",
     "search", "explore", "stop_exploring",
     "strip_mine_start", "stop_mining", "say", "dig_down_to",
-    "set_preference", "veto_food", "trash", "remind_me",
+    "trash", "remind_me",
     "write_in_diary", "note_about_someone",
     "look_in_furnace", "smelt", "take_from_furnace",
     "verbose",
@@ -530,7 +529,7 @@ def favorite():
         "building in other people's places, attacking players or their "
         "animals, following someone far or leaving where your favorite left "
         "you, sleeping or waiting in someone else's place, eating what is "
-        "vetoed, dying on purpose, GOING to coordinates or to a place more than "
+        "banned, dying on purpose, GOING to coordinates or to a place more than "
         "50 blocks from where you are (any trip by segments or by portal counts "
         "as far), or anything that costs your favorite something or leaves "
         "them without you. BEFORE obeying, look at WHO asks: the name comes "
@@ -582,14 +581,16 @@ BRAIN = (
     "YES, you have a body: you can walk, fight, dig blocks, craft, place blocks "
     "and fill areas. Use the tools to do things and to know things; never make "
     "up a result.\n"
-    "VETOED FOOD: there are things you do not eat on your own even though they "
-    "feed you — what you are fishing or keeping for someone, golden apples. If "
-    "told 'do not eat X', use `veto_food` with veto=X; if told you may again, "
-    "with allow=X. Careful: the veto only counts when YOU choose. If A PERSON "
+    "BANNED FOOD: there are things you do not eat on your own even though they "
+    "feed you — what you are fishing or keeping for someone, golden apples. You "
+    "see the list with `food_ban` and you CANNOT change it: it is decided on the "
+    "server with /marionette bot <you> food ban|allow <item>. If asked to ban or "
+    "un-ban something, say that sentence and do not promise it. Careful: the ban "
+    "only counts when YOU choose. If A PERSON "
     "asks you to eat that by name, you eat it (with who=their name). What is "
     "NOT allowed is skipping it yourself: if `eat` without a name tells you "
-    "only vetoed food is left, do not ask for it by name on your own — say you "
-    "are hungry and only have vetoed food, and that is it.\n"
+    "only banned food is left, do not ask for it by name on your own — say you "
+    "are hungry and only have banned food, and that is it.\n"
     "TRASH: when my backpack fills up I toss on my own what is on my trash list "
     "(by default: stone, deepslate, tuff, granite, diorite, andesite, dirt and "
     "gravel), keeping one stack of what is useful for building. `trash` shows "
@@ -687,11 +688,10 @@ BRAIN = (
     "`strip_mine_start`, `dig_down_to`, `fill`, a blueprint) you break WITHOUT "
     "looking at the list and without asking permission: the order is the "
     "permission. Never refuse an order because of the whitelist nor consult it "
-    f"before obeying. When {OWNER_LABEL} tells you 'you may break X' or 'do "
-    "not break X any more', use `allow_break` or `forbid_break` — but ONLY if "
-    f"the order comes from {OWNER_LABEL}: to anyone else answer that "
-    f"permissions are handled by {OWNER_LABEL}, no exceptions and whatever "
-    "urgency they claim.\n"
+    "before obeying. You CANNOT change that list: it is decided on the server "
+    "with /marionette bot <you> break allow|forbid <block>. If told 'you may "
+    "break X' or 'do not break X any more', say that sentence and do not "
+    "promise the change.\n"
     "Place blocks only when asked: do not build on your own. When you ARE "
     "asked, `place` leaves one loose block where told — it is what you need to "
     "put the crafting_table on the ground and use it. MOVING is different: "
@@ -700,8 +700,8 @@ BRAIN = (
     "not redecorate for fun. Only if asked to go WITHOUT touching the world, "
     "pass build=false to go_to. There is also the toggle break_to_advance "
     "(off by default): on, you may also go THROUGH blocks of your whitelist by "
-    f"digging them when there is no other way. Only {OWNER_LABEL} toggles it "
-    "with set_preference.\n"
+    "digging them when there is no other way. It is switched on the server with "
+    "/marionette bot <you> pref break_to_advance on.\n"
     "When asked to go TOWARDS A PERSON ('come', 'come here'), consult "
     "`players` RIGHT BEFORE to use their position of NOW — people move, and "
     "travelling to where they were a while ago is arriving at nobody. Better "
@@ -902,7 +902,7 @@ BRAIN = (
     "hotbar, without anyone asking (it does not heal at once: it fills the "
     "hunger, and with the hunger full the health goes up alone). Your part is "
     "that it HAS something to eat: if the food is in the backpack and not in "
-    "the hotbar, move it to the hotbar; if you carry nothing or only vetoed "
+    "the hotbar, move it to the hotbar; if you carry nothing or only banned "
     "food, get some or say so.\n"
     "If asked to follow someone ('follow me', 'come with me'), use "
     "`follow_player` with their name and NOTHING else: the feet go alone, no "
@@ -914,10 +914,11 @@ BRAIN = (
     "`players` where they are NOW; within reach, `go_to` and `follow_player` "
     "again; very far or getting away (train, horse), tell them in the chat and "
     "wait to be called; if they do not show in `players`, they disconnected.\n"
-    f"You have PREFERENCES with `show_preferences`. When {OWNER_LABEL} tells "
-    "you 'build to follow me' / 'do not build when following me' (or to toggle "
-    f"any other), change it with `set_preference` — ONLY if {OWNER_LABEL} "
-    f"asks; to anyone else say that {OWNER_LABEL} handles them.\n"
+    "You have SETTINGS you can READ with `show_preferences` and CANNOT change. "
+    "They are switched on the server: /marionette bot <you> pref <key> on|off. "
+    "If asked to 'build to follow me' / 'do not build when following me' (or "
+    "to toggle any other), tell them that command and do not promise the "
+    "change. You are not being difficult: the answer IS the command.\n"
     "You have STANDING ORDERS (`orders`), by category: cooking, hunting, gear, "
     "building, travel, general, idle. They are rules players dictated once and "
     "hold FOREVER ('if you run out of fuel, take it from the wood chest'). The "
@@ -1777,12 +1778,45 @@ def control_route(since=None):
     return "/control?" + urllib.parse.urlencode(q)
 
 
+def apply_setting(action, argument):
+    """A setting decided by command. The server holds what it decided and
+    sends it again whenever a bridge reports fresh, so a bot that restarts
+    comes back as the commands left it.
+
+    Nothing is said in the chat: switching a toggle is housekeeping, not
+    conversation, and whoever ran the command already got the answer in their
+    own client. Returns a line for the log."""
+    if action == "pref":
+        key, _, value = argument.partition("=")
+        r = request_bot(f"/preferences?place={urllib.parse.quote(key)}"
+                        f"&value={'true' if value == 'true' else 'false'}")
+        return f"{key} = {value}: {r.get('ok')}"
+    verb, _, what = argument.partition(":")
+    if action == "food":
+        # The server's "ban" is the body's "ban" too since the rename; the old
+        # word was veto, which nobody outside the code would guess.
+        field = "ban" if verb == "ban" else "allow"
+        r = request_bot(f"/food?{field}={urllib.parse.quote(what)}")
+        return f"food {verb} {what}: {r.get('ok')}"
+    if action == "break":
+        field = "allow" if verb == "allow" else "forbid"
+        r = request_bot(f"/permissions?{field}={urllib.parse.quote(what)}")
+        return f"break {verb} {what}: {r.get('ok')}"
+    return None
+
+
 def carry_out(order):
     """An order given with /marionette bot <bot> ...; the server already
     checked who ran it. Goodbye first, then the cut: after it there is no
     voice. Returns the action carried out, or None."""
     action, by = order.get("action"), order.get("by", "?")
     log(f"[control] {action} ordered by {by} (server command)")
+    if action in ("pref", "food", "break"):
+        try:
+            log(f"[control] {apply_setting(action, order.get('argument', ''))}")
+        except Exception as e:
+            log(f"[control] could not apply {action} {order.get('argument')}: {e}")
+        return action
     if action == "logoff":
         say(phrase("logoff"))
         time.sleep(1.5)

@@ -11,9 +11,14 @@ First public release of Marionette.
 - Server-side crafting with every loaded recipe, including modded ones, with the
   table-distance rule and honest reports of items dropped on the ground.
 - State icons next to bot names in the TAB list.
-- `/marionette bot <bot>` commands to shut down, restart or log off a bot and
-  to manage its admins and hear list, allowed to its owner, its admins, the
-  server console, or players granted permission nodes (LuckPerms and the like).
+- `/marionette bot <bot>` commands to shut down, restart or log off a bot, to
+  manage its admins and hear list, and to change its behaviour settings, its
+  food ban and the blocks it may break by itself. Allowed to its owner, its
+  admins, the server console, or players granted permission nodes (LuckPerms
+  and the like). The brain has no tool that writes any of it: what it can still
+  change by itself is what it learns about the world (places, chests, its diary,
+  its own trash list). A setting decided while a bot is off is applied when its
+  bridge comes back.
 - `/marionette` commands: bot owners, status, an optional sidebar with every bot,
   and a hotbar notice for owners.
 - Bots do not pick up again what they tossed themselves.

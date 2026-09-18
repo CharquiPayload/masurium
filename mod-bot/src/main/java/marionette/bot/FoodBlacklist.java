@@ -15,13 +15,15 @@ import java.util.Set;
  * the errand: a fishing afternoon can end up eaten without the bot noticing it was
  * working.
  *
- * <p>The veto only covers what the bot does ON ITS OWN. Asking it directly still works
+ * <p>The ban only covers what the bot does ON ITS OWN. Asking it directly still works
  * ("eat a salmon" is an order, not an oversight), just as with rotten flesh: never on its
  * own, by hand yes.
  *
  * <p>It is born with the two golden apples inside, which is what nobody wants to see
- * disappear in a hunger dip. The rest is said in the chat and stored, like the break
- * permissions.
+ * disappear in a hunger dip. The rest is decided on the server, with
+ * {@code /marionette bot <bot> food ban|allow <item>}, and arrives as an order through the
+ * bridge: the brain has no tool that writes this list. Asking the bot to ban something
+ * used to be enough, and "only the owner may" was a sentence in its prompt.
  *
  * <p>Per server, like permissions and preferences: fish is an errand in one world and a
  * snack in another.
@@ -41,27 +43,27 @@ final class FoodBlacklist {
         return ServerIdentity.file("vetoed-food");
     }
 
-    private static Set<String> vetoedOnes;
+    private static Set<String> bannedOnes;
 
     private static synchronized Set<String> load() {
-        if (vetoedOnes != null) return vetoedOnes;
-        vetoedOnes = new LinkedHashSet<>();
+        if (bannedOnes != null) return bannedOnes;
+        bannedOnes = new LinkedHashSet<>();
         try {
             if (Files.exists(file())) {
                 for (String line : Files.readAllLines(file())) {
                     line = line.strip().toLowerCase();
                     if (!line.isEmpty() && !line.startsWith("#")) {
-                        vetoedOnes.add(line);
+                        bannedOnes.add(line);
                     }
                 }
-                return vetoedOnes;
+                return bannedOnes;
             }
         } catch (IOException ignored) {
             // Unreadable list: start with the factory one and rewrite it.
         }
-        vetoedOnes.addAll(FACTORY);
+        bannedOnes.addAll(FACTORY);
         save();
-        return vetoedOnes;
+        return bannedOnes;
     }
 
     private static void save() {
@@ -71,7 +73,7 @@ final class FoodBlacklist {
             List<String> lines = new ArrayList<>();
             lines.add("# Food I do NOT eat on my own. By hand yes, if asked "
                     + "for it by that name.");
-            lines.addAll(vetoedOnes);
+            lines.addAll(bannedOnes);
             Files.write(f, lines);
         } catch (IOException e) {
             marionette.common.Logbook.note("food",
@@ -81,12 +83,12 @@ final class FoodBlacklist {
     }
 
     /** Whether it must NOT eat this on its own. */
-    static synchronized boolean vetoed(String id) {
+    static synchronized boolean banned(String id) {
         return id != null && load().contains(id.strip().toLowerCase());
     }
 
     /** @return true if it was not already there */
-    static synchronized boolean veto(String id) {
+    static synchronized boolean ban(String id) {
         boolean fresh = load().add(id.strip().toLowerCase());
         if (fresh) save();
         return fresh;

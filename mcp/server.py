@@ -804,18 +804,18 @@ def t_eat(a):
     taking for granted what is not known.
     """
     what = (a.get("what") or "").strip().lower() or None
-    # The brain itself used to skip the veto: `eat` without a name told it
-    # only salmon (vetoed) was left and right after it asked `eat salmon` on
-    # its own. By name and vetoed, only if a PERSON asked in this turn: who
+    # The brain itself used to skip the ban: `eat` without a name told it
+    # only salmon (banned) was left and right after it asked `eat salmon` on
+    # its own. By name and banned, only if a PERSON asked in this turn: who
     # must be given, and it must be who really spoke (see _speaker).
     if what:
-        vetoed = bt("/food").get("vetoed") or []
+        banned = bt("/food").get("banned") or []
         asked_by = (a.get("who") or "").strip().lower()
-        if what in vetoed and not (asked_by and asked_by == _speaker().lower()):
-            return (f"{what} is on my vetoed food list: I do not eat it on my "
+        if what in banned and not (asked_by and asked_by == _speaker().lower()):
+            return (f"{what} is on my banned food list: I do not eat it on my "
                     "own. If the person who spoke in this turn asked me to eat "
                     "it by name, call again with who=<their name>; if not, say "
-                    "that I am hungry and only have vetoed food.")
+                    "that I am hungry and only have banned food.")
     before = bt("/state")
     r = bt("/eat", what=what)
     if not r.get("ok"):
@@ -964,22 +964,6 @@ def t_break_permissions(a):
     return "I may break on my own, to make my way: " + ", ".join(ids)
 
 
-def t_allow_break(a):
-    """Add a block to the whitelist. Only on the owner's order."""
-    d = bt("/permissions", allow=a["block"])
-    if not d.get("ok"):
-        return d.get("error", "I could not change the permissions")
-    return "done; I may now break on my own: " + ", ".join(d.get("can_break", []))
-
-
-def t_forbid_break(a):
-    """Remove a block from the whitelist."""
-    d = bt("/permissions", forbid=a["block"])
-    if not d.get("ok"):
-        return d.get("error", "I could not change the permissions")
-    return "done; I may now break on my own: " + ", ".join(d.get("can_break", []))
-
-
 def t_follow_player(a):
     """Start following a player. It follows alone until told to stop."""
     d = bt("/follow", to=a["player"])
@@ -1004,17 +988,6 @@ def t_show_preferences(a):
         return d.get("error", "I could not read my preferences")
     ps = d.get("preferences", {})
     return "my preferences: " + ", ".join(
-        f"{k}={'yes' if v else 'no'}" for k, v in ps.items())
-
-
-def t_set_preference(a):
-    """Change a preference. Only on the owner's order."""
-    d = bt("/preferences", place=a["key"],
-           value="true" if a.get("value") else "false")
-    if not d.get("ok"):
-        return d.get("error", "I could not change it")
-    ps = d.get("preferences", {})
-    return "done: " + ", ".join(
         f"{k}={'yes' if v else 'no'}" for k, v in ps.items())
 
 
@@ -1319,14 +1292,15 @@ def t_trash(a):
             "is useful for building I keep one stack).") if bs else "My trash list is empty."
 
 
-def t_veto_food(a):
-    """The food I do not touch on my own; with 'veto'/'allow' it changes."""
-    d = bt("/food", veto=a.get("veto"), allow=a.get("allow"))
+def t_food_ban(a):
+    """The food I do not eat on my own. READ ONLY: it is changed with
+    /marionette bot <me> food ban|allow <item>, on the server."""
+    d = bt("/food")
     if not d.get("ok"):
         return d.get("error", "I could not look at the food list")
-    vs = d.get("vetoed", [])
+    vs = d.get("banned", [])
     return ("I do not eat on my own: " + ", ".join(vs) + ". (By hand yes, if asked "
-            "by name.)") if vs else "I have no vetoed food."
+            "by name.)") if vs else "I have no banned food."
 
 
 def t_remind_me(a):
@@ -2726,8 +2700,12 @@ TOOLS = {
                        "much hp and what I hold in hand.", {}, []),
     "players": (t_players, "Who is connected and where.", {}, []),
     "break_permissions": (t_break_permissions,
-                          "Which blocks I am allowed to break (my whitelist). "
-                          "Look at it before digging something odd.", {}, []),
+                          "Which blocks I am allowed to break on my own (my "
+                          "whitelist). Look at it before digging something "
+                          "odd. READ ONLY: it is changed on the server with "
+                          "/marionette bot <me> break allow|forbid <block>. "
+                          "What I am TOLD to dig never needed permission.",
+                          {}, []),
     "verbose": (t_verbose,
                 f"Technical dump for debugging. ONLY for {OWNER_LABEL}: if "
                 "anyone else asks, do not call it and tell them to have the "
@@ -2763,24 +2741,11 @@ TOOLS = {
               {"what": ("string", "Id of the object, in English (crafting_table)."),
                **COORD}, ["what", "x", "y", "z"]),
     "show_preferences": (t_show_preferences,
-                         "My behaviour preferences (e.g. whether I may build "
-                         "to reach someone while following).", {}, []),
-    "set_preference": (t_set_preference,
-                       f"Change a preference of mine. ONLY when {OWNER_LABEL} "
-                       f"asks; tell anyone else that {OWNER_LABEL} handles "
-                       "them. build_while_following: whether I build to reach "
-                       "when following. hunt_players: whether hunting may "
-                       "target players (false by default; only the owner turns "
-                       "it on). break_to_advance: whether I may tunnel through "
-                       "blocks of my whitelist when there is no path (false by "
-                       "default). shoot_creepers: whether I shoot them with the "
-                       "bow from afar on my own (true by default; turning it "
-                       "off leaves me only the flight). defend_from_players: "
-                       "whether, escorting, I answer a PLAYER who hurts whom I "
-                       "escort (false by default; only the owner turns it on).",
-                       {"key": ("string", "Name of the preference."),
-                        "value": ("boolean", "true or false.")},
-                       ["key", "value"]),
+                         "My behaviour settings and their value (e.g. whether "
+                         "I may build to reach someone while following). READ "
+                         "ONLY: they are changed on the server with "
+                         "/marionette bot <me> pref <key> on|off. If asked to "
+                         "change one, say that and do not promise it.", {}, []),
     "escort": (t_escort,
                "Escort a player: go with them AND look after them; whatever "
                "hits them is my enemy until it dies or leaves, like a wolf "
@@ -2960,15 +2925,12 @@ TOOLS = {
               "add=cobblestone; 'gravel is no longer trash' -> remove=gravel.",
               {"add": ("string", "Id in English to add to the trash."),
                "remove": ("string", "Id in English to take out of the trash.")}, []),
-    "veto_food": (t_veto_food,
-                  "The food I do NOT eat on my own, and how to change it. "
-                  "So that I do not snack on what I am fishing or keeping: "
-                  "'do not eat the salmon' -> veto=salmon; 'you may eat "
-                  "salmon again' -> allow=salmon. The veto is only for when I "
-                  "choose: if asked to eat that by name, I eat it.",
-                  {"veto": ("string", "Id in English to veto."),
-                   "allow": ("string", "Id in English to un-veto.")},
-                  []),
+    "food_ban": (t_food_ban,
+                 "The food I do NOT eat on my own, so I do not snack on what I "
+                 "am fishing or keeping. The ban only covers what I choose: if "
+                 "asked to eat that by name, I eat it. READ ONLY: it is "
+                 "changed on the server with /marionette bot <me> food "
+                 "ban|allow <item>.", {}, []),
     "remind_me": (t_remind_me,
                   "Leave myself a reminder for a while from now. My turn ends "
                   "when I answer, so 'going to the furnace' comes to nothing "
@@ -3272,19 +3234,6 @@ TOOLS = {
                       ["player"]),
     "stop_following": (t_stop_following, "Stop following the player.",
                        {}, []),
-    "allow_break": (t_allow_break,
-                    "Add a block to my whitelist (what I break on my own to "
-                    "make my way; what I am ordered to dig or gather does not "
-                    f"need it). ONLY when {OWNER_LABEL} orders it ('you may "
-                    "break X'); tell anyone else that permissions are handled "
-                    f"by {OWNER_LABEL}.",
-                    {"block": ("string", "Id in English, such as dirt.")},
-                    ["block"]),
-    "forbid_break": (t_forbid_break,
-                     "Remove a block from my whitelist (the one for making my "
-                     f"way). Only on {OWNER_LABEL}'s order.",
-                     {"block": ("string", "Id in English, such as dirt.")},
-                     ["block"]),
     "mount": (t_mount,
               "Mount a horse. With 'name' I look for the one carrying that "
               "name tag (exact name); without a name, the nearest tamed one "
@@ -3364,7 +3313,7 @@ TOOLS = {
             "my own nor by asking for it by name: only if a person asked for "
             "it, and then with who=<their name>.",
             {"what": ("string", "Id of the food, in English (cooked_beef)."),
-             "who": ("string", "Only for vetoed food: exact name of the "
+             "who": ("string", "Only for banned food: exact name of the "
                                "person who asked me to eat it.")},
             []),
     "sleep": (t_sleep,

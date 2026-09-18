@@ -72,7 +72,7 @@ def tests_speaker():
     def record(route, **kw):
         seen.append((route, kw))
         if route == "/food":
-            return {"ok": True, "vetoed": ["salmon"]}
+            return {"ok": True, "banned": ["salmon"]}
         if route == "/eat":
             return {"ok": False, "error": "not in a test"}   # no 3 s wait
         if route == "/access":
@@ -83,22 +83,63 @@ def tests_speaker():
     os.environ["MARIONETTE_SPEAKER"] = "Stranger"
     try:
         out = server.t_eat({"what": "salmon", "who": "Owner"})
-        check("eat: vetoed food refused when the brain names someone who did not speak",
-              "vetoed food list" in out, out)
+        check("eat: banned food refused when the brain names someone who did not speak",
+              "banned food list" in out, out)
         before = len(seen)
         server.t_eat({"what": "salmon", "who": "stranger"})
-        check("eat: vetoed food allowed when the one who spoke asked for it",
+        check("eat: banned food allowed when the one who spoke asked for it",
               ("/eat", {"what": "salmon"}) in seen[before:], seen[before:])
     finally:
         os.environ.pop("MARIONETTE_SPEAKER", None)
 
-    # Taking the bot out of the game is a server command, not a tool: a brain
-    # that has no such tool cannot be talked into using it.
-    for name in ("add_admin", "remove_admin", "log_off", "restart_me"):
+    # Taking the bot out of the game, and changing its own rules, are server
+    # commands and not tools: a brain with no such tool cannot be talked into
+    # using it. The ones that only READ stay, so it still knows its own rules.
+    for name in ("add_admin", "remove_admin", "log_off", "restart_me",
+                 "set_preference", "allow_break", "forbid_break", "veto_food"):
         check(f"{name}: is not a tool any more (it is /marionette bot)",
               name not in server.TOOLS)
         check(f"{name}: the bridge does not allow it either",
               f"mcp__bot__{name}" not in bridge.TOOLS.split())
+    for name in ("show_preferences", "break_permissions", "food_ban", "trash"):
+        check(f"{name}: it can still LOOK at its own rules", name in server.TOOLS)
+    check("the settings tools take no arguments: nothing to write",
+          all(not server.TOOLS[n][3]
+              for n in ("show_preferences", "break_permissions", "food_ban")))
+    # The trash list is the exception the owner asked for: it governs only its own
+    # backpack, so the bot keeps it.
+    check("trash: the bot still decides its own trash", bool(server.TOOLS["trash"][2]))
+
+    # A settings order arrives with an argument and is applied to the body. The
+    # bridge talks to the bot with its own request_bot, so that is what is
+    # replaced here.
+    asked = []
+    real_request_bot = bridge.request_bot
+    bridge.request_bot = lambda route: (asked.append(route), {"ok": True})[1]
+    try:
+        bridge.apply_setting("pref", "bunny_hop=true")
+        check("pref order: it reaches /preferences with the key and the value",
+              asked and asked[-1].startswith("/preferences?place=bunny_hop")
+              and "value=true" in asked[-1], asked)
+        bridge.apply_setting("pref", "bunny_hop=false")
+        check("pref order: anything that is not true is false, never a third thing",
+              "value=false" in asked[-1], asked[-1])
+        bridge.apply_setting("food", "ban:rotten_flesh")
+        check("food order: it reaches /food with ban=",
+              "ban=rotten_flesh" in asked[-1], asked[-1])
+        bridge.apply_setting("food", "allow:rotten_flesh")
+        check("food order: allowing goes with allow=",
+              "allow=rotten_flesh" in asked[-1], asked[-1])
+        bridge.apply_setting("break", "forbid:dirt")
+        check("break order: it reaches /permissions with forbid=",
+              "forbid=dirt" in asked[-1], asked[-1])
+        bridge.apply_setting("break", "allow:dirt")
+        check("break order: allowing goes with allow=",
+              "allow=dirt" in asked[-1], asked[-1])
+        check("a settings order says nothing in the chat: it is housekeeping",
+              all("/say" not in r for r in asked), asked)
+    finally:
+        bridge.request_bot = real_request_bot
     out = server.t_who_commands({})
     check("who_commands: owner, admins and hearing come from the server",
           "Owner: Owner" in out and "Helper" in out and "Friend" in out, out)
@@ -716,7 +757,7 @@ def tests_protocol():
     names = {t["name"] for t in by_id[2]["tools"]}
     questions = {"state", "players", "creatures_nearby", "objects_nearby",
                  "what_is_at", "search_block", "inventory", "show_recipe",
-                 "logbook", "break_permissions", "show_preferences",
+                 "logbook", "break_permissions", "show_preferences", "food_ban",
                  "look_in_furnace", "places", "look_in_chest", "search_chests",
                  "orders", "light",
                  "diary", "what_i_know_about", "who_commands"}
@@ -726,12 +767,11 @@ def tests_protocol():
                "tie_animal", "lead_animals", "tether_to_post", "release_animals",
                "set_spawn",
                "eat",
-               "allow_break", "forbid_break",
-               "follow_player", "stop_following", "set_preference",
+               "follow_player", "stop_following",
                "escort", "stop_escorting", "trash",
                "explore", "stop_exploring",
                "write_in_diary", "note_about_someone",
-               "veto_food", "remind_me",
+               "remind_me",
                "smelt", "take_from_furnace",
                "verbose",
                "remember_place", "forget_place",

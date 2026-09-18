@@ -230,6 +230,13 @@ server in the client's `config/` folder.
 | `/marionette bot <bot> hear add\|remove <player>` | owner, admins | edit the hear list |
 | `/marionette bot <bot> hear list` | anyone | the hear list and whether it is on |
 | `/marionette bot <bot> admins add\|remove <player>` | owner | edit the admins |
+| `/marionette bot <bot> pref` | anyone | every behaviour setting with its value |
+| `/marionette bot <bot> pref <key>` | anyone | what one setting does, and how it stands |
+| `/marionette bot <bot> pref <key> on\|off` | owner, admins | switch a setting |
+| `/marionette bot <bot> food` | anyone | what it will not eat on its own |
+| `/marionette bot <bot> food ban\|allow <item>` | owner, admins | edit the food ban |
+| `/marionette bot <bot> break` | anyone | what it may break by itself to make its way |
+| `/marionette bot <bot> break allow\|forbid <block>` | owner, admins | edit that whitelist |
 | `/marionette owners` | anyone | every bot with its owner |
 | `/marionette status` | anyone | what each bot is doing, with health and position |
 | `/marionette hud on\|off` | players | your bots' state icons above your hotbar |
@@ -245,6 +252,19 @@ a bot in the chat gets you the command, not the action, even from its owner:
 the server knows for sure who runs a command, while a name in the chat reaches
 the brain through words a player can fake.
 
+**Settings, food and breaking, too.** The same holds for the behaviour
+settings, the food ban and the break whitelist. They used to be changed by
+asking the bot, and the brain's tools for it said "only on the owner's order" —
+which was a sentence in a prompt with nothing enforcing it. The brain now has
+tools that only *read* them, so it still knows its own rules and can tell you
+what they are; changing them is `pref`, `food` and `break` above. A setting
+decided while the bot is off is kept and applied when it comes back.
+
+What the bot writes about the **world** stays its own: the places it
+remembers, the chests it annotates, its diary, what it learns about people, and
+its trash list, which only governs what it drops from its own backpack. It may
+write down what it discovers; it may not change what it is allowed to do.
+
 **Hear list.** It works like the vanilla `/whitelist`. By default it is off
 and a bot hears everyone who names it. With `hear on` it only hears its owner,
 its admins, other bots and the players on its list. Anyone else is ignored before the brain, so they cost no tokens and
@@ -252,7 +272,8 @@ cannot inject anything.
 
 **Permission nodes.** Every action has a node for permission mods such as
 LuckPerms: `marionette.bot.shutdown`, `marionette.bot.restart`,
-`marionette.bot.logoff`, `marionette.bot.hear` and `marionette.bot.admins`.
+`marionette.bot.logoff`, `marionette.bot.hear`, `marionette.bot.admins`,
+`marionette.bot.pref`, `marionette.bot.food` and `marionette.bot.break`.
 Nobody has them by default. Granting one lets that player use it on every bot.
 
 ## Tests

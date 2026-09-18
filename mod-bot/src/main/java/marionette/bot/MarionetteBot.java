@@ -966,11 +966,11 @@ public class MarionetteBot {
 
     /** The food it does not touch on its own: view it, veto or unveto. */
     private String food(Map<String, String> q) throws Exception {
-        String veto = q.getOrDefault("veto", "").trim().toLowerCase();
+        String ban = q.getOrDefault("ban", "").trim().toLowerCase();
         String allow = q.getOrDefault("allow", "").trim().toLowerCase();
-        if (!veto.isEmpty()) {
-            if (FoodBlacklist.veto(veto)) {
-                Logbook.note("food", "I no longer eat " + veto + " on my "
+        if (!ban.isEmpty()) {
+            if (FoodBlacklist.ban(ban)) {
+                Logbook.note("food", "I no longer eat " + ban + " on my "
                         + "own");
             }
         } else if (!allow.isEmpty()) {
@@ -979,7 +979,7 @@ public class MarionetteBot {
                         + " on my own");
             }
         }
-        StringBuilder sb = new StringBuilder("{\"ok\":true,\"vetoed\":[");
+        StringBuilder sb = new StringBuilder("{\"ok\":true,\"banned\":[");
         boolean firstItem = true;
         for (String id : FoodBlacklist.list()) {
             if (!firstItem) sb.append(',');
@@ -2195,7 +2195,7 @@ public class MarionetteBot {
             // The blacklist only weighs when IT chooses. Asking for it by name is an
             // order, not an oversight, just as with rotten flesh (the bot was caught
             // snacking on what it was fishing).
-            if (FoodBlacklist.vetoed(id)) continue;
+            if (FoodBlacklist.banned(id)) continue;
             if (poisons(id)) {
                 if (poisonous < 0) poisonous = i;
             } else if (fine < 0) {
@@ -2207,7 +2207,7 @@ public class MarionetteBot {
     }
 
     /**
-     * The first wholesome food (neither vetoed nor poisonous) in the backpack, brought up
+     * The first wholesome food (neither banned nor poisonous) in the backpack, brought up
      * to the hotbar. -1 if there is none.
      */
     private static int moveFoodFromBackpack(LocalPlayer p) {
@@ -2216,7 +2216,7 @@ public class MarionetteBot {
             var stack = inv.getItem(i);
             if (stack.isEmpty() || !stack.has(DataComponents.FOOD)) continue;
             String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
-            if (FoodBlacklist.vetoed(id) || poisons(id)) continue;
+            if (FoodBlacklist.banned(id) || poisons(id)) continue;
             int r = takeFromBackpack(p, id);
             if (r >= 0) {
                 Logbook.note("eat", "I brought up " + id + " from the backpack to eat");

@@ -46,6 +46,16 @@ import java.util.regex.Pattern;
  * what anyone else says never reaches the brain, so it spends no tokens and injects
  * nothing.
  *
+ * <p><b>Settings.</b> The behaviour toggles, the food ban and the break whitelist were
+ * changed by asking the bot, and the tools that did it said "only on the owner's order" —
+ * a sentence in a prompt, not a rule. Nothing enforced it. Now they are commands too, and
+ * the brain has no tool that writes them; the change travels as an order in the same poll
+ * that already carries shutdown. Only what a command decided is stored here: anything
+ * untouched keeps the body's own default, so the two never hold rival copies of the same
+ * value. What the bot writes about the WORLD — places, chests, its diary, what it learned
+ * about people, and the trash list, which only governs its own backpack — stays its own.
+ * It may write down what it finds; it may not change its own rules.
+ *
  * <p>Written from the server thread (commands) and read from the HTTP one (the bridge's
  * poll), so everything is synchronized on this instance.
  */
@@ -53,7 +63,7 @@ final class BotAccess {
 
     /** What a command may do to a bot. Each one has its own permission node. */
     enum Action {
-        SHUTDOWN, RESTART, LOGOFF, HEAR, ADMINS;
+        SHUTDOWN, RESTART, LOGOFF, HEAR, ADMINS, PREF, FOOD, BREAK;
 
         /** The name used in commands, in the bridge's orders and in permission nodes. */
         String id() {
@@ -63,6 +73,11 @@ final class BotAccess {
 
     /** Valid Minecraft names. What is not one is refused before touching any list. */
     private static final Pattern NAME = Pattern.compile("[A-Za-z0-9_]{1,16}");
+    /**
+     * Valid item and block ids. Bare, without a namespace: that is what the body's
+     * endpoints expect, and they are the ones that resolve it against the registry.
+     */
+    private static final Pattern ID = Pattern.compile("[a-z0-9_]{1,64}");
     /** An order not picked up in this time is dropped: its bridge was gone. */
     static final long ORDER_TTL_MS = 60_000;
     /** A bridge that has not polled for this long is taken as not running. */
@@ -77,12 +92,30 @@ final class BotAccess {
         /** When its bridge last polled. Not saved: after a restart nobody has. */
         long lastPoll;
 
+        /**
+         * The settings decided here, and ONLY those. What was never touched by a command
+         * is not stored: the body keeps its own defaults for it, so this file never has
+         * to know them and they cannot drift apart.
+         */
+        final TreeMap<String, Boolean> prefs = new TreeMap<>();
+        /** Food banned and food explicitly allowed, on top of the body's factory list. */
+        final Set<String> foodBan = new TreeSet<>();
+        final Set<String> foodAllow = new TreeSet<>();
+        /** Blocks it may break on its own, and ones taken off the body's seed list. */
+        final Set<String> breakAllow = new TreeSet<>();
+        final Set<String> breakForbid = new TreeSet<>();
+
         Bot(String name) {
             this.name = name;
         }
     }
 
-    record Order(long id, String bot, String action, String by, long at) {}
+    /**
+     * An order for a bridge. {@code argument} carries what the action needs and is empty
+     * for the ones that need nothing: {@code pref} takes {@code key=true}, {@code food}
+     * takes {@code ban:rotten_flesh} and {@code break} takes {@code allow:dirt}.
+     */
+    record Order(long id, String bot, String action, String argument, String by, long at) {}
 
     private final Path file;
     /** Lowercase name -> bot. */
@@ -180,12 +213,29 @@ final class BotAccess {
             throw new IllegalArgumentException("the owner is not a valid name");
         }
         Bot b = bots.computeIfAbsent(bot.toLowerCase(), k -> new Bot(bot));
+        // A bridge that was not alive a moment ago is a NEW bridge: the body may have
+        // restarted and come back with its own files, which know nothing of what was
+        // decided here. Everything this server has set is queued again so the bot ends
+        // up as the commands left it, without anyone having to remember to redo them.
+        boolean freshBridge = b.lastPoll == 0 || now - b.lastPoll > ALIVE_MS;
         b.lastPoll = now;
         if (!b.owner.equals(who) || !b.name.equals(bot)) {
             b.owner = who;
             b.name = bot;
             save();
         }
+        if (freshBridge) resend(b, now);
+    }
+
+    /** Queues every setting this server holds for that bot, as orders. */
+    private void resend(Bot b, long now) {
+        b.prefs.forEach((k, v) -> queue(b.name, Action.PREF, k + "=" + v, "server", now));
+        b.foodBan.forEach(id -> queue(b.name, Action.FOOD, "ban:" + id, "server", now));
+        b.foodAllow.forEach(id -> queue(b.name, Action.FOOD, "allow:" + id, "server", now));
+        b.breakAllow.forEach(
+                id -> queue(b.name, Action.BREAK, "allow:" + id, "server", now));
+        b.breakForbid.forEach(
+                id -> queue(b.name, Action.BREAK, "forbid:" + id, "server", now));
     }
 
     /**
@@ -198,8 +248,11 @@ final class BotAccess {
         if (since != null) {
             for (Order o : orders) {
                 if (o.id() > since && o.bot().equalsIgnoreCase(bot)) {
-                    rows.add(String.format("{\"id\":%d,\"action\":\"%s\",\"by\":\"%s\"}",
-                            o.id(), o.action(), Request.escape(o.by())));
+                    rows.add(String.format(
+                            "{\"id\":%d,\"action\":\"%s\",\"argument\":\"%s\","
+                            + "\"by\":\"%s\"}",
+                            o.id(), o.action(), Request.escape(o.argument()),
+                            Request.escape(o.by())));
                 }
             }
         }
@@ -304,15 +357,107 @@ final class BotAccess {
         return null;
     }
 
+    // --------------------------------------------------------------- settings
+
+    /**
+     * Switches a behaviour toggle. The key is checked against {@link
+     * marionette.common.Settings}, shared with the body, so a typo is refused here
+     * instead of travelling to a bot that will silently ignore it.
+     *
+     * @return null if it was set, or why not
+     */
+    synchronized String pref(String bot, String key, boolean value, String by, long now) {
+        Bot b = find(bot);
+        if (b == null) return "unknown bot";
+        String k = key == null ? "" : key.strip().toLowerCase();
+        if (!marionette.common.Settings.known(k)) {
+            return "there is no setting '" + k + "'";
+        }
+        b.prefs.put(k, value);
+        save();
+        queue(b.name, Action.PREF, k + "=" + value, by, now);
+        return null;
+    }
+
+    /** What this server has set for that bot, without the untouched ones. */
+    synchronized Map<String, Boolean> prefs(String bot) {
+        Bot b = find(bot);
+        return b == null ? Map.of() : new TreeMap<>(b.prefs);
+    }
+
+    /**
+     * Bans a food, or allows it again. Banned means it does not eat it ON ITS OWN;
+     * handed to it by name it still eats, which is what the ban is for.
+     *
+     * @return null if it changed, or why not
+     */
+    synchronized String food(String bot, String id, boolean ban, String by, long now) {
+        return listChange(bot, id, ban, by, now, Action.FOOD,
+                b -> b.foodBan, b -> b.foodAllow);
+    }
+
+    /** What it may break on its own, and what was taken off its seed list. */
+    synchronized String breaking(String bot, String id, boolean allow, String by,
+                                 long now) {
+        return listChange(bot, id, allow, by, now, Action.BREAK,
+                b -> b.breakAllow, b -> b.breakForbid);
+    }
+
+    /**
+     * The two sides of one list. An id lives in one set or the other, never in both: the
+     * second decision replaces the first instead of piling on top of it.
+     */
+    private String listChange(String bot, String id, boolean first, String by, long now,
+                              Action action,
+                              java.util.function.Function<Bot, Set<String>> yes,
+                              java.util.function.Function<Bot, Set<String>> no) {
+        Bot b = find(bot);
+        if (b == null) return "unknown bot";
+        String what = id == null ? "" : id.strip().toLowerCase();
+        if (!ID.matcher(what).matches()) {
+            return "'" + what + "' is not an id; they go in English and without a "
+                    + "namespace, like rotten_flesh or dirt";
+        }
+        Set<String> into = first ? yes.apply(b) : no.apply(b);
+        Set<String> outOf = first ? no.apply(b) : yes.apply(b);
+        outOf.remove(what);
+        if (!into.add(what)) {
+            return "'" + what + "' was already like that";
+        }
+        save();
+        String verb = action == Action.FOOD ? (first ? "ban" : "allow")
+                                            : (first ? "allow" : "forbid");
+        queue(b.name, action, verb + ":" + what, by, now);
+        return null;
+    }
+
+    /** Food this server banned, and food it allowed back. */
+    synchronized List<String> foodList(String bot, boolean banned) {
+        Bot b = find(bot);
+        if (b == null) return List.of();
+        return new ArrayList<>(banned ? b.foodBan : b.foodAllow);
+    }
+
+    /** Blocks this server allowed breaking, and ones it forbade. */
+    synchronized List<String> breakList(String bot, boolean allowed) {
+        Bot b = find(bot);
+        if (b == null) return List.of();
+        return new ArrayList<>(allowed ? b.breakAllow : b.breakForbid);
+    }
+
     // ---------------------------------------------------------------- orders
 
     /** Queues an order for the bot's bridge. @return its id */
     synchronized long order(String bot, Action action, String by, long now) {
         prune(now);
+        return queue(display(bot), action, "", by, now);
+    }
+
+    private long queue(String bot, Action action, String argument, String by, long now) {
         // Ids from the clock, so they keep growing across server restarts: a bridge that
         // outlived one does not skip the first orders after it.
         lastOrder = Math.max(lastOrder + 1, now);
-        orders.add(new Order(lastOrder, display(bot), action.id(), by, now));
+        orders.add(new Order(lastOrder, bot, action.id(), argument, by, now));
         return lastOrder;
     }
 
@@ -347,6 +492,23 @@ final class BotAccess {
             names(p.getProperty(k + ".admins", ""), b.admins);
             b.onlyList = "list".equalsIgnoreCase(p.getProperty(k + ".hear.mode", "").strip());
             names(p.getProperty(k + ".hear.players", ""), b.hear);
+            ids(p.getProperty(k + ".food.ban", ""), b.foodBan);
+            ids(p.getProperty(k + ".food.allow", ""), b.foodAllow);
+            ids(p.getProperty(k + ".break.allow", ""), b.breakAllow);
+            ids(p.getProperty(k + ".break.forbid", ""), b.breakForbid);
+            // Settings are one property each, so the file stays readable and a hand
+            // edit of one cannot take the others with it.
+            String prefix = k + ".pref.";
+            for (String row : p.stringPropertyNames()) {
+                if (!row.startsWith(prefix)) continue;
+                String setting = row.substring(prefix.length());
+                // A setting that no longer exists in the code is dropped on load: it
+                // would be a ghost that reads as saved and governs nothing.
+                if (marionette.common.Settings.known(setting)) {
+                    b.prefs.put(setting,
+                            Boolean.parseBoolean(p.getProperty(row, "").strip()));
+                }
+            }
             bots.put(name.toLowerCase(), b);
         }
     }
@@ -355,6 +517,13 @@ final class BotAccess {
         for (String n : list.split(",")) {
             n = n.strip();
             if (validName(n)) into.add(n);
+        }
+    }
+
+    private static void ids(String list, Set<String> into) {
+        for (String n : list.split(",")) {
+            n = n.strip().toLowerCase();
+            if (ID.matcher(n).matches()) into.add(n);
         }
     }
 
@@ -367,6 +536,11 @@ final class BotAccess {
             p.setProperty(k + ".admins", String.join(",", b.admins));
             p.setProperty(k + ".hear.mode", b.onlyList ? "list" : "everyone");
             p.setProperty(k + ".hear.players", String.join(",", b.hear));
+            p.setProperty(k + ".food.ban", String.join(",", b.foodBan));
+            p.setProperty(k + ".food.allow", String.join(",", b.foodAllow));
+            p.setProperty(k + ".break.allow", String.join(",", b.breakAllow));
+            p.setProperty(k + ".break.forbid", String.join(",", b.breakForbid));
+            b.prefs.forEach((key, v) -> p.setProperty(k + ".pref." + key, String.valueOf(v)));
         }
         try (var out = Files.newOutputStream(file)) {
             p.store(out, "Marionette: who owns, administers and is heard by each bot. "
