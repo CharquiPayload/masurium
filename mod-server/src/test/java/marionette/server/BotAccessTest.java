@@ -26,7 +26,7 @@ class BotAccessTest {
 
     private static BotAccess withAlice(Path dir) {
         BotAccess a = new BotAccess(dir.resolve("bots.properties"));
-        a.report("Alice", "Owner", NOW);
+        a.report("Alice", "Owner", "1.0.0", NOW);
         return a;
     }
 
@@ -59,7 +59,7 @@ class BotAccessTest {
     @DisplayName("a bot without an owner is commanded by nobody through the lists")
     void botWithoutOwnerIsCommandedByNobody(@TempDir Path dir) {
         BotAccess a = new BotAccess(dir.resolve("bots.properties"));
-        a.report("Alice", "", NOW);
+        a.report("Alice", "", "1.0.0", NOW);
         // An empty owner must not match an empty or missing player name.
         assertFalse(a.may("Alice", "", Action.SHUTDOWN));
         assertFalse(a.may("Alice", " ", Action.SHUTDOWN));
@@ -70,7 +70,7 @@ class BotAccessTest {
     void ownerComesFromTheReport(@TempDir Path dir) {
         BotAccess a = withAlice(dir);
         assertEquals("Owner", a.owner("ALICE"));
-        a.report("Alice", "Other", NOW + 1);
+        a.report("Alice", "Other", "1.0.0", NOW + 1);
         assertEquals("Other", a.owner("alice"));
         assertFalse(a.may("Alice", "Owner", Action.SHUTDOWN));
     }
@@ -82,8 +82,8 @@ class BotAccessTest {
         assertNotNull(a.addAdmin("Alice", "bad name"));
         assertNotNull(a.addHear("Alice", "x\",\"admins\":[\"y"));
         assertNotNull(a.addHear("Alice", "waytoolongplayername_17"));
-        assertThrows(IllegalArgumentException.class, () -> a.report("A b", "Owner", NOW));
-        assertThrows(IllegalArgumentException.class, () -> a.report("Alice", "O\"wner", NOW));
+        assertThrows(IllegalArgumentException.class, () -> a.report("A b", "Owner", "1.0.0", NOW));
+        assertThrows(IllegalArgumentException.class, () -> a.report("Alice", "O\"wner", "1.0.0", NOW));
         assertTrue(a.admins("Alice").isEmpty());
     }
 
@@ -131,7 +131,7 @@ class BotAccessTest {
     @DisplayName("orders reach only their bot, once, and expire")
     void ordersReachTheirBotOnceAndExpire(@TempDir Path dir) {
         BotAccess a = withAlice(dir);
-        a.report("Bob", "Owner", NOW);
+        a.report("Bob", "Owner", "1.0.0", NOW);
         long first = a.order("alice", Action.SHUTDOWN, "Owner", NOW);
 
         String forAlice = a.controlJson("Alice", first - 1, NOW);
@@ -224,7 +224,7 @@ class BotAccessTest {
     void settingsSurviveAndRideInTheAnswer(@TempDir Path dir) {
         Path file = dir.resolve("bots.properties");
         BotAccess a = new BotAccess(file);
-        a.report("Alice", "Owner", NOW);
+        a.report("Alice", "Owner", "1.0.0", NOW);
         a.pref("Alice", "bunny_hop", true, "Owner", NOW);
         a.food("Alice", "salmon", true, "Owner", NOW);
         a.breaking("Alice", "dirt", true, "Owner", NOW);
@@ -241,7 +241,7 @@ class BotAccessTest {
         // was already past the orders just queued. So they ride in the answer instead,
         // in EVERY answer, including the first one a bridge makes with no `since`.
         long later = NOW + BotAccess.ALIVE_MS + 1;
-        back.report("Alice", "Owner", later);
+        back.report("Alice", "Owner", "1.0.0", later);
         String first = back.controlJson("Alice", null, later);
         assertTrue(first.contains("\"settings\":"), first);
         assertTrue(first.contains("\"bunny_hop\":true"), first);
@@ -273,5 +273,39 @@ class BotAccessTest {
                 "alice.pref.fly_to_the_moon=true"));
         BotAccess a = new BotAccess(file);
         assertEquals(Map.of("bunny_hop", true), a.prefs("Alice"));
+    }
+
+    @Test
+    @DisplayName("a bot on another version is reported to the console, once")
+    void aDifferentVersionWarnsOnce(@TempDir Path dir) {
+        BotAccess a = new BotAccess(dir.resolve("bots.properties"));
+        a.serverVersion("1.1.0");
+        // A bot is a SEPARATE installation: unifying the two jars stops them drifting
+        // on one machine, not a bot joining a server built from another version.
+        String said = a.report("Alice", "Owner", "1.0.0", NOW);
+        assertNotNull(said);
+        assertTrue(said.contains("1.0.0") && said.contains("1.1.0"), said);
+        // Once, not on every poll: this is a one-second loop.
+        assertNull(a.report("Alice", "Owner", "1.0.0", NOW + 1000));
+        assertNull(a.report("Alice", "Owner", "1.0.0", NOW + 2000));
+        // A different mismatch is news again.
+        assertNotNull(a.report("Alice", "Owner", "0.9.0", NOW + 3000));
+        assertEquals("0.9.0", a.version("Alice"));
+    }
+
+    @Test
+    @DisplayName("agreeing, or having nothing to compare, says nothing at all")
+    void agreementAndSilenceAreNotWarnings(@TempDir Path dir) {
+        BotAccess a = new BotAccess(dir.resolve("bots.properties"));
+        a.serverVersion("1.1.0");
+        assertNull(a.report("Alice", "Owner", "1.1.0", NOW));
+        // An older bridge reports no version. Nothing to compare is NOT disagreeing,
+        // and warning about it would cry wolf on every older bot that joins.
+        assertNull(a.report("Bob", "Owner", "", NOW));
+        assertNull(a.report("Carol", "Owner", null, NOW));
+        assertEquals("", a.version("Bob"));
+        // And a server that cannot read its own version warns about nobody.
+        BotAccess mute = new BotAccess(dir.resolve("other.properties"));
+        assertNull(mute.report("Alice", "Owner", "1.0.0", NOW));
     }
 }

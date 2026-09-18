@@ -192,6 +192,7 @@ public class MarionetteBot {
             http.createContext("/diary", x -> attend(x, this::diary));
             http.createContext("/people", x -> attend(x, this::people));
             http.createContext("/eat", x -> attend(x, this::eat));
+            http.createContext("/version", x -> attend(x, this::version));
             http.createContext("/food", x -> attend(x, this::food));
             http.createContext("/trash", x -> attend(x, this::trash));
             http.createContext("/dig", x -> attend(x, this::dig));
@@ -965,6 +966,25 @@ public class MarionetteBot {
     }
 
     /** The food it does not touch on its own: view it, veto or unveto. */
+    /**
+     * This jar's version, so the server can say something when a bot joins running a
+     * different one. It does NOT go through the game thread and does not need to be in
+     * a world: the bridge asks for it while starting, before the client has joined.
+     */
+    private String version(Map<String, String> q) {
+        String v = "";
+        try {
+            v = net.neoforged.fml.ModList.get().getModContainerById("marionette_bot")
+                    .map(c -> c.getModInfo().getVersion().toString())
+                    .orElse("");
+        } catch (RuntimeException e) {
+            // With no version there is nothing to compare; the server warns about
+            // nothing, which beats failing the poll over a cosmetic field.
+            Logbook.note("version", "could not read my own version: " + e.getMessage());
+        }
+        return String.format("{\"ok\":true,\"version\":\"%s\"}", Request.escape(v));
+    }
+
     private String food(Map<String, String> q) throws Exception {
         String ban = q.getOrDefault("ban", "").trim().toLowerCase();
         String allow = q.getOrDefault("allow", "").trim().toLowerCase();
@@ -3638,7 +3658,7 @@ public class MarionetteBot {
     private static final List<String> LOOK_ONLY = List.of(
             "/state", "/logbook", "/needs", "/inventory", "/light",
             "/places", "/permissions", "/preferences", "/orders", "/diary",
-            "/people", "/selection", "/look");
+            "/people", "/selection", "/look", "/version");
 
     private void attend(HttpExchange x, RouteHandler m) throws IOException {
         if (!LOOK_ONLY.contains(x.getRequestURI().getPath())) {

@@ -91,6 +91,10 @@ final class BotAccess {
         final Set<String> hear = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         /** When its bridge last polled. Not saved: after a restart nobody has. */
         long lastPoll;
+        /** The version of the bot mod its bridge reported, empty if it did not. */
+        String version = "";
+        /** The mismatch already warned about, so the console is told once, not every poll. */
+        String warned = "";
 
         /**
          * The settings decided here, and ONLY those. What was never touched by a command
@@ -122,6 +126,8 @@ final class BotAccess {
     private final Map<String, Bot> bots = new TreeMap<>();
     private final List<Order> orders = new ArrayList<>();
     private long lastOrder;
+    /** This server mod's own version, told once at startup. */
+    private String mine = "";
 
     BotAccess(Path file) {
         this.file = file;
@@ -204,7 +210,35 @@ final class BotAccess {
      * The bridge's poll: the bot is alive and this is its owner. The owner comes from the
      * bot's config, so whatever it says replaces what was saved.
      */
-    synchronized void report(String bot, String owner, long now) {
+    /** What version this server mod is, so a bot's can be compared with it. */
+    synchronized void serverVersion(String version) {
+        mine = version == null ? "" : version.strip();
+    }
+
+    synchronized String serverVersion() {
+        return mine;
+    }
+
+    /** The version of the bot mod that bot reported, or "" if its bridge is older. */
+    synchronized String version(String bot) {
+        Bot b = find(bot);
+        return b == null ? "" : b.version;
+    }
+
+    /**
+     * The bridge's poll. Returns a line for the server console the FIRST time a bot
+     * shows up with a version other than this server's, and null otherwise.
+     *
+     * <p>Unifying the two jars stops them drifting apart on one machine, but not this:
+     * a bot is a separate installation, run by whoever owns it, and it can join a server
+     * built from another version. Nothing else notices — the mismatched half simply
+     * ignores what it does not understand — so the console is told, once per version
+     * seen rather than on every poll.
+     *
+     * <p>A bridge that reports no version at all is not warned about: it is older than
+     * this check and there is nothing to compare, which is not the same as disagreeing.
+     */
+    synchronized String report(String bot, String owner, String version, long now) {
         if (!validName(bot)) {
             throw new IllegalArgumentException("bot missing or not a valid name");
         }
@@ -219,6 +253,14 @@ final class BotAccess {
             b.name = bot;
             save();
         }
+        String said = version == null ? "" : version.strip();
+        b.version = said;
+        if (said.isEmpty() || mine.isEmpty() || said.equals(mine)) return null;
+        if (said.equals(b.warned)) return null;
+        b.warned = said;
+        return b.name + " is running the bot mod " + said + " and this server runs "
+                + mine + ". Deploy both jars together: the one that does not understand "
+                + "a setting ignores it without saying so.";
     }
 
     /**

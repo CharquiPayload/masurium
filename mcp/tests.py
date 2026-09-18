@@ -106,8 +106,8 @@ def tests_speaker():
     check("the settings tools take no arguments: nothing to write",
           all(not server.TOOLS[n][3]
               for n in ("show_preferences", "break_permissions", "food_ban")))
-    # The trash list is the exception the owner asked for: it governs only its own
-    # backpack, so the bot keeps it.
+    # The trash list is the deliberate exception: it governs only what the bot drops
+    # from its OWN backpack, so it stays the bot's to decide.
     check("trash: the bot still decides its own trash", bool(server.TOOLS["trash"][2]))
 
     # A settings order arrives with an argument and is applied to the body. The
@@ -188,6 +188,28 @@ def tests_speaker():
     check("control poll: carries the bot, its owner and since",
           route.startswith("/control?") and "bot=" in route and "since=5" in route
           and "owner=" in route, route)
+    # The mod version travels with the poll, so the server can say something when a
+    # bot joins running another one. A body that cannot answer leaves it OUT rather
+    # than sending an empty value: nothing to compare is not the same as disagreeing.
+    bridge.MOD_VERSION.clear()
+    real_request_bot = bridge.request_bot
+    bridge.request_bot = lambda route: {"ok": True, "version": "1.2.3"}
+    try:
+        check("control poll: carries the version of the bot mod",
+              "version=1.2.3" in bridge.control_route(), bridge.control_route())
+        # Asked once and remembered: this runs every second.
+        calls = []
+        bridge.request_bot = lambda route: (calls.append(route), {"version": "9"})[1]
+        bridge.control_route()
+        bridge.control_route()
+        check("the version is asked for once, not on every poll", not calls, calls)
+        bridge.MOD_VERSION.clear()
+        bridge.request_bot = lambda route: (_ for _ in ()).throw(OSError("body down"))
+        check("with the body down the poll still goes, without a version",
+              "version=" not in bridge.control_route(), bridge.control_route())
+    finally:
+        bridge.request_bot = real_request_bot
+        bridge.MOD_VERSION.clear()
     lock = pathlib.Path(tempfile.mkdtemp()) / "bridge.lock"
     held = bridge.only_one_bridge(lock)
     try:

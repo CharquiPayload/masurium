@@ -21,6 +21,8 @@ First public release of Marionette.
   bridge comes back.
 - `/marionette` commands: bot owners, status, an optional sidebar with every bot,
   and a hotbar notice for owners.
+- The server console says so, once, when a bot joins running a different version of
+  the bot mod than the server's, and `/marionette bot <bot>` shows both.
 - Bots do not pick up again what they tossed themselves.
 
 ### Bot mod

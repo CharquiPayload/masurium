@@ -222,7 +222,7 @@ server in the client's `config/` folder.
 
 | command | who | what |
 |---|---|---|
-| `/marionette bot <bot>` | anyone | owner, admins, who it hears, and whether its bridge answers |
+| `/marionette bot <bot>` | anyone | owner, admins, who it hears, whether its bridge answers, and which version of the bot mod it runs |
 | `/marionette bot <bot> shutdown` | owner, admins | stop the client and its bridge |
 | `/marionette bot <bot> restart` | owner, admins | restart the client and its bridge |
 | `/marionette bot <bot> logoff` | owner, admins | leave the server, keeping the client running |
@@ -269,6 +269,13 @@ write down what it discovers; it may not change what it is allowed to do.
 and a bot hears everyone who names it. With `hear on` it only hears its owner,
 its admins, other bots and the players on its list. Anyone else is ignored before the brain, so they cost no tokens and
 cannot inject anything.
+
+**Versions.** A bot is a separate installation from the server: it can join one
+built from another version, and the half that does not understand a setting
+ignores it without a word. Its bridge reports the bot mod's version in every
+poll; when it differs from the server's, the server console says so once and
+`/marionette bot <bot>` shows both. A bridge older than this check reports no
+version, and nothing is claimed about it.
 
 **Permission nodes.** Every action has a node for permission mods such as
 LuckPerms: `marionette.bot.shutdown`, `marionette.bot.restart`,

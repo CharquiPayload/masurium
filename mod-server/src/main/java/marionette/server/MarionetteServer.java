@@ -113,6 +113,7 @@ public class MarionetteServer {
         token = cfg.getProperty("token", "").trim();
         bots = PickupRule.bots(cfg.getProperty("bots", DEFAULT_BOTS));
         access.declare(bots);
+        access.serverVersion(ownVersion("marionette_server"));
         LOG.info("[marionette] bots: {}", bots);
 
         if (!host.equals("127.0.0.1") && token.isEmpty()) {
@@ -189,10 +190,26 @@ public class MarionetteServer {
      * the orders given with {@code /marionette bot} after N. Without 'since', only the
      * last order id, to start from there.
      */
+    /** This jar's version, from its own metadata. Empty if it cannot be read. */
+    private static String ownVersion(String modId) {
+        try {
+            return net.neoforged.fml.ModList.get().getModContainerById(modId)
+                    .map(c -> c.getModInfo().getVersion().toString())
+                    .orElse("");
+        } catch (RuntimeException e) {
+            // Not fatal: with no version there is nothing to compare and no warning,
+            // which is better than refusing to start over a cosmetic check.
+            LOG.warn("[marionette] could not read the version of {}", modId, e);
+            return "";
+        }
+    }
+
     private String control(Map<String, String> q) {
         String bot = q.getOrDefault("bot", "").trim();
         long now = System.currentTimeMillis();
-        access.report(bot, q.getOrDefault("owner", ""), now);
+        String mismatch = access.report(bot, q.getOrDefault("owner", ""),
+                q.getOrDefault("version", ""), now);
+        if (mismatch != null) LOG.warn("[marionette] {}", mismatch);
         String since = q.get("since");
         return access.controlJson(bot, since == null ? null : Long.parseLong(since.trim()), now);
     }

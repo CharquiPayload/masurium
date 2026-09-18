@@ -263,9 +263,33 @@ final class BotCommands {
                         + (admins.isEmpty() ? "none" : String.join(", ", admins)))
                         .withStyle(ChatFormatting.WHITE))
                 .append(Component.literal("\n  hears: " + hearing(bot))
-                        .withStyle(ChatFormatting.WHITE));
+                        .withStyle(ChatFormatting.WHITE))
+                .append(Component.literal("\n  bot mod: " + modVersion(bot))
+                        .withStyle(sameVersion(bot) ? ChatFormatting.WHITE
+                                                    : ChatFormatting.YELLOW));
         s.sendSuccess(() -> m, false);
         return 1;
+    }
+
+    /**
+     * The version of the bot mod that bot is running, next to this server's when they
+     * differ. A bot is a separate installation: it can join a server built from another
+     * version, and the half that does not understand a setting ignores it in silence.
+     */
+    private String modVersion(String bot) {
+        String theirs = access.version(bot);
+        String mine = access.serverVersion();
+        if (theirs.isEmpty()) {
+            return "not reported (its bridge is older than this check)";
+        }
+        return theirs.equals(mine) || mine.isEmpty() ? theirs
+                : theirs + "  — THIS SERVER RUNS " + mine + ", deploy both jars together";
+    }
+
+    private boolean sameVersion(String bot) {
+        String theirs = access.version(bot);
+        return theirs.isEmpty() || access.serverVersion().isEmpty()
+                || theirs.equals(access.serverVersion());
     }
 
     /** "everyone" or "only its list", with the names. */

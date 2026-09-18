@@ -1770,9 +1770,32 @@ def hears(who, access=None):
     return w in allowed or is_bot(w)
 
 
+# The bot mod's own version, asked for once at start. The server compares it with
+# its own and says something in its console when they differ: a bot is a separate
+# installation and can join a server built from another version, and the half that
+# does not understand a setting ignores it without a word.
+MOD_VERSION = []
+
+
+def mod_version():
+    """The bot mod's version, asked for once and remembered. Empty if the body is
+    not up yet or is older than the /version endpoint: nothing to compare is not
+    the same as disagreeing, and the server is told neither way."""
+    if not MOD_VERSION:
+        try:
+            MOD_VERSION.append(str(request_bot("/version").get("version", "")))
+        except Exception:
+            return ""
+    return MOD_VERSION[0]
+
+
 def control_route(since=None):
-    """The poll that tells the server "I am alive, and this is my owner"."""
+    """The poll that tells the server "I am alive, this is my owner and this is the
+    version of the mod I am driving"."""
     q = {"bot": NAME, "owner": bot_owner()}
+    version = mod_version()
+    if version:
+        q["version"] = version
     if since is not None:
         q["since"] = since
     return "/control?" + urllib.parse.urlencode(q)
