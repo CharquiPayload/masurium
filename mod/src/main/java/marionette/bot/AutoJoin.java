@@ -67,6 +67,10 @@ public final class AutoJoin {
             // Not zero: the client still has to tick, and the tick loop is paced by
             // the frame loop. Low enough to stop burning a core on frames nobody sees.
             mc.options.framerateLimit().set(30);
+            // A bot must not stop working because a window lost the mouse. This is a
+            // person's setting and it is on by default; for a bot it is a bug waiting
+            // for the first time anyone clicks somewhere else.
+            mc.options.pauseOnLostFocus = false;
             // Render distance is deliberately NOT touched. It looks like the obvious
             // next saving, but it decides which chunks the client has at all, and a bot
             // acts on the world through this client: cutting it would quietly shorten

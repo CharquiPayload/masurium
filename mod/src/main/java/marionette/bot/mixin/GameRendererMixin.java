@@ -2,6 +2,7 @@ package marionette.bot.mixin;
 
 import marionette.bot.Bot;
 import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -26,8 +27,18 @@ public abstract class GameRendererMixin {
         // Only for a bot. A mixin is applied when its class loads, long before anyone
         // asks what this client is for, so the question is asked here instead: without
         // the guard, anyone who installs the jar to play gets a black screen.
-        if (Bot.isBot()) {
-            ci.cancel();
+        if (!Bot.isBot()) {
+            return;
         }
+        // A screen is open, so a person is looking at this window. Bots have windows
+        // now, and a person will press E on one. The inventory draws the player model,
+        // and the entity renderer reads a camera that ONLY renderLevel sets — cancelled
+        // here, that camera is null and opening the inventory crashes the game with a
+        // stack trace that names none of this. So while a screen is up, the world is
+        // drawn. A working bot never opens one, and pays nothing.
+        if (Minecraft.getInstance().screen != null) {
+            return;
+        }
+        ci.cancel();
     }
 }
