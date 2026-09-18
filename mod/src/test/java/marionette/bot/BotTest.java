@@ -47,10 +47,21 @@ class BotTest {
     }
 
     @Test
+    @DisplayName("the server flag follows the same blank rule as the name")
+    void aBlankServerIsNoServer() {
+        // Joining "" would fail complaining about the address, which sends whoever
+        // configured it looking in the wrong place entirely.
+        assertNull(Bot.nameFrom(""));
+        assertNull(Bot.nameFrom("  "));
+        assertEquals("10.0.0.5:25565", Bot.nameFrom("  10.0.0.5:25565 "));
+    }
+
+    @Test
     @DisplayName("the property is the one the launcher documentation names")
     void theFlagIsTheDocumentedOne() {
         // Renaming it silently would leave every configured instance a ghost, with
         // nothing in the game to say why.
         assertEquals("marionette.name", Bot.NAME_PROPERTY);
+        assertEquals("marionette.server", Bot.SERVER_PROPERTY);
     }
 }

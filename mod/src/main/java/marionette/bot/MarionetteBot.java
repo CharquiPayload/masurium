@@ -181,6 +181,7 @@ public class MarionetteBot {
         }
         BOSS = defaultEscort;
         NeoForge.EVENT_BUS.register(this);
+        NeoForge.EVENT_BUS.register(AutoJoin.class);
         try {
             http = HttpServer.create(new InetSocketAddress("127.0.0.1", PORT), 0);
             http.createContext("/state", x -> attend(x, this::state));

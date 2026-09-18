@@ -31,7 +31,11 @@ public final class Bot {
     /** The property that decides it all. No name, no bot. */
     public static final String NAME_PROPERTY = "marionette.name";
 
+    /** Where to go on start, so a bot never waits at the menu for a click. */
+    public static final String SERVER_PROPERTY = "marionette.server";
+
     private static final String RAW = System.getProperty(NAME_PROPERTY);
+    private static final String SERVER = nameFrom(System.getProperty(SERVER_PROPERTY));
     private static final String NAME = nameFrom(RAW);
 
     private Bot() {
@@ -74,5 +78,16 @@ public final class Bot {
     /** The name it was told to use, or {@code null} if it is not a bot. */
     public static String name() {
         return NAME;
+    }
+
+    /**
+     * The server to join on start, or {@code null} to stop at the menu.
+     *
+     * <p>Blank counts as absent for the same reason a blank name does: a flag written
+     * and left empty is a launcher someone has not finished configuring, and joining
+     * "" would fail with a message about the address instead of about the flag.
+     */
+    public static String server() {
+        return SERVER;
     }
 }
