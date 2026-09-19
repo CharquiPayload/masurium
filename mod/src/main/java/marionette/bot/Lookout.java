@@ -281,6 +281,7 @@ final class Lookout {
         LocalPlayer p = mc.player;
         if (p == null || mc.level == null || !p.isAlive()) {
             fleeing = false;
+            walker.urgent(false);
             // The jump key is released HERE too: drowning with the key held left the bot
             // hopping on land after respawning.
             if (breathing) {
@@ -318,6 +319,7 @@ final class Lookout {
             if (inRange) {
                 if (fleeing) {
                     fleeing = false;
+                    walker.urgent(false);
                     Logbook.note("danger", "creeper in range: I stop fleeing and shoot");
                 }
                 if (walker.walking()) walker.stop("I shoot the creeper");
@@ -340,6 +342,7 @@ final class Lookout {
             }
             if (fleeing && d >= SAFE) {
                 fleeing = false;
+                walker.urgent(false);
                 if (walker.walking()) walker.stop("I am far away now");
                 Logbook.note("danger", String.format(
                         "the creeper is %.0f blocks away: I am far away now", d));
@@ -354,6 +357,7 @@ final class Lookout {
         }
         if (fleeing) {
             fleeing = false;
+            walker.urgent(false);
             if (walker.walking()) walker.stop("the creeper is gone");
         }
         creeperInRange = null;
@@ -685,6 +689,9 @@ final class Lookout {
             fleeing = true;
             ticksSincePlan = EVERY;         // let it plan in this same tick
             walker.stop("creeper nearby");
+            // Run, do not walk. A creeper chases at nearly the speed of a walking
+            // player, so an escape on foot never reaches SAFE and starts over.
+            walker.urgent(true);
             Logbook.note("danger", String.format(
                     "creeper %.0f blocks away%s: moving away",
                     d, enabled ? " and lit" : ""));

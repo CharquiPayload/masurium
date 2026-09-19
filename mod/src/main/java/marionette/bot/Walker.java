@@ -54,6 +54,9 @@ final class Walker {
 
     private static final int TICKS_MAX = 20 * 90;
 
+    /** Escaping: speed is worth more than control. See {@link #urgent(boolean)}. */
+    private boolean urgent;
+
     private List<Route.Point> route;
     private int index;
     private Function<Route.Point, List<Route.Point>> replanner;
@@ -216,8 +219,26 @@ final class Walker {
     private boolean canRun(LocalPlayer p, Route.Point goal) {
         if (towerAtY != null || diggingAt != null) return false;
         if (goal.y() > floorY(p)) return false;      // step
-        if (index + 1 >= route.size()) return false;            // last segment
+        if (index + 1 >= route.size()) {
+            // Arriving while braking is arriving closer — which is the right trade
+            // everywhere except when the thing behind is a creeper. Fleeing was walking
+            // away from something that walks at the same speed: it never reached its
+            // safe distance, gave up, and tried again. Three times, and then the anti-
+            // loop gave up for it.
+            return urgent;
+        }
         return route.get(index + 1).y() == goal.y();            // and what comes after
+    }
+
+    /**
+     * Run even where control would normally be worth more than speed.
+     *
+     * <p>Only for escaping. It does NOT lift the conditions that exist to avoid falling
+     * or getting stuck (a step up, a tower, a half-dug block): sprinting off a ledge to
+     * get away from a creeper is dying of the other thing.
+     */
+    synchronized void urgent(boolean yes) {
+        urgent = yes;
     }
 
     /** One step. Called on every client tick, on the game thread. */
