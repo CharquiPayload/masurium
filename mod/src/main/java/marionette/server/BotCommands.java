@@ -9,6 +9,8 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
@@ -105,8 +107,25 @@ final class BotCommands {
         // the same one the bot knows, so it cannot suggest a key that does nothing.
         SuggestionProvider<CommandSourceStack> keys =
                 (c, b) -> SharedSuggestionProvider.suggest(marionette.common.Settings.keys(), b);
-        // Undoing suggests what there is to undo. Banning suggests nothing: any item id
-        // is fair game and the body is the one that knows them all.
+        // Undoing suggests what is on the list; adding suggests what the game has.
+        // Typing an item id from memory is how you end up with a list holding
+        // `cooked_beaf`, which bans nothing and says nothing either.
+        //
+        // Food suggests only what can be EATEN. The alternative is offering every item
+        // in the game, about fifteen hundred of them, to answer "what will it not eat":
+        // a list that long is the same as no list. Blocks are not filtered because
+        // anything placed can be in the way.
+        SuggestionProvider<CommandSourceStack> anyFood = (c, b) ->
+                SharedSuggestionProvider.suggestResource(
+                        BuiltInRegistries.ITEM.entrySet().stream()
+                                .filter(e -> e.getValue().components()
+                                        .has(DataComponents.FOOD))
+                                .map(e -> e.getKey().location())
+                                .toList(), b);
+        SuggestionProvider<CommandSourceStack> anyBlock = (c, b) ->
+                SharedSuggestionProvider.suggestResource(
+                        BuiltInRegistries.BLOCK.keySet(), b);
+
         SuggestionProvider<CommandSourceStack> banned =
                 (c, b) -> SharedSuggestionProvider.suggest(access.foodList(bot(c), true), b);
         SuggestionProvider<CommandSourceStack> allowed =
@@ -152,13 +171,13 @@ final class BotCommands {
                                                         .executes(c -> pref(c, false)))))
                                 .then(Commands.literal("food")
                                         .executes(this::foodList)
-                                        .then(Commands.literal("ban").then(id(none)
+                                        .then(Commands.literal("ban").then(id(anyFood)
                                                 .executes(c -> food(c, true))))
                                         .then(Commands.literal("allow").then(id(banned)
                                                 .executes(c -> food(c, false)))))
                                 .then(Commands.literal("break")
                                         .executes(this::breakList)
-                                        .then(Commands.literal("allow").then(id(none)
+                                        .then(Commands.literal("allow").then(id(anyBlock)
                                                 .executes(c -> breaking(c, true))))
                                         .then(Commands.literal("forbid").then(id(allowed)
                                                 .executes(c -> breaking(c, false))))))));
