@@ -1554,11 +1554,19 @@ def tab_state(thinking, failure, body, stuck=False, with_ai=False):
     # things. Goes BEFORE combat, since one can also fight while fleeing.
     if v.get("fleeing") or v.get("retreating"):
         return "fleeing"
-    # `fighting` is the Lookout's defence (with bow or up close); `killing` is
-    # the `kill` tool. Only the second was looked at before and bow fights did
-    # not mark combat.
-    if v.get("fighting") or shot.get("killing"):
+    # Combat is being ATTACKED, not attacking. `fighting` is the Lookout's
+    # defence: something alive is coming at it, with the bow or up close.
+    #
+    # `killing` used to count too, and it reads wrong: a bot working through a
+    # village of people who do not fight back showed the same red crossed swords
+    # as one surrounded by zombies. The icon exists so that a glance tells you
+    # whether your bot is in danger, and counting that made it stop answering
+    # the only question it was for. Killing by order is a job, and jobs have
+    # their own flag.
+    if v.get("fighting"):
         return "combat"
+    if shot.get("killing"):
+        return "hunting"
     # The jobs with a name of their own, for the board that admits text. The
     # order is the priority: what it does with the hands before the feet, and
     # escorting/following last.
