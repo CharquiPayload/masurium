@@ -550,6 +550,14 @@ public class MarionetteServer {
         try {
             if (Files.exists(CONFIG)) {
                 try (var in = Files.newInputStream(CONFIG)) { p.load(in); }
+            } else if (server != null && !server.isDedicatedServer()) {
+                // A client. This half of the mod is awake here so a single-player or
+                // LAN world can answer bots, but nobody is hosting any: writing a
+                // config file into the folder of someone who just wanted to play is
+                // the jar failing to be invisible. It is written the first time a
+                // dedicated server starts, which is when it means something.
+                LOG.info("[marionette] no {} here, and not writing one: "
+                        + "this is a client", CONFIG);
             } else {
                 Files.writeString(CONFIG, """
                         # Marionette server mod: the source of truth for the bots.
