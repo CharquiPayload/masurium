@@ -47,7 +47,9 @@ public final class BotScreen {
 
     @SubscribeEvent
     public static void onKey(InputEvent.Key event) {
-        if (!Bot.isBot() || event.getAction() != InputConstants.PRESS) {
+        // Headless: no window, no keyboard, nobody. See onGui.
+        if (Bot.headless() || !Bot.isBot()
+                || event.getAction() != InputConstants.PRESS) {
             return;
         }
         Minecraft mc = Minecraft.getInstance();
@@ -65,7 +67,15 @@ public final class BotScreen {
 
     @SubscribeEvent
     public static void onGui(RenderGuiEvent.Post event) {
-        if (!Bot.isBot() || rendering) {
+        // Headless clients draw NOTHING, and this is the trap the HUD walked into:
+        // the GUI is a separate layer from the world, which is exactly why writing on
+        // the black worked at all — and exactly why cancelling the world did not keep
+        // this out of the render path. Under a stubbed graphics library it took the
+        // client down mid-handshake, and the server reported a NeoForge version
+        // mismatch that had nothing to do with it.
+        //
+        // There is also nobody to read it: a headless bot has no window.
+        if (Bot.headless() || !Bot.isBot() || rendering) {
             return;
         }
         Minecraft mc = Minecraft.getInstance();

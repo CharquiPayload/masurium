@@ -31,6 +31,15 @@ public abstract class GameRendererMixin {
         if (!Bot.isBot()) {
             return;
         }
+        // No graphics card at all: there is nothing to draw on and no one to draw for.
+        // This goes FIRST and admits no exception. The connect screen is a screen, so
+        // the rule below would let a headless client into the render path in the middle
+        // of joining a server — where it dies inside a mod handshake, reporting a
+        // version mismatch that is not what happened.
+        if (Bot.headless()) {
+            ci.cancel();
+            return;
+        }
         // Someone pressed R and is looking at the bot. Their keypress, their frames.
         if (BotScreen.drawing()) {
             return;

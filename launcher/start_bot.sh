@@ -130,7 +130,7 @@ sleep 4
 # -Dmarionette.bot.port: the mod reads it when it opens its HTTP server. Without
 # it every bot would fight over 8478 and the second one would have no hands.
 echo "launch $VERSION -lwjgl$OFFLINE_FLAG -paulscode" \
-     "--jvm \"-Xmx$HEAP -Dmarionette.name=$NAME" \
+     "--jvm \"-Xmx$HEAP -Dmarionette.name=$NAME -Dmarionette.headless=true" \
      "-Dmarionette.bot.port=$PORT$SPEECH_FLAGS\"" > "$PIPE"
 
 echo "==> loading the game"

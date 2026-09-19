@@ -38,6 +38,16 @@ public final class Bot {
     public static final String PORT_PROPERTY = "marionette.bot.port";
 
     /**
+     * No screen and no graphics card: the client is running under a launcher that
+     * stubs out the graphics library, such as HeadlessMC.
+     *
+     * <p>It is told, not guessed. Sniffing for a launcher's own properties works until
+     * the launcher renames one, and the failure it causes then is a connection that
+     * dies in the middle of a mod handshake with a message about something else.
+     */
+    public static final String HEADLESS_PROPERTY = "marionette.headless";
+
+    /**
      * What a bot may be called: Minecraft's own username rules.
      *
      * <p>Enforced here for a reason that has nothing to do with Minecraft. This name
@@ -116,6 +126,11 @@ public final class Bot {
     /** What was given and refused, so the message can quote it back. */
     public static String rejected() {
         return TRIMMED;
+    }
+
+    /** Whether this client has no graphics at all. See {@link #HEADLESS_PROPERTY}. */
+    public static boolean headless() {
+        return nameFrom(System.getProperty(HEADLESS_PROPERTY)) != null;
     }
 
     /** Whether this client was told to be a bot. */
