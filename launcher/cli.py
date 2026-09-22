@@ -128,9 +128,9 @@ def cmd_status(ws, args):
     if not args.name and not ws.bot_keys():
         say(f"no bots under {ws.bots_dir}")
         return 0
-    problem, statuses = operations.survey(ws, args.name)
-    if problem:
-        say(f"({problem}; 'in server' is unknown)")
+    problems, statuses = operations.survey(ws, args.name)
+    for problem in problems:
+        say(f"({problem}; 'in server' is unknown for its bots)")
     yes_no = lambda v: "-" if v is None else ("yes" if v else "no")
     say(f"  {'bot':<16} {'server':<14} {'port':<5} {'client':<7} {'hands':<6} "
         f"{'in server':<10} {'bridge':<7} {'guard of'}")

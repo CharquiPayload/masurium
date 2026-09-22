@@ -94,11 +94,26 @@ BRAIN_TIMEOUT = 180  # s per brain turn (180 with medium effort; 120 with low)
 
 
 def cfg():
+    """server.env, and over it the file of this bot's own server when the
+    launcher names one (MARIONETTE_SERVER_ENV): that server's address and
+    token, without losing what only the global file says (the owner, the
+    folders). At least one of the two has to be there."""
     d = {}
-    for line in pathlib.Path(CONFIG).read_text().splitlines():
-        if "=" in line and not line.startswith("#"):
-            k, v = line.split("=", 1)
-            d[k.strip()] = v.strip()
+    read = 0
+    for path in (CONFIG, os.environ.get("MARIONETTE_SERVER_ENV")):
+        if not path:
+            continue
+        try:
+            lines = pathlib.Path(path).read_text().splitlines()
+        except FileNotFoundError:
+            continue
+        read += 1
+        for line in lines:
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                d[k.strip()] = v.strip()
+    if not read:
+        raise FileNotFoundError(f"no server.env: {CONFIG}")
     return d
 
 

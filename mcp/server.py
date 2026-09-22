@@ -77,16 +77,23 @@ OWNER_LABEL = OWNER or "the server owner"
 
 
 def load_config():
+    """server.env, and over it the file of the bot's own server when the
+    launcher names one (MARIONETTE_SERVER_ENV, inherited from the bridge):
+    the server this bot is on, not whichever the global file points at."""
     cfg = {}
-    try:
-        with open(CONFIG, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    cfg[k.strip()] = v.strip()
-    except OSError as e:
-        record(f"could not read {CONFIG}: {e}")
+    for path in (CONFIG, os.environ.get("MARIONETTE_SERVER_ENV")):
+        if not path:
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        cfg[k.strip()] = v.strip()
+        except OSError as e:
+            # Not record(): it is defined below, and this runs on import.
+            print(f"[mcp] could not read {path}: {e}", file=sys.stderr, flush=True)
     return (cfg.get("MARIONETTE_HOST", "127.0.0.1"),
             cfg.get("MARIONETTE_PORT", "8477"),
             cfg.get("MARIONETTE_TOKEN", ""))

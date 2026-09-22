@@ -814,8 +814,9 @@ def tests_logwatch():
 def tests_status():
     print("\nStatus: what every bot is doing, as data and as a table")
     quick_server_env()
-    problem, statuses = ops.survey(WS)
-    check("the survey says the server mod does not answer", problem and "does not answer" in problem, problem)
+    problems, statuses = ops.survey(WS)
+    check("the survey says the server mod does not answer",
+          len(problems) == 1 and "does not answer" in problems[0], problems)
     check("...and one status per bot, 'in server' unknown",
           [s.name for s in statuses] == ["Alice", "Bob"] and all(s.inside is None for s in statuses))
     check("a stopped bot: no client, no hands, no bridge",
@@ -1018,6 +1019,100 @@ def tests_settings():
     (bob.dir / "language").write_text("en\n")
 
 
+# --- one server mod per server ------------------------------------------------
+
+def fake_server_mod(token, players):
+    """A server mod that answers /players and /mods, with a token, on a port
+    of its own; returns (the HTTP server, its port)."""
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.headers.get("X-Marionette-Token") != token:
+                self.send_response(401)
+                self.end_headers()
+                return
+            if self.path == "/players":
+                body = json.dumps({"players": players})
+            elif self.path == "/mods":
+                body = json.dumps({"mods": [{"id": "create", "version": "6.0.10"}]})
+            else:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body.encode())
+
+        def log_message(self, *a):
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, httpd.server_address[1]
+
+
+def tests_server_apis():
+    print("\nServer mods: each server can have its own, and each bot is looked for in its own")
+    quick_server_env()
+    (TMP / "server.env").write_text((TMP / "server.env").read_text() + "MARIONETTE_OWNER=Owner\n")
+    other = TMP / "servers" / "other"
+    (other / "mods").mkdir(parents=True, exist_ok=True)
+    (other / "server.conf").write_text("HOST=10.0.0.6\n")
+    httpd, port = fake_server_mod("own-token", ["Bob"])
+    own = other / "server.env"
+    own.write_text(f"MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT={port}\nMARIONETTE_TOKEN=own-token\n")
+    own.chmod(0o600)
+    alice, bob = WS.bot("Alice"), WS.bot("Bob")
+    bob.write("server", "other")
+    try:
+        check("a server without its own server.env uses the global one",
+              WS.api_for(WS.server("test")).address == "127.0.0.1:1")
+        api = WS.api_for(WS.server("other"))
+        check("a server with its own uses it", api.address == f"127.0.0.1:{port}" and api.token == "own-token")
+        check("...keeping the owner, which only the global file says", api.owner == "Owner")
+
+        problems, statuses = ops.survey(WS)
+        by_name = {s.name: s for s in statuses}
+        check("status finds Bob in HIS server's /players", by_name["Bob"].inside is True, repr(by_name["Bob"]))
+        check("...while Alice's server does not answer, and only hers is unknown",
+              by_name["Alice"].inside is None and len(problems) == 1 and "of test" in problems[0], problems)
+
+        text, result = said(ops.start, bob)
+        check("start asks the bot's own server whether it is already in",
+              result == ops.ALREADY_IN and "already in" in text, text)
+
+        env = ops.bridge_env(bob)
+        check("the bridge of Bob is told the PATH of his server's file",
+              env.get("MARIONETTE_SERVER_ENV") == str(own) and env.get("BOT_NAME") == "Bob")
+        check("...never the token itself", "own-token" not in "".join(env.values()))
+        check("a bot whose server has no file of its own is told nothing",
+              "MARIONETTE_SERVER_ENV" not in ops.bridge_env(alice))
+
+        checks = doctor.checks(WS)
+        check("doctor asks each server's own mod", any(
+            l == "servers/other: server mod" and ok is True for l, ok, _ in checks), [c for c in checks if "other" in c.label])
+        check("...and compares the pack with ITS server, not whichever answers",
+              any(l == "servers/other: versions" and "with its server" in d for l, ok, d in checks))
+        own.chmod(0o644)
+        checks = doctor.checks(WS)
+        check("a server.env others can read is a problem: it holds the token",
+              any(l == "servers/other: server.env" and ok is False and "chmod 600" in d for l, ok, d in checks))
+        own.chmod(0o600)
+        own.write_text(f"MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT={port}\nMARIONETTE_TOKEN=wrong\n")
+        checks = doctor.checks(WS)
+        check("a wrong token is named as such",
+              any(l == "servers/other: server mod" and ok is False and "wrong token" in d for l, ok, d in checks))
+    finally:
+        httpd.shutdown()
+        bob.write("server", "test")
+        for p in sorted(other.rglob("*"), reverse=True):
+            p.rmdir() if p.is_dir() else p.unlink()
+        other.rmdir()
+        layout()
+
+
 if __name__ == "__main__":
     tests_files()
     tests_workspace()
@@ -1043,6 +1138,7 @@ if __name__ == "__main__":
     tests_status()
     tests_cancel()
     tests_settings()
+    tests_server_apis()
     tests_cli()
 
     print(f"\n{done - len(failures)}/{done} checks pass")

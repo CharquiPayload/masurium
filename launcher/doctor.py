@@ -10,6 +10,7 @@ from collections import namedtuple
 from . import settings
 from .api import UNREACHABLE
 from .events import Fail
+from .files import read_env_file
 from .packs import ADDON_FOR, CORE_JAR, compare_packs, jar_family, pack_carries, pack_mods
 from .processes import WINDOWS, run_quiet
 
@@ -79,7 +80,11 @@ def checks(ws):
         add("claude code", False, "not on PATH (nor in ~/.local/bin): the brain has nothing to run")
 
     theirs = None
-    if ws.env_file.is_file():
+    own_api = [s for s in ws.servers() if s.env_file.is_file()]
+    everyone_has_own = bool(ws.server_slugs()) and len(own_api) == len(ws.server_slugs())
+    if not ws.env_file.is_file() and everyone_has_own:
+        add("server.env", None, f"{ws.env_file} does not exist; not needed, every server has its own")
+    elif ws.env_file.is_file():
         values = ws.env_values()
         missing = [k for k in ("MARIONETTE_HOST", "MARIONETTE_PORT", "MARIONETTE_TOKEN")
                    if not values.get(k)]
@@ -137,20 +142,43 @@ def checks(ws):
             add(f"servers/{slug}", False, str(e))
             continue
         add(f"servers/{slug}", True, f"{s.address} {s.version} {s.mod_count()} client mods")
-        # Against the server that answers /mods (one at a time answers, and it
-        # may not be this slug's: only mismatches are reported, and a pack
-        # that shares nothing with it has none).
-        if theirs:
+        # Against the server that answers the global server.env's API (it may
+        # not be this slug's: only mismatches are reported, and a pack that
+        # shares nothing with it has none)... unless the server has its own
+        # server.env: then against its own server mod, exactly.
+        against, its_mods = "the server that answers", theirs
+        if s.env_file.is_file():
+            its_mods = None
+            own = read_env_file(s.env_file)
+            missing = [k for k in ("MARIONETTE_HOST", "MARIONETTE_PORT", "MARIONETTE_TOKEN") if not own.get(k)]
+            if not WINDOWS and s.env_file.stat().st_mode & 0o077:
+                add(f"servers/{slug}: server.env", False,
+                    f"{s.env_file} can be read by other users, and it holds the token: chmod 600 it")
+            elif missing:
+                add(f"servers/{slug}: server.env", False, f"{s.env_file}: missing {', '.join(missing)}")
+            else:
+                api = ws.api_for(s)
+                try:
+                    api.get("/players")
+                    its_mods, against = api.mods(), "its server"
+                    add(f"servers/{slug}: server mod", True, f"{api.address} answers")
+                except urllib.error.HTTPError as e:
+                    add(f"servers/{slug}: server mod", False, f"{api.address} said HTTP {e.code}"
+                        + (" (wrong token?)" if e.code in (401, 403) else ""))
+                except UNREACHABLE as e:
+                    add(f"servers/{slug}: server mod", False,
+                        f"{api.address}: {getattr(e, 'reason', e)} (server down, or not that host/port)")
+        if its_mods:
             mine = pack_mods(ws, s.pack)
-            diff = compare_packs(mine, theirs)
+            diff = compare_packs(mine, its_mods)
             if diff["mismatch"]:
                 add(f"servers/{slug}: versions", False,
                     "; ".join(f"{i}: pack {a}, server {b}" for i, a, b in diff["mismatch"][:6])
                     + (" ..." if len(diff["mismatch"]) > 6 else ""))
             else:
-                shared_ids = len([i for i in mine if i in theirs])
+                shared_ids = len([i for i in mine if i in its_mods])
                 add(f"servers/{slug}: versions", True,
-                    f"{shared_ids} mods in common with the server that answers, same versions")
+                    f"{shared_ids} mods in common with {against}, same versions")
         # A mod that needs an add-on on a headless bot, with the add-on missing:
         # the client would crash at startup, before the mod handshake.
         for mod_id, addon in ADDON_FOR.items():

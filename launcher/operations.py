@@ -197,7 +197,7 @@ def _start_steps(bot, switch_to, report, cancel, launched):
         raise Fail(f"{bot.name} has no server noted. Say which one it joins:",
                    lines=ws.servers_listing(), code="no_server")
     server = ws.server(slug)
-    api = ws.api()
+    api = ws.api_for(server)
     clash = ws.name_clash(bot.key)
     if clash:
         raise Fail(f"the name '{bot.name}' clashes with the bot '{clash}': one contains the other.",
@@ -359,7 +359,7 @@ def connect(bot, on_event=None, cancel=None):
     if not slug:
         raise Fail(f"{bot.name} has no server noted.", code="no_server")
     server = bot.ws.server(slug)
-    api = bot.ws.api()
+    api = bot.ws.api_for(server)
     with operating(bot):
         if not keeper_alive(bot):
             raise Fail(f"no live client of {bot.name}: use  marionette.py start {bot.name}",
@@ -389,6 +389,23 @@ def bridge_pid(bot):
     return None
 
 
+def bridge_env(bot):
+    """What the bridge (and the MCP server under it) is started with: the
+    workspace's folders, the bot's name, and the PATH of its server's own
+    server.env when that server has one. The path, never the token: the
+    bridge reads the file, over the global server.env, and talks to the
+    server this bot is on."""
+    env = bot.ws.child_env()
+    env["BOT_NAME"] = bot.name
+    env.pop("MARIONETTE_SERVER_ENV", None)
+    slug = bot.read("server")
+    if slug:
+        own = bot.ws.servers_dir / slug / "server.env"
+        if own.is_file():
+            env["MARIONETTE_SERVER_ENV"] = str(own)
+    return env
+
+
 def start_bridge(bot, on_event=None):
     """Starts the bridge, detached. It goes AFTER the client, and only if it
     joined: without a body in the game it has nobody to write to. Returns
@@ -402,8 +419,7 @@ def start_bridge(bot, on_event=None):
             return pid
         bot.run.mkdir(parents=True, exist_ok=True)
         unlink_quietly(bot.bridge_log)
-        env = bot.ws.child_env()
-        env["BOT_NAME"] = bot.name
+        env = bridge_env(bot)
         report.step(f"starting the bridge of {bot.name}", stage="bridge")
         spawn_free([sys.executable, str(REPO / "mcp" / "bridge.py"), bot.name],
                    bot.bridge_log, cwd=bot.ws.home, env=env)
@@ -560,22 +576,32 @@ def status_of(bot, api=None):
 
 
 def survey(ws, name=None):
-    """(what is wrong with the server mod, or None; the status of every bot,
-    or of one). The server mod is asked once here, not once per bot with a
-    5 s timeout each."""
+    """(what is wrong with the server mods asked, as a list; the status of
+    every bot, or of one). Each bot is looked for in ITS server's mod, and
+    each server mod is asked once here, not once per bot with a 5 s timeout
+    each."""
     bots = [ws.bot(name).require()] if name else ws.bots()
-    problem, api = None, None
-    try:
-        api = ws.api()
-    except Fail as e:
-        problem = str(e)
-    if api:
-        try:
-            api.get("/players")
-        except UNREACHABLE as e:
-            problem = f"the server mod at {api.address} does not answer: {getattr(e, 'reason', e)}"
+    apis, problems = {}, []
+
+    def api_of(bot):
+        slug = bot.read("server")
+        if slug not in apis:
             api = None
-    return problem, [status_of(b, api) for b in bots]
+            try:
+                api = ws.api_for(ws.server(slug))
+                api.get("/players")
+            except Fail as e:
+                problems.append(f"{slug or bot.name}: {e}")
+                api = None
+            except UNREACHABLE as e:
+                problems.append(f"the server mod of {slug} at {api.address} does not answer: "
+                                f"{getattr(e, 'reason', e)}")
+                api = None
+            apis[slug] = api
+        return apis[slug]
+
+    statuses = [status_of(b, api_of(b)) for b in bots]
+    return problems, statuses
 
 
 # --- deploy -------------------------------------------------------------------

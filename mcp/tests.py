@@ -902,6 +902,31 @@ def tests_chat():
           drawable(spanish)[0] == spanish, drawable(spanish)[0])
 
 
+def tests_server_env():
+    print("\nThe server's own server.env: read over the global one, when the launcher names it")
+    own = _cfg.parent / "own-server.env"
+    own.write_text("MARIONETTE_HOST=10.1.1.1\nMARIONETTE_PORT=9\nMARIONETTE_TOKEN=own\n")
+    _cfg.write_text(_cfg.read_text() + "MARIONETTE_OWNER=Someone\n")
+    os.environ.pop("MARIONETTE_SERVER_ENV", None)
+    try:
+        c = bridge.cfg()
+        check("without it, the global file is all there is",
+              (c["MARIONETTE_HOST"], c["MARIONETTE_TOKEN"]) == ("127.0.0.1", "test"), c)
+        os.environ["MARIONETTE_SERVER_ENV"] = str(own)
+        c = bridge.cfg()
+        check("bridge: the server's address and token win over the global ones",
+              (c["MARIONETTE_HOST"], c["MARIONETTE_PORT"], c["MARIONETTE_TOKEN"]) == ("10.1.1.1", "9", "own"), c)
+        check("bridge: ...and what only the global file says is kept", c.get("MARIONETTE_OWNER") == "Someone", c)
+        check("mcp server: the same, for the tools the brain calls",
+              server.load_config() == ("10.1.1.1", "9", "own"))
+        os.environ["MARIONETTE_SERVER_ENV"] = str(own.parent / "missing.env")
+        check("a server file that is gone falls back to the global one",
+              bridge.cfg()["MARIONETTE_HOST"] == "127.0.0.1")
+    finally:
+        os.environ.pop("MARIONETTE_SERVER_ENV", None)
+        _cfg.write_text("MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT=1\nMARIONETTE_TOKEN=test\n")
+
+
 if __name__ == "__main__":
     tests_honesty()
     tests_ids()
@@ -916,6 +941,7 @@ if __name__ == "__main__":
     tests_protocol()
     tests_chat()
     tests_speaker()
+    tests_server_env()
 
     print(f"\n{done - len(failures)}/{done} checks pass")
     if failures:

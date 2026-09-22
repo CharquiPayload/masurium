@@ -51,6 +51,11 @@ setting ignored it without a word.
   the client runs. `doctor` names hand-edited values `set` would refuse.
   `MARIONETTE_HEAP` and `MARIONETTE_VERSION` replace the old `HEAP` and
   `VERSION`, names generic enough to be set by something else.
+- Each server can have its own `servers/<slug>/server.env` (address and token
+  of its server mod, readable by its owner only). The launcher, the bridge and
+  the MCP server then talk to the server each bot is on, not to the one the
+  global `server.env` names; `doctor` checks each server's mod and its pack
+  against that server's mods.
 - A keeper per bot holds the game's console open and takes lines for it on a
   localhost socket, only from whoever can read its token. It stops the game's
   whole process tree, because HeadlessMC starts the game as a child java, and

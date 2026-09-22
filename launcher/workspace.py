@@ -40,6 +40,13 @@ class Server:
         return self.pack / "mods"
 
     @property
+    def env_file(self):
+        """Its own way to its server mod (MARIONETTE_HOST, MARIONETTE_PORT,
+        MARIONETTE_TOKEN), when it has one. Apart from server.conf on
+        purpose: server.conf can be shown and passed around, the token never."""
+        return self.pack / "server.env"
+
+    @property
     def address(self):
         """25565 goes unsaid because it is the default; any other port is spelled out."""
         return self.host if self.mc_port == "25565" else f"{self.host}:{self.mc_port}"
@@ -126,6 +133,17 @@ class Workspace:
         v = self.env_values()
         return ServerApi(v.get("MARIONETTE_HOST"), v.get("MARIONETTE_PORT"),
                          v.get("MARIONETTE_TOKEN"), v.get("MARIONETTE_OWNER"))
+
+    def api_for(self, server):
+        """The server mod of THIS server: its own servers/<slug>/server.env,
+        or the global server.env when it has none. With one global file for
+        several servers, a bot started on one was looked for in another's
+        /players, not found, and reported as not joined."""
+        if server.env_file.is_file():
+            v = read_env_file(server.env_file)
+            return ServerApi(v.get("MARIONETTE_HOST"), v.get("MARIONETTE_PORT"),
+                             v.get("MARIONETTE_TOKEN"), self.env_values().get("MARIONETTE_OWNER"))
+        return self.api()
 
     # --- servers ----------------------------------------------------------------
 

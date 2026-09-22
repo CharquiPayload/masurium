@@ -170,6 +170,19 @@ VERSION=neoforge-21.1.248
 DESCRIPTION="My survival server"
 ```
 
+**More than one server.** `server.env` points at one server mod. When the bots
+play on several servers, give each server its own
+`~/servers/<slug>/server.env`, with the same three lines for *its* server mod,
+and `chmod 600` it: it holds that server's token. It is kept apart from
+`server.conf` on purpose, so the address, version and pack can be shown and
+passed around without the token. The launcher then looks for each bot in its
+own server's `/players` and compares its pack with that server's `/mods`, and
+the bridge and the MCP server talk to that server (the launcher tells them
+the file's path, never the token). A server without a file of its own uses
+`server.env`, which also keeps what only it says, such as `MARIONETTE_OWNER`.
+`doctor` checks each server's mod, and that each such file is readable by you
+alone.
+
 The folders can be moved with `MARIONETTE_BOTS_DIR`, `MARIONETTE_SERVERS_DIR`
 and `MARIONETTE_COMMON_DIR`, either in the environment or as three more lines
 of `server.env` (`MARIONETTE_ENV` says where that file is). After building,
