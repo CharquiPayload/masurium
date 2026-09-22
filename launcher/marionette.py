@@ -1216,18 +1216,20 @@ def cmd_start(args):
             return {}
 
     if "screen" in readiness():
-        say("==> waiting for the title screen")
+        say("==> waiting for the game to finish loading")
 
-        def at_title():
+        def loaded():
             v = readiness()
-            # The title screen itself, and not the first-run prompt that can
-            # stand in front of it (prepare_gamedir turns that one off).
-            return "Title" in str(v.get("screen", "")) and not v.get("loading") and not v.get("in_world")
+            # Any menu will do, not only the title screen: packs put welcome
+            # screens of their own in front of it, and `connect` works from
+            # those. What does not work is the loading overlay, which is what
+            # the first connect used to hit.
+            return bool(v.get("screen")) and not v.get("loading") and not v.get("in_world")
 
-        if wait_for(at_title, 180, every=3):
-            say(f"    {readiness().get('screen')}")
+        if wait_for(loaded, 180, every=3):
+            say(f"    at {readiness().get('screen')}")
         else:
-            say(f"    (no title screen after 3 minutes, on {readiness().get('screen')!r}; trying anyway)")
+            say(f"    (still loading after 3 minutes, on {readiness().get('screen')!r}; trying anyway)")
 
     if join(bot, server, env, attempts=3):
         say(players_text(env))
