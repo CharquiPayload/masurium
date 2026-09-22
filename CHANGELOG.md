@@ -33,6 +33,24 @@ setting ignored it without a word.
   the bot mod than the server's, and `/marionette bot <bot>` shows both.
 - Bots do not pick up again what they tossed themselves.
 
+### Launcher
+- One command, `launcher/marionette.py`, in Python with no dependencies and no
+  shell: `servers`, `create`, `login`, `start`, `connect`, `bridge`, `stop`,
+  `restart`, `status`, `deploy-mod`, `doctor`. It replaced eight bash scripts.
+- A keeper per bot holds the game's console open and takes lines for it on a
+  localhost socket; its pid file is what says "already running". It stops the
+  game's whole process tree, because HeadlessMC starts the game as a child java.
+- `doctor` checks the machine, the folders, the jars and the server mod, in the
+  order in which things break; `status` says per bot whether the client is there,
+  its port is open, the server lists it and its bridge is alive.
+- A crashed start quotes the crash report's cause instead of the mod list.
+
+### Add-ons
+- `addons/veil`: a jar of its own that keeps Veil (bundled in Sable and others)
+  from touching a GPU that a headless bot does not have. Two mixins, applied only
+  on a bot with no screen; nothing of Veil's own jar is touched. The core no
+  longer carries a mixin against any third-party mod.
+
 ### Bot half
 - A* path finder with tick-based costs, partial routes, goal conditions, anti-
   dithering, doors, swimming, bridges, towers and optional tunnelling.

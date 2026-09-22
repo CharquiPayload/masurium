@@ -29,6 +29,7 @@ build it, and how to get the first bot into the game.
 | **Bridge** | reads the chat, wakes the brain when the bot is named, relays body notices | `mcp/bridge.py` |
 | **Claude Code** | thinking, only when needed | — |
 | **Launcher** | creates, starts, stops and watches bots; a keeper per bot holds the game's console | `launcher/marionette.py` |
+| **Add-ons** | jars of their own, one per third-party mod the bot has to live with; the first keeps Veil off a GPU that a headless bot does not have | `addons/veil/` |
 
 The split is strict: **a question goes to the server, an action goes to the
 bot.** A dedicated server loads only the server and shared halves; the bot half
@@ -110,11 +111,13 @@ inline, a lambda, or a return type that no `import` would reveal.
   time). To do: groups of bots that share one configuration, a `/mods` route
   on the server so the launcher can say which jar differs before joining, a
   graphical front end on the same code, and a run on Windows.
-- **Add-ons** (to do): separate jars that teach the bots one mod each
-  (`marionette-create`, `marionette-watut`...). The core offers them a place to
-  register their own `/marionette bot <bot> <add-on> ...` subcommands and their own
-  per-bot settings, kept where the rest of the per-bot settings live and handed to
-  the bridge in the same poll, so an add-on needs no server of its own.
+- **Add-ons**: separate jars that teach the bots one mod each. The first one is
+  there, `addons/veil` (compatibility: Veil without a GPU); the next ones teach
+  *abilities* (`marionette-create`, `marionette-watut`...). To do for those: the
+  core offers them a place to register their own `/marionette bot <bot> <add-on>
+  ...` subcommands and their own per-bot settings, kept where the rest of the
+  per-bot settings live and handed to the bridge in the same poll, so an add-on
+  needs no server of its own.
 - **Asleep in a normal client** (to do): the bot half assumes the client it runs
   in is always a bot, so dropping the jar into a client you play on makes it eat
   your food and respawn you. It should stay asleep unless it finds a bot's

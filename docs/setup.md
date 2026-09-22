@@ -13,6 +13,11 @@ that order. The rest can wait until you have a bot in the game.
 - Minecraft **1.21.1** with **NeoForge 21.1.x**.
 - The mod: `marionette-<version>.jar`, the same file the bots use.
 
+**If the server's pack carries Veil** (it ships inside Sable, among others), the
+bots also need `marionette-veil-<version>.jar` in `shared/mods/`: without it a
+headless client crashes at startup. See `addons/veil/README.md`. The server does
+not need it.
+
 **Accounts: bots work online or offline**
 - **Online (recommended):** each bot uses its own purchased Minecraft Java
   account (a Microsoft account), logged in once through HeadlessMC, and the
