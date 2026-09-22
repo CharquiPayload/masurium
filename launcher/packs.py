@@ -93,15 +93,20 @@ def jar_mods(jar_path):
     return found
 
 
-def pack_sources(ws, pack):
-    """Where a bot's jars come from: shared/mods and the pack's own."""
-    return (ws.shared_dir / "mods", pathlib.Path(pack) / "mods")
+def pack_sources(ws, pack, extra=None):
+    """Where an instance's jars come from: shared/mods, the pack's own, and
+    the instance's own extra mods (its mods/ folder), in that order: a jar
+    of the same name later on wins."""
+    sources = [ws.shared_dir / "mods", pathlib.Path(pack) / "mods"]
+    if extra:
+        sources.append(pathlib.Path(extra))
+    return sources
 
 
-def pack_mods(ws, pack):
-    """Every mod a bot joins with from this pack: shared/mods and the pack's own."""
+def pack_mods(ws, pack, extra=None):
+    """Every mod an instance joins with: shared/mods, the pack's own, its extras."""
     mods = {}
-    for source in pack_sources(ws, pack):
+    for source in pack_sources(ws, pack, extra):
         for jar in sorted(source.glob("*.jar")):
             mods.update(jar_mods(jar))
     return mods
@@ -121,19 +126,23 @@ def compare_packs(client, server):
     }
 
 
-def sync_mods(ws, gamedir, pack):
+def sync_mods(ws, gamedir, pack, extra=None):
     """gamedir/mods is a MANAGED folder, not a drawer: it is rebuilt whole. A
-    jar someone drops there is gone on the next sync."""
+    jar someone drops there is gone on the next sync; an extra mod for one
+    instance goes in the instance's own mods/ folder."""
     mods = pathlib.Path(gamedir) / "mods"
     mods.mkdir(parents=True, exist_ok=True)
     for old in mods.glob("*.jar"):
         old.unlink()
-    n = 0
-    for source in pack_sources(ws, pack):
+    linked = {}
+    for source in pack_sources(ws, pack, extra):
         for jar in sorted(source.glob("*.jar")):
-            link_or_copy(jar, mods / jar.name)
-            n += 1
-    return n
+            target = mods / jar.name
+            if target.exists():
+                target.unlink()
+            link_or_copy(jar, target)
+            linked[jar.name] = True
+    return len(linked)
 
 
 def jar_family(name):

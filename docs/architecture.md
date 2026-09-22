@@ -274,13 +274,42 @@ The expensive parts are shared: `~/.minecraft` (game versions, libraries and
 assets, about 1 GB) is used by HeadlessMC for every bot, and each bot's mods are
 hard links to the server's pack, so **creating a bot costs a few megabytes**.
 
-### Three folders, outside the repo
+### Folders, outside the repo
 
 ```text
-bots/<name>/      port, server, language, personality, gamedir/, hmc/, run/
-servers/<slug>/   server.conf + mods/  (one server and ITS client pack)
-shared/           the HeadlessMC launcher and the mods every bot uses
+servers/<slug>/        server.conf + mods/ (one server and ITS client pack), server.env (its token)
+bots/<bot>/            bot.json + personality.txt: a character, and nothing heavy
+instances/<instance>/  instance.json (which bot, which server, its port, its own settings),
+                       mods/ (its extras), gamedir/, hmc/, run/: a bot on a server, what runs
+shared/                the HeadlessMC launcher and the mods every instance uses
+<state>/servers/<slug>/   what the bridges of that server keep (sessions, channels, jobs)
 ```
+
+**A bot and an instance are two things.** The bot is who it is: its player
+name, its personality, its settings. The instance is that bot on a server, and
+carries what running needs: a game folder, a HeadlessMC with its login, a port,
+logs, extra mods, and settings of its own that win over the bot's. One bot can
+have several instances, on several servers, and instances are cloned without
+questions: two may even be the same player on the same server. What cannot
+happen is both RUNNING, which is one player joining twice; `start` refuses it
+(the same player on one server, or an online account already playing
+anywhere), saying which instance is in the way.
+
+**Settings come in layers**, weakest first: the bot's (`bot.json`), then the
+instance's (`instance.json`); groups and a global layer will come on top. One
+table (`launcher/settings.py`) says what each setting accepts, at which layers,
+and when a change counts. The bridge knows nothing about layers: on every
+start and every change the launcher writes the resolved values into the
+instance's folder as one small file each (`language`, `model`, `owner`...),
+which is what the bridge always read in a bot's folder.
+
+**The bridge sees its server, not the machine.** A running instance is linked
+in its server's state folder under its player name
+(`<state>/servers/<slug>/bots/<player>` → the instance). That folder is the
+bridge's bots folder, so what it looks up there (its own port, its guards, the
+other bots, their internal channel) are the bots of its server, as always,
+and its state folder (session, pending jobs, marks, call log) is its server's.
+Two instances of one bot on two servers are two lives that share nothing.
 
 **The pack owns `gamedir/mods`.** A bot's mods are hard links to the server's
 pack, so switching servers means deleting them and linking again: a second, and
@@ -298,22 +327,23 @@ server selection really chooses **which mods the bot joins with**. Joining with
 the wrong pack is not a network error but a mod rejection, which is why the
 launcher says which pack it tried when it cannot join.
 
-**Each bot has its own port.** The bot mod opens an HTTP server on `127.0.0.1`;
-the port lives in `bots/<name>/port`, read by the launcher (to pass
-`-Dmarionette.bot.port`) and by the bridge (to know whom it talks to). The
+**Each instance has its own port.** The bot mod opens an HTTP server on
+`127.0.0.1`; the port lives in `instance.json`, is passed as
+`-Dmarionette.bot.port`, and is written for the bridge (to know whom it talks
+to). The
 bridge exports `MARIONETTE_BOT` so the MCP server, started by `claude`, inherits
 it.
 
-**No bot name may be a substring of another.** The bridge reacts when
+**No two names on one server may contain one another.** The bridge reacts when
 `NAME in text`: with "Ada" and "Adam" in the same chat, calling one wakes both.
-The launcher checks and refuses.
+`start` checks the players already running on that server and refuses.
 
 **The keeper.** HeadlessMC takes its commands (`launch`, `connect`, `msg`) on
 its stdin, so something has to hold that stdin open for as long as the game
 runs. It used to be `tail -f` on a FIFO in `/tmp`, which does not exist on
-Windows. Now it is a process per bot, the keeper (`marionette.py keeper`,
+Windows. Now it is a process per instance, the keeper (`marionette.py keeper`,
 started by `start`), that owns the java process and listens on a localhost
-socket whose port is written in `bots/<name>/run/keeper.port`. The launcher
+socket whose port is written in `instances/<instance>/run/keeper.port`. The launcher
 sends it `connect`; the bridge sends it `msg`; `@ping` and `@stop` are for the
 keeper itself. HeadlessMC starts the game as a child java, so the keeper
 starts the launcher in a process group of its own and stops the group, not the

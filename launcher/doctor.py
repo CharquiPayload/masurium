@@ -9,6 +9,7 @@ from collections import namedtuple
 
 from . import settings
 from .api import UNREACHABLE
+from .bots import check_name
 from .events import Fail
 from .files import read_env_file
 from .packs import ADDON_FOR, CORE_JAR, compare_packs, jar_family, pack_carries, pack_mods
@@ -188,45 +189,68 @@ def checks(ws):
                     f"carried by {', '.join(carriers)}; a headless bot needs {addon}-<version>.jar "
                     f"in shared/mods (see addons/)")
 
+    legacy = ws.legacy_bots()
+    if legacy:
+        add("layout", False, f"bots in the layout from before instances: {', '.join(legacy)} "
+            "(marionette.py migrate)")
+
     keys = ws.bot_keys()
     add("bots", True if keys else None, ", ".join(keys) if keys else f"none yet under {ws.bots_dir}")
-    seen_ports = {}
     for key in keys:
         bot = ws.bot(key)
+        problems = [why for _, why in settings.problems(bot)]
+        try:
+            check_name(bot.name)
+        except Fail as e:
+            problems.append(str(e))
+        add(f"bots/{key}", not problems, "; ".join(problems) or f"plays as {bot.name}, "
+            f"{len(bot.instances())} instance(s)")
+
+    instances = ws.instances()
+    add("instances", True if instances else None,
+        ", ".join(i.key for i in instances) if instances else f"none yet under {ws.instances_dir}")
+    seen_ports = {}
+    players = {}
+    for inst in instances:
         problems = []
-        port = bot.read("port")
+        data = inst.data
+        port = str(data.get("port", ""))
         if not port.isdigit():
             problems.append("no port")
         elif port in seen_ports:
             problems.append(f"port {port} also belongs to {seen_ports[port]}")
         else:
-            seen_ports[port] = key
-        if not bot.read("server"):
-            problems.append("no server")
-        if not (bot.hmc / "HeadlessMC" / "config.properties").is_file():
+            seen_ports[port] = inst.key
+        if not inst.bot.exists():
+            problems.append(f"its bot '{data.get('bot')}' is not in {ws.bots_dir}")
+        if inst.slug not in slugs:
+            problems.append(f"its server '{inst.slug}' is not registered")
+        if not (inst.hmc / "HeadlessMC" / "config.properties").is_file():
             problems.append("no hmc config")
-        clash = ws.name_clash(key)
-        if clash:
-            problems.append(f"name contains or is contained by '{clash}'")
-        if bot.read("account", "online") == "online" and not (bot.hmc / "HeadlessMC" / "auth").exists():
-            problems.append("online account never logged in (marionette.py login)")
-        escort = bot.read("escort").lower()
-        if escort and escort not in keys:
-            problems.append(f"escorts '{escort}', which is not a bot here")
-        elif escort == key:
+        accounts = inst.hmc / "HeadlessMC" / "auth" / ".accounts.json"
+        if settings.get(inst, "account") == "online" and (not accounts.is_file() or accounts.stat().st_size < 3):
+            # HeadlessMC makes an EMPTY accounts file on its first run: the
+            # folder being there never meant a login.
+            problems.append(f"online account never logged in (marionette.py login {inst.key})")
+        escort = settings.get(inst, "escort").lower()
+        if escort and escort == inst.player:
             problems.append("escorts itself")
-        # Every other file with a value `set` would refuse (the port and the
-        # escort are said above, in their own words).
-        problems += [why for k, why in settings.problems(bot) if k not in ("port", "escort")]
-        add(f"bots/{key}", not problems, "; ".join(problems) or f"port {port}, server {bot.read('server')}")
+        problems += [why for k, why in settings.problems(inst) if k != "port"]
+        players.setdefault((inst.slug, inst.player), []).append(inst.key)
+        add(f"instances/{inst.key}", not problems,
+            "; ".join(problems) or f"{inst.name} on {inst.slug}, port {port}")
+    for (slug, player), keys_ in sorted(players.items()):
+        if len(keys_) > 1:
+            add(f"{player} on {slug}", None, f"{len(keys_)} instances ({', '.join(keys_)}); "
+                "only one of them can run at a time")
 
-    heaps = [heap_gb(settings.get(ws.bot(k), "heap")) or heap_gb(ws.heap()) or 0 for k in keys]
+    heaps = [heap_gb(settings.get(i, "heap")) or heap_gb(ws.heap()) or 0 for i in instances]
     avail = free_memory_gb()
     if heaps and avail is not None:
         need = sum(heaps)
         same = len(set(heaps)) == 1
-        add("memory for every bot at once", need <= avail if need > avail * 0.9 else True,
-            (f"{len(keys)} bots x {heaps[0]:g} GB heap" if same else f"{len(keys)} bots, heaps "
+        add("memory for every instance at once", need <= avail if need > avail * 0.9 else True,
+            (f"{len(heaps)} instances x {heaps[0]:g} GB heap" if same else f"{len(heaps)} instances, heaps "
              + " + ".join(f"{h:g}" for h in heaps) + " GB")
             + f" = {need:g} GB; {avail:.1f} GB available"
             + ("" if need <= avail else " (not all of them at once)"))

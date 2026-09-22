@@ -1,33 +1,43 @@
-"""A bot's settings: the small files in bots/<name>/, what each one means,
-what it accepts, and what applies without it. One table, so the command line,
-doctor and a window's drop-down menus all check a value the same way.
+"""Settings, in layers, and what each one accepts.
 
-The files stay the source of truth, and they stay plain: one value per file,
-edited by hand if someone prefers, read by the bridge and the launcher as they
-always were. What this adds is saying NO to a bad value when it is set,
-instead of when a game that took minutes to load does something odd with it.
+One table says, for each setting, what it means, what it accepts, what
+applies without it, what a menu would offer, when a change counts, and at
+which layers it may be set. The command line, doctor and a window check a
+value the same way.
+
+The layers, weakest first: the bot (bot.json), then the instance
+(instance.json). A layer sets only what it names; what no layer names takes
+the default. (Groups and the global layer come on top, later.)
+
+The bridge and the MCP server do not know about layers. They read one small
+file per setting in the instance's folder, as they always read a bot's
+folder; `render` writes those files from the layers, on every start and
+every change, so they are an output, never edited by hand.
 """
 import re
+import shutil
 from dataclasses import dataclass
 
+from .bots import Character, Instance
 from .events import Fail
-from .files import read_java_properties
+from .files import read_java_properties, unlink_quietly
 
 PLAYER_NAME = re.compile(r"^[A-Za-z0-9_]{1,16}$")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
+BOT, INSTANCE = "bot", "instance"
 
 
 @dataclass(frozen=True)
 class Setting:
-    key: str              # the file in bots/<name>/
+    key: str
     help: str
-    default: object       # what applies without the file: a value, or a function of the bot
+    default: object       # what applies without it: a value, or a function of the target
     choices: tuple = ()   # what a menu offers; a free-form setting has none
-    required: bool = False
     applies: str = "restart"  # when a change counts: see APPLIES
+    layers: tuple = (BOT, INSTANCE)
 
-    def default_for(self, bot):
-        return self.default(bot) if callable(self.default) else self.default
+    def default_for(self, target):
+        return self.default(target) if callable(self.default) else self.default
 
     @property
     def at_start(self):
@@ -44,31 +54,25 @@ APPLIES = {
 }
 
 
-def _check_port(bot, value):
+def _check_port(target, value):
     if not value.isdigit() or not 1024 <= int(value) <= 65535:
         return "a port number between 1024 and 65535"
-    if bot.ws.port_reserved(int(value), bot.key):
-        return f"port {value} already belongs to another bot"
     if int(value) == 8477:
         return "8477 is the server mod's port"
+    if target.ws.port_reserved(int(value), target.key):
+        return f"port {value} already belongs to another instance"
     return None
 
 
-def _check_server(bot, value):
-    if value not in bot.ws.server_slugs():
-        return "one of the registered servers: " + (", ".join(bot.ws.server_slugs()) or "(none yet)")
-    return None
-
-
-def _check_language(bot, value):
+def _check_language(target, value):
     return None if re.match(r"^[a-z]{2,3}$", value) else "a language code such as en or es"
 
 
-def _check_owner(bot, value):
+def _check_owner(target, value):
     return None if PLAYER_NAME.match(value) else "a Minecraft player name: letters, digits, underscore"
 
 
-def _check_model(bot, value):
+def _check_model(target, value):
     parts = value.split()
     if not 1 <= len(parts) <= 2 or not re.match(r"^[A-Za-z0-9._:\[\]-]+$", parts[0]):
         return "a model and an optional effort, such as `sonnet` or `haiku low`"
@@ -77,16 +81,17 @@ def _check_model(bot, value):
     return None
 
 
-def _check_escort(bot, value):
-    if value.lower() == bot.key:
+def _check_escort(target, value):
+    if value.lower() == target.player:
         return "a bot cannot escort itself"
-    if value.lower() not in bot.ws.bot_keys():
-        return "the name of another bot here: " + (", ".join(k for k in bot.ws.bot_keys() if k != bot.key)
-                                                   or "(there is no other)")
+    here = sorted({i.player for i in target.ws.instances(target.slug) if i.player != target.player})
+    if value.lower() not in here:
+        return (f"the player name of a bot with an instance on {target.slug}: "
+                + (", ".join(here) or "(there is no other)"))
     return None
 
 
-def _check_heap(bot, value):
+def _check_heap(target, value):
     m = re.match(r"^(\d+)([gm])$", value)
     if not m:
         return "a heap size such as 3g or 2048m"
@@ -96,35 +101,35 @@ def _check_heap(bot, value):
     return None
 
 
-def _apply_account(bot, value):
-    """HeadlessMC decides offline or not from its own config, not from the
-    `account` file: both are written, or they would disagree."""
-    cfg = bot.hmc / "HeadlessMC" / "config.properties"
-    props = read_java_properties(cfg)
-    if props:
-        props["hmc.offline"] = "true" if value == "offline" else "false"
-        cfg.write_text("".join(f"{k}={v}\n" for k, v in props.items()), encoding="utf-8")
+def _owner_default(target):
+    return target.ws.env_values().get("MARIONETTE_OWNER", "")
+
+
+def _heap_default(target):
+    return target.ws.heap()
 
 
 SETTINGS = {s.key: s for s in [
-    Setting("server", "the server it joins (a slug from `servers`)", "", required=True, applies="start"),
-    Setting("port", "the local port of the bot mod: its hands", "", required=True, applies="start"),
     Setting("account", "online (a purchased account, logged in once) or offline "
             "(private servers with online-mode=false)", "online", ("online", "offline"), applies="start"),
-    Setting("heap", "the game's memory (Java heap)", lambda bot: bot.ws.heap(),
-            ("2g", "3g", "4g", "6g"), applies="start"),
+    Setting("heap", "the game's memory (Java heap)", _heap_default, ("2g", "3g", "4g", "6g"),
+            applies="start"),
+    Setting("port", "the local port of the bot mod: its hands", "", applies="start", layers=(INSTANCE,)),
     Setting("language", "the language it speaks in the chat", "en", ("en", "es", "pt", "fr", "de", "it")),
     Setting("gender", "grammatical gender, for languages that inflect", "f", ("f", "m")),
-    Setting("escort", "another bot: this one becomes its guard", ""),
+    Setting("escort", "another instance on its server, by player name: this one becomes its guard",
+            "", layers=(INSTANCE,)),
     Setting("model", "its brain's model and effort", "opus medium",
             ("opus medium", "sonnet", "sonnet low", "haiku low"), applies="bridge"),
     Setting("owner", "the player it belongs to: their delicate orders, /marionette bot anywhere",
-            lambda bot: bot.ws.env_values().get("MARIONETTE_OWNER", ""), applies="now"),
+            _owner_default, applies="now"),
 ]}
 
-CHECKS = {"server": _check_server, "port": _check_port, "language": _check_language,
-          "owner": _check_owner, "model": _check_model, "escort": _check_escort, "heap": _check_heap}
-APPLY = {"account": _apply_account}
+CHECKS = {"port": _check_port, "language": _check_language, "owner": _check_owner,
+          "model": _check_model, "escort": _check_escort, "heap": _check_heap}
+# Case matters in names (a player, a bot as the game shows it); in codes and
+# sizes it does not.
+LOWERCASE = ("account", "language", "gender", "heap")
 
 
 def setting(key):
@@ -134,9 +139,12 @@ def setting(key):
         raise Fail(f"there is no setting '{key}'. These are:", lines=list(SETTINGS), code="bad_setting")
 
 
-# Case matters in names (a player, a server's folder, a bot as the game shows
-# it); in codes and sizes it does not.
-LOWERCASE = ("account", "language", "gender", "heap")
+def layer_of(target):
+    if isinstance(target, Instance):
+        return INSTANCE
+    if isinstance(target, Character):
+        return BOT
+    raise TypeError(target)
 
 
 def normalize(key, value):
@@ -144,59 +152,134 @@ def normalize(key, value):
     return value.lower() if key in LOWERCASE else value
 
 
-def problem(bot, key, value):
-    """What is wrong with this value for this bot, or None."""
+def problem(target, key, value):
+    """What is wrong with this value, set at this target's layer, or None."""
     s = setting(key)
+    if layer_of(target) not in s.layers:
+        return f"it is set per {' or '.join(s.layers)}, not per {layer_of(target)}"
     value = normalize(key, value)
     if s.choices and key not in CHECKS and value not in s.choices:
         return "one of " + ", ".join(s.choices)
     check = CHECKS.get(key)
-    return check(bot, value) if check else None
+    return check(target, value) if check else None
 
 
-def get(bot, key):
-    """The value that applies: the file's, or the default."""
+def _raw(target, key):
+    v = target.data.get(key)
+    return "" if v is None else str(v)
+
+
+def resolve(target, key):
+    """(the value that applies, the layer it comes from: "instance", "bot"
+    or "default")."""
     s = setting(key)
-    return bot.read(key) or s.default_for(bot)
+    if isinstance(target, Instance):
+        if INSTANCE in s.layers and _raw(target, key):
+            return _raw(target, key), INSTANCE
+        bot = target.bot
+        if BOT in s.layers and bot.exists() and _raw(bot, key):
+            return _raw(bot, key), BOT
+    elif BOT in s.layers and _raw(target, key):
+        return _raw(target, key), BOT
+    return s.default_for(target), "default"
 
 
-def is_set(bot, key):
-    return bool(bot.read(key))
+def get(target, key):
+    return resolve(target, key)[0]
 
 
-def set_value(bot, key, value):
-    """Check, then write. Returns the value written."""
+def is_set(target, key):
+    """Whether this target's OWN layer names it."""
+    return bool(_raw(target, key))
+
+
+def set_value(target, key, value):
+    """Check, then write into this target's own layer. Returns the value written."""
     value = normalize(key, value)
-    wrong = problem(bot, key, value)
+    wrong = problem(target, key, value)
     if wrong:
-        raise Fail(f"{bot.name}: '{value}' is not a valid {key}: {wrong}.", code="bad_setting")
-    bot.write(key, value)
-    if key in APPLY:
-        APPLY[key](bot, value)
+        who = target.id if isinstance(target, Instance) else f"the bot {target.key}"
+        raise Fail(f"{who}: '{value}' is not a valid {key}: {wrong}.", code="bad_setting")
+    data = target.data
+    data[key] = int(value) if key == "port" else value
+    target.save(data)
     return value
 
 
-def clear(bot, key):
-    """Back to the default: the file goes. A required one cannot."""
+def clear(target, key):
+    """Back to what the layer below says: the key leaves this layer."""
     s = setting(key)
-    if s.required:
-        raise Fail(f"{key} has no default: every bot needs one.", code="bad_setting")
-    try:
-        (bot.dir / key).unlink()
-    except FileNotFoundError:
-        pass
-    if key in APPLY:
-        APPLY[key](bot, s.default_for(bot))
+    if layer_of(target) not in s.layers:
+        raise Fail(f"{key} is set per {' or '.join(s.layers)}, not per {layer_of(target)}.",
+                   code="bad_setting")
+    if key == "port":
+        raise Fail("port has no default: every instance needs one.", code="bad_setting")
+    data = target.data
+    data.pop(key, None)
+    target.save(data)
 
 
-def problems(bot):
-    """(key, what is wrong) for every file present with a value that would
-    be refused if it were set now: files are also edited by hand."""
+def problems(target):
+    """(key, what is wrong) for every value this target's own layer holds
+    that would be refused if it were set now: the JSON files can also be
+    edited by hand."""
     out = []
-    for key in SETTINGS:
-        value = bot.read(key)
-        if value:
-            wrong = problem(bot, key, value)
-            if wrong:
-                out.append((key, f"'{value}' is not a valid {key}: {wrong}"))
+    for key, value in target.data.items():
+        if key in ("name", "bot", "server") or value in (None, ""):
+            continue
+        if key not in SETTINGS:
+            out.append((key, f"'{key}' is not a setting"))
+            continue
+        wrong = problem(target, key, str(value))
+        if wrong:
+            out.append((key, f"'{value}' is not a valid {key}: {wrong}"))
     return out
+
+
+# --- what the bridge reads -------------------------------------------------------
+
+# The flat files the bridge and the MCP server read in an instance's folder, one
+# value each, written only when a layer sets them: without the file they apply
+# the same defaults as the table above (MARIONETTE_OWNER for the owner).
+RENDERED = ("account", "language", "gender", "escort", "model", "owner")
+
+
+def render(inst):
+    """Write what the bridge reads, from the layers: one file per setting,
+    the port, the server's slug, the personality, and HeadlessMC's own config
+    (the player name, offline or not, and the game folder, which moves with
+    the instance)."""
+    inst.dir.mkdir(parents=True, exist_ok=True)
+
+    def put(name, text):
+        f = inst.dir / name
+        text = f"{text}\n"
+        try:
+            if f.read_text(encoding="utf-8") == text:
+                return
+        except OSError:
+            pass
+        f.write_text(text, encoding="utf-8")
+
+    for key in RENDERED:
+        value, layer = resolve(inst, key)
+        if layer == "default" or not value:
+            unlink_quietly(inst.dir / key)
+        else:
+            put(key, value)
+    put("port", inst.port)
+    put("server", inst.slug)
+    bot = inst.bot
+    if bot.personality.is_file():
+        shutil.copyfile(bot.personality, inst.dir / "personality.txt")
+    else:
+        unlink_quietly(inst.dir / "personality.txt")
+    cfg = inst.hmc / "HeadlessMC" / "config.properties"
+    if cfg.parent.is_dir():
+        props = read_java_properties(cfg)
+        props.setdefault("hmc.jline.enabled", "false")
+        props["hmc.offline"] = "true" if get(inst, "account") == "offline" else "false"
+        props["hmc.offline.username"] = inst.name
+        props.setdefault("hmc.invert.command.modifiers", "false")
+        props["hmc.gamedir"] = str(inst.gamedir)
+        cfg.write_text("".join(f"{k}={v}\n" for k, v in props.items()), encoding="utf-8")

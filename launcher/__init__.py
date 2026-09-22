@@ -11,14 +11,17 @@ the command line (cli.py, reached through marionette.py) today, a window
 tomorrow, both on the same functions.
 
     workspace.py   the three folders, server.env, the environment; the server registry
-    bots.py        a bot's folder and files, and the lock that keeps two commands off it
-    settings.py    what each of a bot's files accepts, its default, when a change counts
+    bots.py        bots (characters) and instances (a bot on a server), and the lock
+                   that keeps two commands off an instance
+    settings.py    settings in layers (bot < instance), what each accepts, when it counts,
+                   and what is rendered for the bridge
     packs.py       what a pack is made of, read from the jars; the pack owns gamedir/mods
     api.py         the server mod's HTTP API
     keeper.py      the process that holds a game's console
     processes.py   pids, process groups, ports
     diagnosis.py   why a start failed, from the client's own logs
-    operations.py  create, start, connect, bridge, stop, restart, status, set, deploy-mod
+    operations.py  create, clone, start, connect, bridge, stop, restart, status, set,
+                   deploy-mod, migrate
     doctor.py      the checks, in the order things break
     events.py      Event and Fail
     files.py       env files, locks, logs read as they grow
@@ -28,11 +31,12 @@ A program uses it like this:
 
     from launcher import Workspace, operations
     ws = Workspace.from_environment()
-    operations.start(ws.bot("Alice"), on_event=print)
+    operations.start(ws.instance("alice"), on_event=print)
 """
-from . import doctor, operations
-from .bots import Bot
-from .events import Event, Fail
+from . import doctor, operations, settings
+from .bots import Character, Instance
+from .events import Cancel, Event, Fail
 from .workspace import Server, Workspace
 
-__all__ = ["Bot", "Event", "Fail", "Server", "Workspace", "doctor", "operations"]
+__all__ = ["Cancel", "Character", "Event", "Fail", "Instance", "Server", "Workspace",
+           "doctor", "operations", "settings"]

@@ -73,96 +73,127 @@ def cmd_servers(ws, args):
         say("  " + line)
 
 
-def cmd_create(ws, args):
-    bot = operations.create_bot(ws, args.name, args.server, args.account, print_event)
-    say(f"==> files you may want to edit in {bot.dir}: personality.txt, language (en/es),")
-    say("    owner (a player name), model, escort (makes it a guard of that bot).")
+def cmd_bots(ws, args):
+    bots = ws.bots()
+    if not bots:
+        say(f"no bots under {ws.bots_dir}")
+    for bot in bots:
+        insts = ", ".join(i.key for i in bot.instances()) or "no instances"
+        say(f"  {bot.key:<16} plays as {bot.name:<16} {settings.get(bot, 'account'):<8} {insts}")
+    for key in ws.legacy_bots():
+        say(f"  {key:<16} (layout from before instances: marionette.py migrate)")
+
+
+def next_steps(inst):
     say()
-    if bot.read("account") == "online":
-        say(f"log in its Minecraft account once:  marionette.py login {args.name}")
-        say(f"then start it with:                 marionette.py start {args.name}")
+    say(f"==> files you may want to edit: {inst.bot.personality}")
+    say(f"    settings:  marionette.py set {inst.key}   (the bot's, for every instance: set --bot {inst.bot.key})")
+    if settings.get(inst, "account") == "online":
+        say(f"log in its Minecraft account once:  marionette.py login {inst.key}")
+        say(f"then start it with:                 marionette.py start {inst.key}")
     else:
         say("offline account: only for private servers with online-mode=false.")
-        say(f"start it with:  marionette.py start {args.name}")
+        say(f"start it with:  marionette.py start {inst.key}")
+
+
+def cmd_create(ws, args):
+    inst = operations.create(ws, args.name, args.server, args.account, args.bot, args.as_, print_event)
+    next_steps(inst)
+
+
+def cmd_clone(ws, args):
+    inst = operations.clone_instance(ws, args.instance, args.as_, args.server, print_event)
+    next_steps(inst)
+
+
+def cmd_clone_bot(ws, args):
+    bot = operations.clone_bot(ws, args.bot, args.as_, print_event)
+    say(f"    an instance of it:  marionette.py create {bot.name} <server> --bot {bot.key}")
 
 
 def cmd_login(ws, args):
     """Opens HeadlessMC interactively: type `login`, follow its instructions,
     and `quit`."""
-    bot = ws.bot(args.name).require()
-    command = operations.login_command(bot)
+    inst = ws.instance(args.name)
+    command = operations.login_command(inst)
     if command is None:
-        say(f"{bot.name} uses an offline account; there is nothing to log in.")
+        say(f"{inst.key} uses an offline account; there is nothing to log in.")
         return 0
     argv, cwd, env = command
-    with operating(bot):
-        say(f"==> HeadlessMC for {bot.name}. Type:  login   (then follow the instructions)")
+    with operating(inst):
+        say(f"==> HeadlessMC for {inst.key} ({inst.name}). Type:  login   (then follow the instructions)")
         say("    and when the account is saved:  quit")
         return subprocess.call(argv, cwd=str(cwd), env=env)
 
 
 def cmd_start(ws, args):
-    bot = ws.bot(args.name)
-    cancellable(lambda cancel: operations.start(bot, args.server, print_event, cancel))
+    inst = ws.instance(args.name)
+    cancellable(lambda cancel: operations.start(inst, print_event, cancel))
 
 
 def cmd_connect(ws, args):
-    bot = ws.bot(args.name)
-    cancellable(lambda cancel: operations.connect(bot, print_event, cancel))
+    inst = ws.instance(args.name)
+    cancellable(lambda cancel: operations.connect(inst, print_event, cancel))
 
 
 def cmd_bridge(ws, args):
-    operations.start_bridge(ws.bot(args.name), print_event)
+    operations.start_bridge(ws.instance(args.name), print_event)
 
 
 def cmd_stop(ws, args):
-    operations.stop(ws.bot(args.name), args.keep_guards, print_event)
+    operations.stop(ws.instance(args.name), args.keep_guards, print_event)
 
 
 def cmd_restart(ws, args):
-    bot = ws.bot(args.name)
-    cancellable(lambda cancel: operations.restart(bot, args.server, print_event, cancel))
+    inst = ws.instance(args.name)
+    cancellable(lambda cancel: operations.restart(inst, print_event, cancel))
 
 
 def cmd_status(ws, args):
-    if not args.name and not ws.bot_keys():
-        say(f"no bots under {ws.bots_dir}")
+    if not args.name and not ws.instance_keys():
+        say(f"no instances under {ws.instances_dir}")
+        if ws.legacy_bots():
+            say("(there are bots in the layout from before instances: marionette.py migrate)")
         return 0
     problems, statuses = operations.survey(ws, args.name)
     for problem in problems:
-        say(f"({problem}; 'in server' is unknown for its bots)")
+        say(f"({problem}; 'in server' is unknown for its instances)")
     yes_no = lambda v: "-" if v is None else ("yes" if v else "no")
-    say(f"  {'bot':<16} {'server':<14} {'port':<5} {'client':<7} {'hands':<6} "
-        f"{'in server':<10} {'bridge':<7} {'guard of'}")
+    say(f"  {'instance':<16} {'plays as':<16} {'server':<14} {'port':<5} {'client':<7} {'hands':<6} "
+        f"{'in server':<10} {'bridge':<10} {'guard of'}")
     for s in statuses:
         bridge = f"pid {s.bridge}" if s.bridge else "no"
-        say(f"  {s.name:<16} {s.server:<14} {s.port:<5} {yes_no(s.client):<7} {yes_no(s.hands):<6} "
-            f"{yes_no(s.inside):<10} {bridge:<7} {s.guard_of}")
+        say(f"  {s.key:<16} {s.name:<16} {s.server:<14} {s.port:<5} {yes_no(s.client):<7} "
+            f"{yes_no(s.hands):<6} {yes_no(s.inside):<10} {bridge:<10} {s.guard_of}")
 
 
 def cmd_set(ws, args):
-    """marionette.py set Alice                 every setting, its value and what it is
-    marionette.py set Alice heap             one
-    marionette.py set Alice heap 4g          change it
-    marionette.py set Alice heap --default   back to the default"""
-    bot = ws.bot(args.name).require()
+    """marionette.py set alice                  every setting of the instance, and where it comes from
+    marionette.py set alice heap             one
+    marionette.py set alice heap 4g          change it, for this instance
+    marionette.py set alice heap --default   take it out of the instance: the bot's, or the default
+    marionette.py set --bot alice model sonnet    the bot's, for all its instances"""
+    target = ws.bot(args.name).require() if args.bot else ws.instance(args.name)
     if args.value or args.default:
         if not args.key:
-            raise Fail("say which setting:  marionette.py set <bot> <setting> <value>", code="bad_setting")
-        operations.configure(bot, args.key, " ".join(args.value or []), clear=args.default,
+            raise Fail("say which setting:  marionette.py set <instance> <setting> <value>",
+                       code="bad_setting")
+        operations.configure(target, args.key, " ".join(args.value or []), clear=args.default,
                              on_event=print_event)
         return 0
-    keys = [settings.setting(args.key).key] if args.key else list(settings.SETTINGS)
+    layer = settings.layer_of(target)
+    keys = [settings.setting(args.key).key] if args.key else [
+        k for k, s in settings.SETTINGS.items() if layer in s.layers]
     for key in keys:
         s = settings.SETTINGS[key]
-        value = settings.get(bot, key)
-        mark = "" if settings.is_set(bot, key) else "  (default)"
-        say(f"  {key:<9} {(value or '-') + mark:<24} {s.help}")
+        value, source = settings.resolve(target, key)
+        mark = "" if source == layer else f"  ({source})"
+        say(f"  {key:<9} {(str(value) or '-') + mark:<26} {s.help}")
         if args.key:
             if s.choices:
                 say(f"  {'':<9} choices: {', '.join(s.choices)}")
-            say(f"  {'':<9} counts {settings.APPLIES[s.applies]}")
-    for key, why in settings.problems(bot):
+            say(f"  {'':<9} set per {' or '.join(s.layers)}; counts {settings.APPLIES[s.applies]}")
+    for key, why in settings.problems(target):
         if key in keys:
             say(f"  !! {why}")
     return 0
@@ -183,9 +214,13 @@ def cmd_doctor(ws, args):
     return 1 if bad else 0
 
 
+def cmd_migrate(ws, args):
+    operations.migrate(ws, args.dry_run, print_event)
+
+
 def cmd_keeper(ws, args):
-    bot = ws.bot(args.name).require()
-    return keeper_main(bot, ws.server(args.server))
+    inst = ws.instance(args.name)
+    return keeper_main(inst, ws.server(inst.slug))
 
 
 def cmd_spawn(ws, args):
@@ -198,66 +233,83 @@ def cmd_spawn(ws, args):
 def build_parser():
     p = argparse.ArgumentParser(
         prog="marionette.py",
-        description="Create, start, stop and watch Marionette bots.")
+        description="Create, start, stop and watch Marionette bots. A bot is a character; an "
+                    "instance is a bot on a server, and is what starts and stops.")
     sub = p.add_subparsers(dest="command", metavar="command")
     sub.required = True
 
     sub.add_parser("servers", help="list the servers in the registry").set_defaults(fn=cmd_servers)
+    sub.add_parser("bots", help="list the bots (the characters) and their instances").set_defaults(fn=cmd_bots)
 
-    c = sub.add_parser("create", help="create a bot, ready to start")
-    c.add_argument("name")
+    c = sub.add_parser("create", help="create a bot (if new) and an instance of it on a server")
+    c.add_argument("name", help="its player name in the game")
     c.add_argument("server", help="a slug from `servers`")
     c.add_argument("--account", choices=("online", "offline"),
-                   help="online (default: a purchased account, logged in once) "
+                   help="for a new bot: online (default: a purchased account, logged in once) "
                         "or offline (private servers with online-mode=false)")
+    c.add_argument("--bot", help="the bot's name here (default: the player name in lowercase)")
+    c.add_argument("--as", dest="as_", metavar="INSTANCE", help="the instance's name (default: the bot's)")
     c.set_defaults(fn=cmd_create)
 
-    c = sub.add_parser("login", help="log a bot's Minecraft account in, once")
-    c.add_argument("name")
+    c = sub.add_parser("clone", help="another instance of the same bot, on this server or another")
+    c.add_argument("instance")
+    c.add_argument("--server", help="where the clone plays (default: the same server)")
+    c.add_argument("--as", dest="as_", metavar="INSTANCE", help="its name (default: <instance>-1, -2...)")
+    c.set_defaults(fn=cmd_clone)
+
+    c = sub.add_parser("clone-bot", help="a new bot from another: its settings and personality")
+    c.add_argument("bot")
+    c.add_argument("--as", dest="as_", metavar="BOT", help="its name (default: <bot>-1, -2...)")
+    c.set_defaults(fn=cmd_clone_bot)
+
+    c = sub.add_parser("login", help="log an instance's Minecraft account in, once")
+    c.add_argument("name", metavar="instance")
     c.set_defaults(fn=cmd_login)
 
-    c = sub.add_parser("start", help="start a bot's client and put it on the server")
-    c.add_argument("name")
-    c.add_argument("server", nargs="?", help="switch it to this server (rebuilds its mods)")
+    c = sub.add_parser("start", help="start an instance's client and put it on its server")
+    c.add_argument("name", metavar="instance")
     c.set_defaults(fn=cmd_start)
 
     c = sub.add_parser("connect", help="put a live client back on its server")
-    c.add_argument("name")
+    c.add_argument("name", metavar="instance")
     c.set_defaults(fn=cmd_connect)
 
-    c = sub.add_parser("bridge", help="start a bot's bridge (its client must be in)")
-    c.add_argument("name")
+    c = sub.add_parser("bridge", help="start an instance's bridge (its client must be in)")
+    c.add_argument("name", metavar="instance")
     c.set_defaults(fn=cmd_bridge)
 
-    c = sub.add_parser("stop", help="stop a bot: client, bridge and its guards")
-    c.add_argument("name")
+    c = sub.add_parser("stop", help="stop an instance: client, bridge and its guards")
+    c.add_argument("name", metavar="instance")
     c.add_argument("--keep-guards", action="store_true", help="leave its guards running")
     c.set_defaults(fn=cmd_stop)
 
-    c = sub.add_parser("restart", help="stop and start a whole bot: client and bridge")
-    c.add_argument("name")
-    c.add_argument("server", nargs="?")
+    c = sub.add_parser("restart", help="stop and start a whole instance: client and bridge")
+    c.add_argument("name", metavar="instance")
     c.set_defaults(fn=cmd_restart)
 
-    c = sub.add_parser("status", help="what every bot is doing")
-    c.add_argument("name", nargs="?")
+    c = sub.add_parser("status", help="what every instance is doing")
+    c.add_argument("name", nargs="?", metavar="instance")
     c.set_defaults(fn=cmd_status)
 
-    c = sub.add_parser("set", help="see or change a bot's settings (language, heap, owner...)")
-    c.add_argument("name")
+    c = sub.add_parser("set", help="see or change settings (language, heap, owner...), per instance or per bot")
+    c.add_argument("name", metavar="instance", help="an instance, or a bot with --bot")
     c.add_argument("key", nargs="?", help="one setting; without it, all of them")
     c.add_argument("value", nargs="*", help="its new value (a model may be two words: haiku low)")
-    c.add_argument("--default", action="store_true", help="put it back to its default")
+    c.add_argument("--default", action="store_true", help="take it out of this layer")
+    c.add_argument("--bot", action="store_true", help="NAME is a bot: its settings, for all its instances")
     c.set_defaults(fn=cmd_set)
 
     c = sub.add_parser("deploy-mod", help="put a built jar in shared/mods, safely (the core by default)")
     c.add_argument("jar", nargs="?", help="a jar to deploy instead of the core, such as an add-on's")
     c.set_defaults(fn=cmd_deploy_mod)
-    sub.add_parser("doctor", help="check the machine, the folders and the server").set_defaults(fn=cmd_doctor)
+    sub.add_parser("doctor", help="check the machine, the folders and the servers").set_defaults(fn=cmd_doctor)
+
+    c = sub.add_parser("migrate", help="move bots from the layout before instances (a backup first)")
+    c.add_argument("--dry-run", action="store_true", help="only say what it would do")
+    c.set_defaults(fn=cmd_migrate)
 
     c = sub.add_parser("keeper", help=argparse.SUPPRESS)   # internal: started by `start`
     c.add_argument("name")
-    c.add_argument("server")
     c.set_defaults(fn=cmd_keeper)
 
     c = sub.add_parser("spawn", help=argparse.SUPPRESS)    # internal: see spawn_free

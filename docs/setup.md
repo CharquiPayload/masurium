@@ -144,7 +144,8 @@ comments on their own lines.
 ~/shared/mods/                  marionette-*.jar and hmc-specifics-*.jar
 ~/servers/<slug>/server.conf    one folder per server you connect to
 ~/servers/<slug>/mods/          client-side mods that server requires (may be empty)
-~/bots/                         created by the launcher, one folder per bot
+~/bots/                         created by the launcher: one folder per bot (a character)
+~/instances/                    created by the launcher: one folder per instance (a bot on a server)
 ```
 
 `~/.marionette/server.env`:
@@ -183,9 +184,11 @@ the file's path, never the token). A server without a file of its own uses
 `doctor` checks each server's mod, and that each such file is readable by you
 alone.
 
-The folders can be moved with `MARIONETTE_BOTS_DIR`, `MARIONETTE_SERVERS_DIR`
-and `MARIONETTE_COMMON_DIR`, either in the environment or as three more lines
-of `server.env` (`MARIONETTE_ENV` says where that file is). After building,
+The folders can be moved with `MARIONETTE_BOTS_DIR`, `MARIONETTE_INSTANCES_DIR`,
+`MARIONETTE_SERVERS_DIR`, `MARIONETTE_COMMON_DIR` and `MARIONETTE_STATE_DIR`
+(where the bridges keep their sessions and channels, `~/.marionette` by
+default), either in the environment or as more lines of `server.env`
+(`MARIONETTE_ENV` says where that file is). After building,
 `launcher/marionette.py deploy-mod` copies the mod into `shared/mods` safely,
 even with bots running, and clears out any older jar that would declare the
 same mod twice. `MARIONETTE_JAVA` points the bots at a particular `java` when
@@ -193,13 +196,19 @@ the one on the PATH is not 21.
 
 ### 4. Create and start a bot
 
+Two things to tell apart. A **bot** is a character: its name in the game, its
+personality, its settings (`bots/<bot>/`). An **instance** is a bot on a
+server, and it is what starts and stops: its game folder, its HeadlessMC, its
+logs, its port (`instances/<instance>/`). One bot can have several instances,
+on several servers.
+
 Everything goes through one command, `launcher/marionette.py`:
 
 ```bash
 launcher/marionette.py doctor            # the machine, the folders, the server: what is missing
-launcher/marionette.py create Alice <slug>
-launcher/marionette.py login Alice       # once: type `login`, follow the steps, then `quit`
-launcher/marionette.py restart Alice     # starts the client and, once it is in, its bridge
+launcher/marionette.py create Alice <slug>   # the bot Alice and the instance alice on that server
+launcher/marionette.py login alice       # once: type `login`, follow the steps, then `quit`
+launcher/marionette.py restart alice     # starts the client and, once it is in, its bridge
 ```
 
 For an offline bot on a private server with `online-mode=false`, create it with
@@ -207,53 +216,81 @@ For an offline bot on a private server with `online-mode=false`, create it with
 
 Then say its name in the chat: `Alice, come here`.
 
-The rest of the subcommands: `status` (every bot: client, hands, in the server,
-bridge), `start` (the client only), `connect` (rejoin after a log off), `bridge`
-(the bridge only), `stop` (client, bridge and its guards; `--keep-guards` leaves
-the guards), `servers` and `deploy-mod`. `start` and `restart` take a server
-slug to move the bot to another server, rebuilding its mods.
+The rest of the subcommands: `status` (every instance: client, hands, in the
+server, bridge), `bots`, `servers`, `start` (the client only), `connect`
+(rejoin after a log off), `bridge` (the bridge only), `stop` (client, bridge and
+its running guards; `--keep-guards` leaves the guards), `set` and `deploy-mod`.
+
+**Cloning.** `clone alice` makes `alice-1`, the same bot on the same server;
+`clone alice --server other` puts it on another. `clone-bot alice` makes a new
+bot from Alice (`alice-1`, playing as `Alice_1`) with her settings and
+personality; `create Alice_1 <slug> --bot alice-1` then gives it an instance.
+Clones are made without questions: two instances may even be the same player
+on the same server. What cannot happen is both **running**, and `start` is
+where that is refused, saying which instance is in the way:
+
+- the same player on the same server;
+- an **online** account already playing anywhere: one Microsoft account plays
+  in one game at a time (an offline player may be on two servers at once);
+- on one server, two players whose names contain one another: the bridge
+  reacts when its name is said, and calling one would wake both.
 
 Ctrl+C during `start`, `restart` or `connect` cancels: the launcher stops the
 client it had started instead of leaving a game loading in the background, and
 exits with 130. A second Ctrl+C leaves at once.
 
-A running bot leaves its tracks in `bots/<name>/run/`: `client.log` (the game),
-`bridge.log` (the brain's side), `keeper.log`, and the pid files. The
-**keeper** is a small process per bot, started by `start`, that holds the
-game's console open and takes lines for it on a localhost socket; it is how the
-launcher knows a bot is already running instead of starting it twice. While a
-command works on a bot it holds `run/launcher.lock`, and a second command on the
-same bot is refused until the first one ends.
+A running instance leaves its tracks in `instances/<instance>/run/`:
+`client.log` (the game), `bridge.log` (the brain's side), `keeper.log`, and the
+pid files. The **keeper** is a small process per instance, started by `start`,
+that holds the game's console open and takes lines for it on a localhost
+socket; it is how the launcher knows an instance is already running instead of
+starting it twice. While a command works on an instance it holds
+`run/launcher.lock`, and a second command on it is refused until the first one
+ends.
+
+**From the layout before instances.** Bots created before instances existed
+kept their game in their own folder. `marionette.py migrate --dry-run` says
+what it would do, and `marionette.py migrate` turns each one into a bot and an
+instance of the same name: the game folders are moved, not copied; what its
+bridge kept goes to its server's state folder; and a backup of every small file
+goes first to `<state>/backups/`. A bot that is running is left alone until it
+is stopped.
 
 ## Configuring a bot
 
-Each bot is a folder in `~/bots/<name>/`. Every file is optional except `port`
-and `server`, which the launcher writes. They are plain files, one value each,
-and can be edited by hand; `marionette.py set` changes them with a check first
-and says when the change counts:
+Settings live in two layers: the **bot's** (`bots/<bot>/bot.json`), for every
+instance of it, and the **instance's** (`instances/<instance>/instance.json`),
+which wins over the bot's. `marionette.py set` changes them with a check first
+and says when the change counts; `doctor` names any value, edited by hand, that
+`set` would refuse.
 
 ```bash
-launcher/marionette.py set Alice                  # every setting, its value and what it is
-launcher/marionette.py set Alice language es
-launcher/marionette.py set Alice model haiku low
-launcher/marionette.py set Alice heap --default   # back to the default
+launcher/marionette.py set alice                      # every setting, its value, and where it comes from
+launcher/marionette.py set --bot alice language es    # for every instance of the bot
+launcher/marionette.py set alice model haiku low      # for this instance only
+launcher/marionette.py set alice heap --default       # out of the instance: the bot's, or the default
 ```
 
-`doctor` names any file whose value `set` would refuse.
+The personality is a text file of its own, `bots/<bot>/personality.txt`: who
+the bot is, in second person; it goes at the start of its prompt.
 
-| file | meaning |
-|---|---|
-| `personality.txt` | who the bot is, in second person; goes at the start of its prompt |
-| `language` | `en` or `es`: the language it speaks in the chat |
-| `account` | `online` (a logged-in Minecraft account) or `offline` (private servers only) |
-| `owner` | the player the bot belongs to: it accepts their delicate orders, and they control it with `/marionette bot` on any server. It cannot be changed from inside the game |
-| `model` | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`) |
-| `escort` | the name of another bot: this bot becomes that bot's **guard** |
-| `heap` | the game's memory, e.g. `3g` (default `MARIONETTE_HEAP`, else `3g`) |
-| `gender` | `m` or `f`, for languages with grammatical gender (default `f`) |
+| setting | layers | meaning |
+|---|---|---|
+| `account` | bot, instance | `online` (a logged-in Minecraft account) or `offline` (private servers only) |
+| `language` | bot, instance | `en` or `es`: the language it speaks in the chat |
+| `gender` | bot, instance | `m` or `f`, for languages with grammatical gender (default `f`) |
+| `owner` | bot, instance | the player the bot belongs to: it accepts their delicate orders, and they control it with `/marionette bot` on any server. It cannot be changed from inside the game |
+| `model` | bot, instance | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`) |
+| `heap` | bot, instance | the game's memory, e.g. `3g` (default `MARIONETTE_HEAP`, else `3g`) |
+| `escort` | instance | the player name of another bot on its server: this one becomes that bot's **guard** |
+| `port` | instance | the local port of the bot mod, chosen by the launcher |
 
-**Main bots and guards.** A main bot takes orders and does jobs. A guard is a
-bot whose `escort` file names a main bot: it follows and protects it, sleeps
+The launcher writes what the bridge reads into the instance's folder on every
+start and every change, one small file per setting (`language`, `model`...):
+those are an output, not a place to edit.
+
+**Main bots and guards.** A main bot takes orders and does jobs. A guard is an
+instance whose `escort` names a main bot on its server: it follows and protects it, sleeps
 when it sleeps, shares its break whitelist, steps aside when it is in the way,
 and is stopped together with it. Guards mostly react, so a smaller model
 (`haiku low`) works well for them.

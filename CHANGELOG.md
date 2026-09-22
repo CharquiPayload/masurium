@@ -51,6 +51,15 @@ setting ignored it without a word.
   the client runs. `doctor` names hand-edited values `set` would refuse.
   `MARIONETTE_HEAP` and `MARIONETTE_VERSION` replace the old `HEAP` and
   `VERSION`, names generic enough to be set by something else.
+- Bots and instances. A bot is a character (`bots/<bot>/bot.json` and its
+  personality); an instance is a bot on a server and is what runs
+  (`instances/<instance>/`: its game, HeadlessMC, logs, port, extra mods and
+  its own settings, which win over the bot's). Instances and bots are cloned
+  without questions (`clone`, `clone-bot`); `start` refuses to run one player
+  twice (the same player on one server, or an online account already playing
+  anywhere) and says which instance is in the way. Each server's bridges keep
+  their state apart, so two instances of one bot on two servers share nothing.
+  `migrate` moves bots from the layout before instances, with a backup first.
 - Each server can have its own `servers/<slug>/server.env` (address and token
   of its server mod, readable by its owner only). The launcher, the bridge and
   the MCP server then talk to the server each bot is on, not to the one the

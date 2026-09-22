@@ -1,5 +1,16 @@
-"""A bot: its folder, its files, its name, and the lock that keeps two
-launcher commands off it at once."""
+"""Bots and instances.
+
+A bot (a Character here, to keep it apart from the running thing) is who it
+is: its name in the game, its personality, its settings. It lives in
+bots/<bot>/: bot.json and personality.txt.
+
+An instance is a bot on a server, and it is what runs: its own game folder,
+its HeadlessMC, its logs, its port, extra mods, and settings of its own that
+win over the bot's. It lives in instances/<name>/, and instance.json says
+which bot and which server.
+
+Plus the lock that keeps two launcher commands off one instance at a time.
+"""
 import contextlib
 import json
 import re
@@ -7,17 +18,18 @@ import threading
 import urllib.request
 
 from .events import Fail
-from .files import read_java_properties, read_pid, try_lock
+from .files import read_pid, try_lock
 from .workspace import FIRST_PORT
 
 NAME_RULE = re.compile(r"^[A-Za-z0-9_]{1,16}$")
+KEY_RULE = re.compile(r"^[a-z0-9_][a-z0-9_-]{0,31}$")
 
 
 def check_name(name):
-    """Minecraft's rules, not a whim: up to 16 characters, letters, digits and
-    underscore. An invalid name does not fail when the bot is created, it
-    fails when it JOINS, minutes later, when the error is hard to connect to
-    the cause."""
+    """Minecraft's rules for a player name, not a whim: up to 16 characters,
+    letters, digits and underscore. An invalid name does not fail when the
+    bot is created, it fails when it JOINS, minutes later, when the error is
+    hard to connect to the cause."""
     if not name or not re.match(r"^[A-Za-z0-9_]*$", name):
         raise Fail(f"'{name}' is not a valid name: only letters, digits and underscore.",
                    code="bad_name")
@@ -25,52 +37,150 @@ def check_name(name):
         raise Fail(f"'{name}' has {len(name)} characters; Minecraft allows 16.", code="bad_name")
 
 
-class Bot:
-    def __init__(self, ws, name):
+def check_key(key, what="bot"):
+    """A bot's name in the launcher: its folder. Lowercase letters, digits,
+    underscore and dash (a clone of alice is alice-1)."""
+    if not KEY_RULE.match(key or ""):
+        raise Fail(f"'{key}' is not a valid {what} name here: lowercase letters, digits, "
+                   "underscore and dash, up to 32.", code="bad_name")
+
+
+def read_json(path):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        raise Fail(f"{path} cannot be read: {e}", code="bad_json")
+    if not isinstance(data, dict):
+        raise Fail(f"{path} is not a JSON object.", code="bad_json")
+    return data
+
+
+def write_json(path, data):
+    """Whole or not at all: written next to it, then renamed over it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+class Character:
+    """A bot: bots/<key>/bot.json and personality.txt."""
+
+    def __init__(self, ws, key):
         self.ws = ws
-        self.given = name
-        self.key = name.lower()
+        self.key = key.lower()
         self.dir = ws.bots_dir / self.key
-        self.hmc = self.dir / "hmc"
-        self.gamedir = self.dir / "gamedir"
-        self.run = self.dir / "run"
+        self.json = self.dir / "bot.json"
+        self.personality = self.dir / "personality.txt"
 
     def __repr__(self):
-        return f"Bot({self.name!r})"
+        return f"Character({self.key!r})"
+
+    def __eq__(self, other):
+        return isinstance(other, Character) and other.dir == self.dir
+
+    def __hash__(self):
+        return hash(self.dir)
 
     def exists(self):
-        return self.dir.is_dir()
+        return self.json.is_file()
 
     def require(self):
         if not self.exists():
-            raise Fail(f"{self.dir} does not exist. Create it first:  "
-                       f"marionette.py create {self.given} <server>", code="no_bot")
+            raise Fail(f"there is no bot {self.key} (no {self.json}).", code="no_bot")
         return self
 
+    @property
+    def data(self):
+        return read_json(self.json)
+
+    def save(self, data):
+        write_json(self.json, data)
+
+    @property
+    def name(self):
+        """Its name in the game, with its capitals."""
+        return self.data.get("name") or self.key
+
+    def instances(self):
+        return [i for i in self.ws.instances() if i.data.get("bot") == self.key]
+
+
+class Instance:
+    """A bot on a server: instances/<key>/, with instance.json naming both."""
+
+    def __init__(self, ws, key):
+        self.ws = ws
+        self.key = key.lower()
+        self.dir = ws.instances_dir / self.key
+        self.json = self.dir / "instance.json"
+        self.hmc = self.dir / "hmc"
+        self.gamedir = self.dir / "gamedir"
+        self.run = self.dir / "run"
+        self.extra_mods = self.dir / "mods"
+
+    def __repr__(self):
+        return f"Instance({self.key!r})"
+
+    def __eq__(self, other):
+        return isinstance(other, Instance) and other.dir == self.dir
+
+    def __hash__(self):
+        return hash(self.dir)
+
+    @property
+    def id(self):
+        return self.key
+
+    def exists(self):
+        return self.json.is_file()
+
+    def require(self):
+        if not self.exists():
+            raise Fail(f"there is no instance {self.key}.", code="no_instance")
+        return self
+
+    @property
+    def data(self):
+        return read_json(self.json)
+
+    def save(self, data):
+        write_json(self.json, data)
+
+    @property
+    def slug(self):
+        return self.data.get("server", "")
+
+    @property
+    def bot(self):
+        return self.ws.bot(self.data.get("bot") or self.key)
+
+    @property
+    def name(self):
+        """The player name in the game, with its capitals: the bot's."""
+        return self.bot.name if self.bot.exists() else self.key
+
+    @property
+    def player(self):
+        return self.name.lower()
+
+    @property
+    def port(self):
+        try:
+            return int(self.data.get("port"))
+        except (TypeError, ValueError):
+            return FIRST_PORT
+
     def read(self, file, default=""):
+        """One of the flat files rendered here for the bridge (see settings.render)."""
         try:
             return (self.dir / file).read_text(encoding="utf-8").strip()
         except OSError:
             return default
 
-    def write(self, file, value):
-        (self.dir / file).write_text(f"{value}\n", encoding="utf-8")
-
-    @property
-    def name(self):
-        """The name with its capitals, from the hmc config, which is what the
-        game and the bridge use; the folder is lowercase."""
-        cfg = read_java_properties(self.hmc / "HeadlessMC" / "config.properties")
-        return cfg.get("hmc.offline.username") or self.given
-
-    @property
-    def port(self):
-        try:
-            return int(self.read("port"))
-        except ValueError:
-            return FIRST_PORT
-
-    # run/: what a running bot leaves behind, and nothing a person edits.
+    # run/: what a running instance leaves behind, and nothing a person edits.
     @property
     def keeper_pid_f(self): return self.run / "keeper.pid"
     @property
@@ -85,16 +195,33 @@ class Bot:
     def bridge_pid_f(self): return self.run / "bridge.pid"
     @property
     def bridge_log(self): return self.run / "bridge.log"
+
+    # Its server's state folder: what its bridge keeps (sessions, channels,
+    # jobs), per player, and the place that says which instance plays as
+    # which player there right now.
+    @property
+    def state(self):
+        return self.ws.server_state(self.slug)
+
+    @property
+    def place(self):
+        """state/servers/<slug>/bots/<player>: a link to the instance that
+        plays as <player> on that server now. The bridge's bots folder is
+        that `bots/`: the bots of its server, as it always read them."""
+        return self.state / "bots" / self.player
+
     @property
     def bridge_lock(self):
         # The bridge's own lock (mcp/bridge.py, only_one_bridge): it writes
         # its pid inside, which makes it the truth about a bridge started by
         # hand, without this launcher.
-        return self.ws.home / ".marionette" / f"bridge_{self.key}.lock"
+        return self.state / f"bridge_{self.player}.lock"
 
     def guards(self):
-        """The bots whose `escort` file names this one."""
-        return [g for g in self.ws.bots() if g.read("escort").lower() == self.key]
+        """The instances whose escort is this one's player, on its server."""
+        from . import settings
+        return [g for g in self.ws.instances(self.slug)
+                if g != self and settings.get(g, "escort").lower() == self.player]
 
     def ask(self, route, timeout=5):
         """One question to the bot mod itself, on its own port."""
@@ -107,29 +234,28 @@ _GUARD = threading.Lock()
 
 
 @contextlib.contextmanager
-def operating(bot):
-    """One launcher command at a time on a bot. Two `start`s of the same bot
-    run side by side (two terminals; a double click, the day there is a
-    window) both find no keeper and both launch a 3 GB java. The pid file
-    cannot prevent that, it is written seconds later; a lock taken before
-    looking can.
+def operating(inst):
+    """One launcher command at a time on an instance. Two `start`s of the
+    same instance run side by side (two terminals; a double click, the day
+    there is a window) both find no keeper and both launch a 3 GB java. The
+    pid file cannot prevent that, it is written seconds later; a lock taken
+    before looking can.
 
     Re-entrant for the thread that holds it (`restart` holds it through its
     stop and its start), and only for that one: a window runs operations on
     threads of its own, and a second thread is a second command."""
-    lock = bot.run / "launcher.lock"
+    lock = inst.run / "launcher.lock"
     me = threading.get_ident()
     with _GUARD:
         held = _OPERATING.get(str(lock))
         if held and held[0] == me:
             handle = None
         elif held:
-            raise Fail(f"another operation on {bot.name} is running in this program",
-                       code="busy")
+            raise Fail(f"another operation on {inst.id} is running in this program", code="busy")
         else:
             handle = try_lock(lock)
             if handle is None:
-                raise Fail(f"another launcher command is working on {bot.name} right now "
+                raise Fail(f"another launcher command is working on {inst.id} right now "
                            f"(pid {read_pid(lock) or '?'}). Wait for it, or see  marionette.py status",
                            code="busy")
             _OPERATING[str(lock)] = (me, handle)

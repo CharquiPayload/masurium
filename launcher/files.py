@@ -72,6 +72,39 @@ def write_private(path, text):
     os.replace(tmp, path)
 
 
+def link_dir(target, link):
+    """`link` becomes a link to the folder `target`, replacing what was there.
+    A symlink where the system allows one; on Windows, where a symlink needs
+    rights a user may not have, a junction, which does not (untested there
+    until the Windows port)."""
+    link = pathlib.Path(link)
+    link.parent.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() or link.is_file():
+        link.unlink()
+    elif link.is_dir():
+        # A junction reads as a folder; a real folder here is not ours to delete.
+        try:
+            os.rmdir(link)
+        except OSError:
+            raise OSError(f"{link} is a real folder, not a link: it will not be replaced")
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            raise
+        import subprocess
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)],
+                       check=True, capture_output=True)
+
+
+def link_target(link):
+    """Where a folder link points, or None."""
+    try:
+        return pathlib.Path(os.readlink(link))
+    except OSError:
+        return None
+
+
 def link_or_copy(src, dst):
     try:
         os.link(src, dst)

@@ -48,15 +48,21 @@ HOME = os.path.expanduser("~")
 BOTS_HOME = (os.environ.get("MARIONETTE_BOTS_DIR") or os.environ.get("MARIONETTE_BOTS")
              or f"{HOME}/bots")
 CONFIG = os.environ.get("MARIONETTE_ENV", f"{HOME}/.marionette/server.env")
+# Where this bridge keeps what it remembers between polls and between starts:
+# its session, the jobs left pending, the internal channel, the marks the MCP
+# leaves. The launcher gives each server a state folder of its own, so two
+# instances of one bot on two servers are two lives. Without it, next to
+# server.env (~/.marionette), where the MCP server keeps its marks as well.
+STATE = os.environ.get("MARIONETTE_STATE_DIR") or os.path.dirname(CONFIG)
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The MCP server the brain gets, passed inline: no config file with absolute
 # paths to keep in sync with wherever the repo happens to live.
 MCP_CONFIG = json.dumps({"mcpServers": {"bot": {
     "command": sys.executable, "args": [os.path.join(REPO, "mcp", "server.py")]}}})
-SESSION_F = pathlib.Path(f"{HOME}/.marionette/session_{NAME.lower()}")
+SESSION_F = pathlib.Path(f"{STATE}/session_{NAME.lower()}")
 # Jobs a tool left "in progress" (the MCP writes them down); see
 # pending_notices.
-PENDING_F = pathlib.Path(f"{HOME}/.marionette/pending_{NAME.lower()}.json")
+PENDING_F = pathlib.Path(f"{STATE}/pending_{NAME.lower()}.json")
 JOBS = {"fill_job": "the fill job", "travel": "the trip",
         "walk": "the walk", "digging": "what I was digging",
         "breeding": "the breeding", "staircase": "the staircase",
@@ -290,7 +296,7 @@ def guards_of(name=None, base=None):
 
 
 def internal_file(name=None):
-    return pathlib.Path(f"{HOME}/.marionette/internal_{(name or NAME).lower()}.jsonl")
+    return pathlib.Path(f"{STATE}/internal_{(name or NAME).lower()}.jsonl")
 
 
 def internal_new(since, file=None):
@@ -1265,7 +1271,7 @@ def only_one_bridge(file=None):
     lock held on an open file is released by the kernel however the process
     ends, so it can never be stale.
     """
-    f = pathlib.Path(file or f"{HOME}/.marionette/bridge_{NAME.lower()}.lock")
+    f = pathlib.Path(file or f"{STATE}/bridge_{NAME.lower()}.lock")
     f.parent.mkdir(parents=True, exist_ok=True)
     handle = open(f, "w")
     try:
@@ -1687,9 +1693,9 @@ WITH_AI = [False]
 
 
 def recent_mark(what, seconds):
-    """Whether the MCP left the mark .marionette/<what>_<bot> less than N seconds ago."""
+    """Whether the MCP left the mark <state>/<what>_<bot> less than N seconds ago."""
     try:
-        m = pathlib.Path(f"{HOME}/.marionette/{what}_{NAME.lower()}")
+        m = pathlib.Path(f"{STATE}/{what}_{NAME.lower()}")
         return time.time() - m.stat().st_mtime < seconds
     except OSError:
         return False
@@ -1701,7 +1707,7 @@ def talking_to_ai():
     if WITH_AI[0]:
         return True
     try:
-        mark = pathlib.Path(f"{HOME}/.marionette/talking_{NAME.lower()}")
+        mark = pathlib.Path(f"{STATE}/talking_{NAME.lower()}")
         return time.time() - mark.stat().st_mtime < 10
     except OSError:
         return False
@@ -1957,7 +1963,11 @@ def carry_out(order):
                           | subprocess.CREATE_NEW_PROCESS_GROUP}
                          if os.name == "nt" else {"start_new_session": True})
                 subprocess.Popen(
-                    [sys.executable, f"{REPO}/launcher/marionette.py", verb, NAME],
+                    # The instance, when the launcher said which one it is:
+                    # restarting by name would not know which of a bot's
+                    # instances this is.
+                    [sys.executable, f"{REPO}/launcher/marionette.py", verb,
+                     os.environ.get("MARIONETTE_INSTANCE") or NAME],
                     stdout=log_f, stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL, **apart)
         except Exception as e:
@@ -2186,7 +2196,7 @@ def spoke_with_say(since_id):
 # did; the bot's logbook mixes what the body does alone (eating, defending,
 # breathing) and is useless for this.
 CALLS = os.path.join(
-    os.path.dirname(os.environ.get("MARIONETTE_ENV", f"{HOME}/.marionette/server.env")),
+    STATE,
     "calls_%s.log" % NAME.lower())
 
 

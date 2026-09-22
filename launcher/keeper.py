@@ -36,7 +36,7 @@ GAME_OVER = "Minecraft exited with code"
 KEEPER_ENDED = "game exited"
 
 
-def launch_line(bot, server):
+def launch_line(inst, server):
     """What HeadlessMC is told. Two things that cost a night when nobody knew
     them: NO -commands (that flag puts HeadlessMC's runtime inside the game,
     and then TWO consoles read the same stdin, stealing each other's lines),
@@ -48,17 +48,17 @@ def launch_line(bot, server):
     creeper next to whoever it escorts) does not go through the brain, so the
     mod gets the same language and gender the bridge uses; only clean values
     reach the JVM."""
-    ws = bot.ws
-    offline = " -offline" if bot.read("account", "online") == "offline" else ""
-    # A heap file edited by hand is not trusted onto the JVM's command line:
+    ws = inst.ws
+    offline = " -offline" if settings.get(inst, "account") == "offline" else ""
+    # A heap edited by hand is not trusted onto the JVM's command line:
     # anything but a size falls back to the default (doctor says why).
-    heap = settings.get(bot, "heap")
-    if settings.problem(bot, "heap", heap):
+    heap = settings.get(inst, "heap")
+    if settings.problem(inst, "heap", heap):
         heap = ws.heap()
-    jvm = [f"-Xmx{heap}", f"-Dmarionette.name={bot.name}",
-           "-Dmarionette.headless=true", f"-Dmarionette.bot.port={bot.port}"]
-    language = re.sub(r"[^A-Za-z]", "", bot.read("language"))[:8]
-    gender = re.sub(r"[^A-Za-z]", "", bot.read("gender"))[:1]
+    jvm = [f"-Xmx{heap}", f"-Dmarionette.name={inst.name}",
+           "-Dmarionette.headless=true", f"-Dmarionette.bot.port={inst.port}"]
+    language = re.sub(r"[^A-Za-z]", "", settings.get(inst, "language"))[:8]
+    gender = re.sub(r"[^A-Za-z]", "", settings.get(inst, "gender"))[:1]
     if language:
         jvm.append(f"-Dmarionette.language={language}")
     if gender:
@@ -66,21 +66,21 @@ def launch_line(bot, server):
     return f"launch {ws.version_for(server)} -lwjgl{offline} -paulscode --jvm \"{' '.join(jvm)}\""
 
 
-def clear_run_files(bot):
-    unlink_quietly(bot.keeper_port_f, bot.client_pid_f, bot.keeper_pid_f)
+def clear_run_files(inst):
+    unlink_quietly(inst.keeper_port_f, inst.client_pid_f, inst.keeper_pid_f)
 
 
-def keeper_main(bot, server):
+def keeper_main(inst, server):
     """The keeper's whole life. Runs in a process of its own (marionette.py
     keeper), with its stdout on run/keeper.log."""
-    bot.run.mkdir(parents=True, exist_ok=True)
+    inst.run.mkdir(parents=True, exist_ok=True)
 
     def note(m):
         print(time.strftime("%H:%M:%S"), m, flush=True)
 
     # Its pid FIRST: from here on `start` can tell a keeper that is loading
     # the game from one that never got going.
-    bot.keeper_pid_f.write_text(f"{os.getpid()}\n")
+    inst.keeper_pid_f.write_text(f"{os.getpid()}\n")
     if not WINDOWS:
         # A plain SIGTERM would end Python on the spot, skipping the finally
         # below, and leave the game running with nobody at its stdin. As an
@@ -96,39 +96,39 @@ def keeper_main(bot, server):
     control_port = listener.getsockname()[1]
     token = secrets.token_hex(16)
 
-    client_log = open(bot.client_log, "ab")
+    client_log = open(inst.client_log, "ab")
     # In a group of its own: HeadlessMC starts the game as a child java, and
     # the group is how both are stopped together (kill_tree).
     try:
         game = subprocess.Popen(
-            bot.ws.java_command() + ["-jar", "headlessmc-launcher.jar"],
-            cwd=str(bot.hmc), stdin=subprocess.PIPE, stdout=client_log,
-            stderr=subprocess.STDOUT, env=bot.ws.child_env(), **own_group())
+            inst.ws.java_command() + ["-jar", "headlessmc-launcher.jar"],
+            cwd=str(inst.hmc), stdin=subprocess.PIPE, stdout=client_log,
+            stderr=subprocess.STDOUT, env=inst.ws.child_env(), **own_group())
     except OSError as e:
         # No java, or not that one. Said in one line `start` is waiting for,
         # instead of a traceback it is not.
-        note(f"{KEEPER_FAILED}: could not run {' '.join(bot.ws.java_command())}: {e}")
+        note(f"{KEEPER_FAILED}: could not run {' '.join(inst.ws.java_command())}: {e}")
         client_log.close()
         listener.close()
-        clear_run_files(bot)
+        clear_run_files(inst)
         return 1
-    bot.client_pid_f.write_text(f"{game.pid}\n")
+    inst.client_pid_f.write_text(f"{game.pid}\n")
     # The port file goes LAST: whoever sees it may talk to a keeper that is whole.
-    write_private(bot.keeper_port_f, f"{control_port} {token}\n")
-    note(f"keeper of {bot.name}: game pid {game.pid}, control port {control_port}")
+    write_private(inst.keeper_port_f, f"{control_port} {token}\n")
+    note(f"keeper of {inst.key} ({inst.name}): game pid {game.pid}, control port {control_port}")
 
     def to_game(line):
         game.stdin.write((line + "\n").encode("utf-8"))
         game.stdin.flush()
 
-    line = launch_line(bot, server)
+    line = launch_line(inst, server)
     note(line)
     to_game(line)
 
     # HeadlessMC is a console around the game: when the game crashes at
     # startup it can stay at its prompt, alive, with nothing behind it. The
     # line it prints then is the sign that the game is gone, not the process.
-    watch = LogWatch(bot.client_log, GAME_OVER)
+    watch = LogWatch(inst.client_log, GAME_OVER)
     stopping = False
     last_look = 0.0
     try:
@@ -183,10 +183,10 @@ def keeper_main(bot, server):
         # The launcher AND the game under it. A JVM asked to stop runs the
         # game's shutdown hooks first (it saves), which takes a while with a
         # world loaded; stop_game has the patience for that.
-        if stopping or game.poll() is None or port_in_use(bot.port):
+        if stopping or game.poll() is None or port_in_use(inst.port):
             note("terminating the game")
-            if not stop_game(bot.port, game.pid):
-                note(f"something still holds port {bot.port}: {game_pids(bot.port)}")
+            if not stop_game(inst.port, game.pid):
+                note(f"something still holds port {inst.port}: {game_pids(inst.port)}")
         try:
             game.wait(timeout=5)      # reap the launcher; a pid probe would see a zombie
         except subprocess.TimeoutExpired:
@@ -194,20 +194,20 @@ def keeper_main(bot, server):
         note(f"{KEEPER_ENDED} with {game.poll()}")
         client_log.close()
         listener.close()
-        clear_run_files(bot)
+        clear_run_files(inst)
     return 0
 
 
-def keeper_ask(bot, line, timeout=5):
-    """One line to this bot's keeper; its one-line answer. None when there is
+def keeper_ask(inst, line, timeout=5):
+    """One line to this instance's keeper; its one-line answer. None when there is
     no keeper to talk to."""
     try:
-        fields = bot.keeper_port_f.read_text().split()
+        fields = inst.keeper_port_f.read_text().split()
         port = int(fields[0])
     except (OSError, ValueError, IndexError):
         return None
     # A keeper older than the token writes the port alone, and takes the
-    # line bare: it goes on working until its bot is restarted.
+    # line bare: it goes on working until its instance is restarted.
     if len(fields) > 1:
         line = f"{fields[1]} {line}"
     try:
@@ -225,19 +225,19 @@ def keeper_ask(bot, line, timeout=5):
         return None
 
 
-def keeper_alive(bot):
+def keeper_alive(inst):
     """The keeper answers, and the game it holds is the pid it claims."""
-    answer = keeper_ask(bot, "@ping")
+    answer = keeper_ask(inst, "@ping")
     return bool(answer and answer.startswith("ok "))
 
 
-def keeper_pid(bot):
-    """The pid in keeper.pid, only while it still is this bot's keeper."""
-    pid = read_pid(bot.keeper_pid_f)
-    return pid if is_ours(pid, "marionette.py", "keeper", bot.name) else None
+def keeper_pid(inst):
+    """The pid in keeper.pid, only while it still is this instance's keeper."""
+    pid = read_pid(inst.keeper_pid_f)
+    return pid if is_ours(pid, "marionette.py", "keeper", inst.key) else None
 
 
-def launcher_pid(bot):
+def launcher_pid(inst):
     """The pid in client.pid, only while it still is a HeadlessMC launcher."""
-    pid = read_pid(bot.client_pid_f)
+    pid = read_pid(inst.client_pid_f)
     return pid if is_ours(pid, "headlessmc-launcher.jar") else None

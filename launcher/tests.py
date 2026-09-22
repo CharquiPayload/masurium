@@ -2,8 +2,9 @@
 """Tests of the launcher. No Minecraft, no server, no network.
 
 What is tested is the part that used to live in bash and could only be tested
-by starting a bot: the folders, the names, the ports, the mods, and the
-keeper, which is run for real against a fake game that echoes what it is told.
+by starting a bot: the folders, the names, the ports, the mods, bots and
+instances, and the keeper, which is run for real against a fake game that
+echoes what it is told.
 
 Run:  python3 launcher/tests.py
 """
@@ -38,19 +39,20 @@ FAKE_JAVA.write_text(
 FAKE_JAVA.chmod(FAKE_JAVA.stat().st_mode | stat.S_IEXEC)
 
 sys.path.insert(0, str(REPO))
-from launcher import cli, doctor, operations as ops  # noqa: E402
+from launcher import cli, doctor, operations as ops, settings  # noqa: E402
 from launcher import bots, files, keeper, packs, processes  # noqa: E402
 from launcher.events import Fail  # noqa: E402
 from launcher.workspace import DEFAULT_HEAP, DEFAULT_VERSION, FIRST_PORT, Workspace  # noqa: E402
 
 # Every test runs in a workspace of its own, under TMP, home included: nothing
-# here reads or writes the real ~/bots, ~/servers, ~/shared or ~/.marionette.
+# here reads or writes the real ~/bots, ~/instances, ~/servers, ~/shared or
+# ~/.marionette.
 ENVIRON = dict(os.environ)
 for k in ("HEAP", "VERSION", "MARIONETTE_HEAP", "MARIONETTE_VERSION", "MARIONETTE_ACCOUNT"):
     ENVIRON.pop(k, None)
 ENVIRON["MARIONETTE_JAVA"] = str(FAKE_JAVA)
 WS = Workspace(TMP / "bots", TMP / "servers", TMP / "shared", TMP / "server.env",
-               home=TMP, environ=ENVIRON)
+               home=TMP, environ=ENVIRON, instances_dir=TMP / "instances", state_dir=TMP / "state")
 
 
 # --- minimal harness --------------------------------------------------------
@@ -113,8 +115,8 @@ def wait(predicate, seconds):
 
 
 def layout():
-    """The three folders and a server, fresh, with a jar in each mods folder."""
-    for d in ("bots", "servers/test/mods", "shared/mods"):
+    """The folders and a server, fresh, with a jar in each mods folder."""
+    for d in ("bots", "instances", "servers/test/mods", "shared/mods"):
         (TMP / d).mkdir(parents=True, exist_ok=True)
     (TMP / "shared" / "headlessmc-launcher.jar").write_bytes(b"not really a jar")
     (TMP / "shared" / "mods" / "marionette-1.0.0.jar").write_bytes(b"m")
@@ -127,6 +129,18 @@ def layout():
         "MARIONETTE_OWNER=Owner\n")
 
 
+def second_server(slug="other"):
+    d = TMP / "servers" / slug
+    (d / "mods").mkdir(parents=True, exist_ok=True)
+    (d / "server.conf").write_text("HOST=10.0.0.6\n")
+    return d
+
+
+def remove_tree(path):
+    import shutil
+    shutil.rmtree(path, ignore_errors=True)
+
+
 def quick_server_env():
     """A server mod that refuses at once (127.0.0.1:1) instead of one that
     times out, so a `start` under test fails in a second, not in ten."""
@@ -134,13 +148,14 @@ def quick_server_env():
                                     "MARIONETTE_TOKEN=t\n")
 
 
-def start_keeper(name="Alice"):
-    bot = WS.bot(name)
-    bot.run.mkdir(parents=True, exist_ok=True)
-    files.unlink_quietly(bot.client_log, bot.keeper_log)
-    processes.spawn_free([sys.executable, str(HERE / "marionette.py"), "keeper", name, "test"],
-                         bot.keeper_log, cwd=TMP, env=WS.child_env())
-    return bot
+def start_keeper(key="alice"):
+    """A keeper holding the fake game for an instance, as `start` launches it."""
+    inst = WS.instance(key)
+    inst.run.mkdir(parents=True, exist_ok=True)
+    files.unlink_quietly(inst.client_log, inst.keeper_log)
+    processes.spawn_free([sys.executable, str(HERE / "marionette.py"), "keeper", key],
+                         inst.keeper_log, cwd=TMP, env=WS.child_env())
+    return inst
 
 
 # --- files ------------------------------------------------------------------
@@ -164,6 +179,8 @@ def tests_files():
     check("java properties", files.read_java_properties(p).get("hmc.offline.username") == "Alice")
 
 
+
+
 # --- the workspace ----------------------------------------------------------
 
 def tests_workspace():
@@ -174,36 +191,38 @@ def tests_workspace():
                                      "MARIONETTE_BOTS_DIR": "/from/the/environment"}, home=TMP)
     check("the environment wins", ws.bots_dir == pathlib.Path("/from/the/environment"))
     check("then server.env", ws.servers_dir == pathlib.Path("/from/the/file"))
-    check("then the default next to the home", ws.shared_dir == TMP / "shared")
+    check("then the default next to the home",
+          ws.shared_dir == TMP / "shared" and ws.instances_dir == TMP / "instances")
+    check("the state folder is next to server.env by default, where the bridge kept it",
+          ws.state_dir == TMP)
     check("two workspaces do not share their folders", WS.bots_dir == TMP / "bots")
     child = WS.child_env()
     check("children inherit the folders this workspace resolved",
-          child["MARIONETTE_BOTS_DIR"] == str(TMP / "bots") and child["MARIONETTE_ENV"] == str(TMP / "server.env"))
+          child["MARIONETTE_BOTS_DIR"] == str(TMP / "bots")
+          and child["MARIONETTE_INSTANCES_DIR"] == str(TMP / "instances")
+          and child["MARIONETTE_STATE_DIR"] == str(TMP / "state")
+          and child["MARIONETTE_ENV"] == str(TMP / "server.env"))
     check("...and ~/.local/bin first on PATH", child["PATH"].startswith(str(TMP / ".local" / "bin")))
     check("without server.env there is no API, and it is said",
           "missing" in told(fails(Workspace(TMP, TMP, TMP, TMP / "nope.env").api)))
+    check("a clone's name: the first of name, name-1, name-2... not taken",
+          WS.free_key("alice", ["alice", "alice-1"]) == "alice-2" and WS.free_key("alice", []) == "alice")
 
 
 # --- names and servers ------------------------------------------------------
 
 def tests_names():
-    print("\nNames: Minecraft's rules, refused at creation and not at join time")
+    print("\nNames: Minecraft's rules for players, the launcher's for folders")
     check("letters, digits, underscore pass", fails(bots.check_name, "Bot_42") is None)
-    check("a dash is refused", "not a valid name" in told(fails(bots.check_name, "bot-1")))
+    check("a dash is refused in a player name", "not a valid name" in told(fails(bots.check_name, "bot-1")))
     check("an accent is refused", fails(bots.check_name, "Iñaki") is not None)
     check("empty is refused", fails(bots.check_name, "") is not None)
     check("17 characters are refused", "allows 16" in told(fails(bots.check_name, "A" * 17)))
     check("16 characters pass", fails(bots.check_name, "A" * 16) is None)
+    check("a bot or instance name takes a dash (alice-1)", fails(bots.check_key, "alice-1") is None)
+    check("...but not capitals, spaces or slashes",
+          all(fails(bots.check_key, k) for k in ("Alice", "my bot", "../x", "")))
 
-    layout()
-    (TMP / "bots" / "adam").mkdir()
-    check("'ada' clashes with 'adam' (one contains the other)", WS.name_clash("ada") == "adam")
-    check("'adam' clashes with 'ada' the other way round", WS.name_clash("adam") is None)
-    (TMP / "bots" / "ada").mkdir()
-    check("a name does not clash with itself", WS.name_clash("adam") == "ada")
-    check("'eve' clashes with nobody", WS.name_clash("eve") is None)
-    for d in ("adam", "ada"):
-        (TMP / "bots" / d).rmdir()
 
 
 def tests_servers():
@@ -226,19 +245,21 @@ def tests_servers():
     (TMP / "servers" / "bad").rmdir()
 
 
+
+
 # --- ports and mods ---------------------------------------------------------
 
 def tests_ports():
-    print("\nPorts: a stopped bot keeps its port")
+    print("\nPorts: a stopped instance keeps its port")
     layout()
-    (TMP / "bots" / "one").mkdir()
-    (TMP / "bots" / "one" / "port").write_text(f"{FIRST_PORT}\n")
+    one = TMP / "instances" / "one"
+    one.mkdir(parents=True)
+    (one / "instance.json").write_text(json.dumps({"bot": "one", "server": "test", "port": FIRST_PORT}))
     check("the first port is reserved by 'one'", WS.port_reserved(FIRST_PORT))
     check("...but not against 'one' itself", not WS.port_reserved(FIRST_PORT, "one"))
     check("the free port skips it", WS.free_port("two") == FIRST_PORT + 1)
     check("a port nobody listens on is not in use", not processes.port_in_use(1))
-    (TMP / "bots" / "one" / "port").unlink()
-    (TMP / "bots" / "one").rmdir()
+    remove_tree(one)
 
     check("this process is alive", processes.pid_alive(os.getpid()))
     check("pid 0/None is not", not processes.pid_alive(None) and not processes.pid_alive(0))
@@ -246,9 +267,9 @@ def tests_ports():
 
 
 def tests_mods():
-    print("\nMods: gamedir/mods is rebuilt whole from shared and the pack")
+    print("\nMods: gamedir/mods is rebuilt whole from shared, the pack and the instance's extras")
     layout()
-    gamedir = TMP / "bots" / "x" / "gamedir"
+    gamedir = TMP / "x" / "gamedir"
     (gamedir / "mods").mkdir(parents=True)
     stray = gamedir / "mods" / "dropped-by-hand.jar"
     stray.write_bytes(b"s")
@@ -263,145 +284,233 @@ def tests_mods():
           same or linked.read_bytes() == source.read_bytes())
     linked.unlink()
     check("deleting the link keeps the pack's jar", source.exists())
-    for p in (gamedir / "mods").glob("*"):
-        p.unlink()
-    (gamedir / "mods").rmdir()
-    gamedir.rmdir()
-    gamedir.parent.rmdir()
+    extra = TMP / "x" / "mods"
+    extra.mkdir()
+    (extra / "minimap-1.jar").write_bytes(b"e")
+    (extra / "create-6.jar").write_bytes(b"instance's own")
+    n = packs.sync_mods(WS, gamedir, TMP / "servers" / "test", extra)
+    check("an instance's extra mods are linked too", n == 4 and (gamedir / "mods" / "minimap-1.jar").exists())
+    check("...and one named like the pack's replaces it, for this instance only",
+          (gamedir / "mods" / "create-6.jar").read_bytes() == b"instance's own" and source.read_bytes() == b"c")
+    remove_tree(TMP / "x")
 
 
-# --- create -----------------------------------------------------------------
+# --- bots and instances -----------------------------------------------------
 
 def tests_create():
-    print("\nCreate: a bot costs a folder, a port and a few small files")
+    print("\nCreate: a bot is a character; an instance is that bot on a server")
     layout()
-    text, bot = said(ops.create_bot, WS, "Alice", "test", "offline")
-    check("returns the bot", not isinstance(bot, Fail) and bot.key == "alice", text)
-    check("the folder is lowercase", bot.dir == TMP / "bots" / "alice" and bot.dir.is_dir())
-    check("the name keeps its capitals in the hmc config", bot.name == "Alice")
-    check("port, server and account are written",
-          (bot.read("port"), bot.read("server"), bot.read("account")) == (str(FIRST_PORT), "test", "offline"))
-    check("the owner comes from server.env", bot.read("owner") == "Owner")
-    check("language defaults to en", bot.read("language") == "en")
-    check("a personality template is there", "You are Alice" in bot.read("personality.txt"))
-    props = files.read_java_properties(bot.hmc / "HeadlessMC" / "config.properties")
-    check("hmc is offline and points at the gamedir",
-          props.get("hmc.offline") == "true" and props.get("hmc.gamedir") == str(bot.gamedir))
-    check("the launcher jar is next to the hmc config", (bot.hmc / "headlessmc-launcher.jar").is_file())
-    check("its mods are linked", len(list((bot.gamedir / "mods").glob("*.jar"))) == 3)
-    check("what it did is reported, not printed", "creating Alice" in text and "3 mods linked" in text, text)
-    check("creating it again is refused",
-          "already exists" in told(fails(ops.create_bot, WS, "Alice", "test")))
-    check("'Ali' is refused: Alice contains it",
-          "clashes" in told(fails(ops.create_bot, WS, "Ali", "test")))
-    check("an unknown server is refused",
-          "unknown server" in told(fails(ops.create_bot, WS, "Bob", "nope")))
+    text, inst = said(ops.create, WS, "Alice", "test", "offline")
+    check("returns the instance", not isinstance(inst, Fail) and inst.key == "alice", text)
+    bot = WS.bot("alice")
+    check("the bot is bots/alice/bot.json, with the name's capitals",
+          bot.exists() and bot.data.get("name") == "Alice" and bot.name == "Alice")
+    check("the account and the language go in the bot", (bot.data.get("account"), bot.data.get("language"))
+          == ("offline", "en"))
+    check("a personality template is there", "You are Alice" in bot.personality.read_text())
+    check("the instance is instances/alice/instance.json: which bot, which server, its port",
+          inst.dir == TMP / "instances" / "alice"
+          and inst.data == {"bot": "alice", "server": "test", "port": FIRST_PORT})
+    check("the instance plays as the bot", inst.name == "Alice" and inst.player == "alice" and inst.slug == "test")
+    props = files.read_java_properties(inst.hmc / "HeadlessMC" / "config.properties")
+    check("HeadlessMC is offline, as Alice, and points at the instance's game folder",
+          props.get("hmc.offline") == "true" and props.get("hmc.offline.username") == "Alice"
+          and props.get("hmc.gamedir") == str(inst.gamedir))
+    check("the launcher jar is next to the hmc config", (inst.hmc / "headlessmc-launcher.jar").is_file())
+    check("its mods are linked", len(list((inst.gamedir / "mods").glob("*.jar"))) == 3)
+    check("what it did is reported, not printed",
+          "bot alice created" in text and "instance alice: Alice on test" in text, text)
+    check("an unknown server is refused before anything is made",
+          "unknown server" in told(fails(ops.create, WS, "Bob", "nope"))
+          and not (TMP / "bots" / "bob").exists())
+    check("'Ali' is a valid second bot: clashes are for start, on one server",
+          not isinstance(said(ops.create, WS, "Ali", "test", "offline")[1], Fail))
+    remove_tree(TMP / "bots" / "ali")
+    remove_tree(TMP / "instances" / "ali")
+    text, inst2 = said(ops.create, WS, "Alice", "test")
+    check("creating Alice again on the same server makes a second instance, alice-1",
+          not isinstance(inst2, Fail) and inst2.key == "alice-1" and inst2.port == FIRST_PORT + 1, text)
+    remove_tree(inst2.dir)
+    check("an existing bot with another player name is refused",
+          "plays as Alice" in told(fails(ops.create, WS, "Alicia", "test", bot_key="alice")))
     check("a second bot takes the next port",
-          not isinstance(said(ops.create_bot, WS, "Bob", "test", "offline")[1], Fail)
-          and WS.bot("Bob").read("port") == str(FIRST_PORT + 1))
+          not isinstance(said(ops.create, WS, "Bob", "test", "offline")[1], Fail)
+          and WS.instance("bob").port == FIRST_PORT + 1)
+    check("instances are found by name; a missing one lists the ones there are",
+          WS.instance("Bob").key == "bob" and "alice, bob" in told(fails(WS.instance, "carol")))
+
+
+def tests_clone():
+    print("\nClone: the same bot again, or a new bot from another, under a name of its own")
+    second_server("other")
+    alice = WS.instance("alice")
+    (alice.gamedir / "config").mkdir(parents=True, exist_ok=True)
+    (alice.gamedir / "config" / "marionette-places-test.txt").write_text("home 1 2 3\n")
+    alice.extra_mods.mkdir(exist_ok=True)
+    (alice.extra_mods / "minimap-1.jar").write_bytes(b"e")
+    settings.set_value(alice, "heap", "4g")
+
+    text, c = said(ops.clone_instance, WS, "alice")
+    check("cloned without a question: alice-1, the same bot on the same server",
+          not isinstance(c, Fail) and c.key == "alice-1" and c.bot.key == "alice" and c.slug == "test", text)
+    check("...with a port of its own", c.port not in (alice.port, WS.instance("bob").port))
+    check("...its own settings copied", c.data.get("heap") == "4g")
+    check("...its extra mods and its memories of that world",
+          (c.extra_mods / "minimap-1.jar").exists()
+          and (c.gamedir / "config" / "marionette-places-test.txt").exists())
+    check("...and HeadlessMC pointed at the clone's own game folder",
+          files.read_java_properties(c.hmc / "HeadlessMC" / "config.properties").get("hmc.gamedir")
+          == str(c.gamedir))
+    text, o = said(ops.clone_instance, WS, "alice", slug="other")
+    check("cloned to another server: alice-2 on other", not isinstance(o, Fail)
+          and o.key == "alice-2" and o.slug == "other", text)
+    check("...without the memories of the first world", not (o.gamedir / "config").exists())
+    check("a clone to an unknown server is refused", "unknown server" in told(
+        fails(ops.clone_instance, WS, "alice", slug="nope")))
+
+    text, b = said(ops.clone_bot, WS, "alice")
+    check("a bot cloned: alice-1, playing as Alice_1 (a dash is not a player-name letter)",
+          not isinstance(b, Fail) and b.key == "alice-1" and b.name == "Alice_1", text)
+    check("...with the personality and settings of the first",
+          b.personality.read_text() == WS.bot("alice").personality.read_text()
+          and b.data.get("account") == "offline")
+    for d in (c.dir, o.dir, b.dir):
+        remove_tree(d)
+    settings.clear(alice, "heap")
+    remove_tree(alice.extra_mods)
+
+
+def tests_render():
+    print("\nRender: what the bridge reads, written from the layers")
+    alice = WS.instance("alice")
+    settings.render(alice)
+    check("the port and the server, always", alice.read("port") == str(FIRST_PORT) and alice.read("server") == "test")
+    check("a setting the bot sets is written for the bridge", alice.read("account") == "offline")
+    check("a setting nobody sets is not: the bridge applies the same default",
+          not (alice.dir / "model").exists() and not (alice.dir / "owner").exists())
+    check("the personality is the bot's", alice.read("personality.txt").startswith("You are Alice"))
+    settings.set_value(WS.bot("alice"), "model", "haiku low")
+    settings.set_value(alice, "model", "sonnet")
+    settings.render(alice)
+    check("the instance wins over the bot", alice.read("model") == "sonnet")
+    settings.clear(alice, "model")
+    settings.render(alice)
+    check("taken out of the instance, the bot's applies again", alice.read("model") == "haiku low")
+    settings.clear(WS.bot("alice"), "model")
+    settings.render(alice)
+    check("taken out of both, the file goes", not (alice.dir / "model").exists())
 
 
 def tests_prepare():
     print("\nPrepare: what the gamedir gets before every start")
-    bot = WS.bot("Alice")
+    inst = WS.instance("alice")
     server = WS.server("test")
-    options = bot.gamedir / "options.txt"
+    options = inst.gamedir / "options.txt"
     options.write_text("fov:0.5\nonboardAccessibility:true\nlang:en_us\n")
-    ops.prepare_gamedir(bot, server)
+    ops.prepare_gamedir(inst, server)
     text = options.read_text()
     check("the accessibility prompt is turned off", "onboardAccessibility:false" in text)
     check("...and every other option is kept", "fov:0.5" in text and "lang:en_us" in text
           and "onboardAccessibility:true" not in text)
     options.unlink()
-    ops.prepare_gamedir(bot, server)
+    ops.prepare_gamedir(inst, server)
     check("with no options.txt, one is written with just that", options.read_text() == "onboardAccessibility:false\n")
     check("the server is noted in the gamedir for the mod",
-          (bot.gamedir / "config" / "marionette-server.txt").read_text().strip() == "test")
+          (inst.gamedir / "config" / "marionette-server.txt").read_text().strip() == "test")
 
 
 # --- the launch line --------------------------------------------------------
 
 def tests_launch_line():
     print("\nLaunch line: what HeadlessMC is told")
-    bot = WS.bot("Alice")
+    inst = WS.instance("alice")
+    bot = inst.bot
     server = WS.server("test")
-    line = keeper.launch_line(bot, server)
+    line = keeper.launch_line(inst, server)
     check("no -commands, ever", "-commands" not in line)
     check("-lwjgl and -paulscode", "-lwjgl" in line and "-paulscode" in line)
     check("offline account: -offline", " -offline " in line)
     check("the name with its capitals", "-Dmarionette.name=Alice" in line)
-    check("headless, and the bot's own port",
+    check("headless, and the instance's own port",
           "-Dmarionette.headless=true" in line and f"-Dmarionette.bot.port={FIRST_PORT}" in line)
     check("default heap", f"-Xmx{DEFAULT_HEAP}" in line)
-    check("no language flag without a clean value", "marionette.language=en" in line)
-    bot.write("language", "es; rm -rf /")
-    bot.write("gender", "f\n")
-    line = keeper.launch_line(bot, server)
+    check("the language, from the bot", "marionette.language=en" in line)
+    data = bot.data
+    data.update(language="es; rm -rf /", gender="f")
+    bot.save(data)
+    line = keeper.launch_line(inst, server)
     check("language and gender reach the JVM cleaned",
           "-Dmarionette.language=esrmrf " in line and "-Dmarionette.gender=f" in line)
     WS.environ["MARIONETTE_HEAP"] = "1g"
     WS.environ["MARIONETTE_VERSION"] = "neoforge-21.1.999"
-    line = keeper.launch_line(bot, server)
+    line = keeper.launch_line(inst, server)
     check("MARIONETTE_HEAP and MARIONETTE_VERSION from the environment win",
           "-Xmx1g" in line and "launch neoforge-21.1.999 " in line)
-    bot.write("heap", "4g")
-    check("...and a bot's own heap file wins over MARIONETTE_HEAP", "-Xmx4g " in keeper.launch_line(bot, server))
-    bot.write("heap", "4g -XX:+Evil")
-    check("a heap file that is not a size never reaches the JVM",
-          "Evil" not in keeper.launch_line(bot, server) and "-Xmx1g " in keeper.launch_line(bot, server))
-    (bot.dir / "heap").unlink()
+    settings.set_value(bot, "heap", "4g")
+    check("...a bot's own heap wins over MARIONETTE_HEAP", "-Xmx4g " in keeper.launch_line(inst, server))
+    settings.set_value(inst, "heap", "6g")
+    check("...and the instance's over the bot's", "-Xmx6g " in keeper.launch_line(inst, server))
+    data = inst.data
+    data["heap"] = "4g -XX:+Evil"
+    inst.save(data)
+    check("a heap that is not a size never reaches the JVM",
+          "Evil" not in keeper.launch_line(inst, server) and "-Xmx1g " in keeper.launch_line(inst, server))
+    settings.clear(inst, "heap")
+    settings.clear(bot, "heap")
     WS.environ.pop("MARIONETTE_HEAP")
     WS.environ.pop("MARIONETTE_VERSION")
     WS.environ["HEAP"] = "1g"
     WS.environ["VERSION"] = "neoforge-21.1.999"
-    line = keeper.launch_line(bot, server)
+    line = keeper.launch_line(inst, server)
     check("the old, too generic HEAP and VERSION are not read any more",
           f"-Xmx{DEFAULT_HEAP}" in line and "21.1.999" not in line)
     WS.environ.pop("HEAP")
     WS.environ.pop("VERSION")
-    bot.write("language", "en")
-    (bot.dir / "gender").unlink()
+    data = bot.data
+    data["language"] = "en"
+    data.pop("gender")
+    bot.save(data)
 
 
 # --- the keeper -------------------------------------------------------------
 
 def tests_keeper():
     print("\nKeeper: holds the game's stdin and answers on a socket")
-    bot = start_keeper()
-    check("the port file appears", wait(lambda: bot.keeper_port_f.is_file(), 10))
-    keeper_pid = files.read_pid(bot.keeper_pid_f)
+    inst = start_keeper()
+    check("the port file appears", wait(lambda: inst.keeper_port_f.is_file(), 10))
+    keeper_pid = files.read_pid(inst.keeper_pid_f)
     check("the keeper belongs to nobody here (not our child, no zombie later)",
           keeper_pid and os.name == "nt" or (keeper_pid and not any(
               int(p) == keeper_pid for p in
               subprocess.run(["ps", "-o", "pid=", "--ppid", str(os.getpid())],
                              capture_output=True, text=True).stdout.split())))
+    check("it is known by its instance on its command line", keeper.keeper_pid(inst) == keeper_pid)
     check("@ping answers with the game's pid",
-          wait(lambda: (keeper.keeper_ask(bot, "@ping") or "").startswith("ok "), 5))
-    answer = keeper.keeper_ask(bot, "@ping")
+          wait(lambda: (keeper.keeper_ask(inst, "@ping") or "").startswith("ok "), 5))
+    answer = keeper.keeper_ask(inst, "@ping")
     game_pid = int(answer.split()[1])
     check("that pid is the one in client.pid and it is alive",
-          files.read_pid(bot.client_pid_f) == game_pid and processes.pid_alive(game_pid))
-    check("keeper.pid is a live process", processes.pid_alive(files.read_pid(bot.keeper_pid_f)))
-    check("keeper_alive() agrees", keeper.keeper_alive(bot))
+          files.read_pid(inst.client_pid_f) == game_pid and processes.pid_alive(game_pid))
+    check("keeper_alive() agrees", keeper.keeper_alive(inst))
     check("the launch line reached the game",
-          wait(lambda: files.log_has(bot.client_log, "got: launch neoforge-21.1.248 -lwjgl -offline"), 5))
-    check("...and the game claimed the mod initialized", files.log_has(bot.client_log, keeper.HMC_READY))
-    check("a line is passed through and acknowledged", keeper.keeper_ask(bot, "connect 10.0.0.5:25566") == "sent")
-    check("it arrived at the game's stdin", wait(lambda: files.log_has(bot.client_log, "got: connect 10.0.0.5:25566"), 5))
-    check("an unknown @command is refused", keeper.keeper_ask(bot, "@dance") == "unknown")
-    check("@stop is acknowledged", keeper.keeper_ask(bot, "@stop") == "stopping")
+          wait(lambda: files.log_has(inst.client_log, "got: launch neoforge-21.1.248 -lwjgl -offline"), 5))
+    check("...and the game claimed the mod initialized", files.log_has(inst.client_log, keeper.HMC_READY))
+    check("a line is passed through and acknowledged", keeper.keeper_ask(inst, "connect 10.0.0.5:25566") == "sent")
+    check("it arrived at the game's stdin", wait(lambda: files.log_has(inst.client_log, "got: connect 10.0.0.5:25566"), 5))
+    check("an unknown @command is refused", keeper.keeper_ask(inst, "@dance") == "unknown")
+    check("@stop is acknowledged", keeper.keeper_ask(inst, "@stop") == "stopping")
     check("the game is gone", wait(lambda: not processes.pid_alive(game_pid), 10))
-    check("the keeper is gone", wait(lambda: not processes.pid_alive(files.read_pid(bot.keeper_pid_f)) if bot.keeper_pid_f.exists() else True, 10))
+    check("the keeper is gone", wait(lambda: keeper.keeper_pid(inst) is None, 10))
     check("the run files are cleaned up",
-          wait(lambda: not bot.keeper_port_f.exists() and not bot.client_pid_f.exists(), 5))
-    check("with no keeper, asking returns None", keeper.keeper_ask(bot, "@ping") is None)
-    check("the keeper's own log says why it ended", files.log_has(bot.keeper_log, "game exited"))
+          wait(lambda: not inst.keeper_port_f.exists() and not inst.client_pid_f.exists(), 5))
+    check("with no keeper, asking returns None", keeper.keeper_ask(inst, "@ping") is None)
+    check("the keeper's own log says why it ended", files.log_has(inst.keeper_log, "game exited"))
 
 
 def tests_stop_without_keeper():
     print("\nStop: nothing running is not an error")
-    text, code = run_cli("stop", "Alice")
-    check("stopping a stopped bot returns 0", code == 0, text)
+    text, code = run_cli("stop", "alice")
+    check("stopping a stopped instance returns 0", code == 0, text)
 
 
 # --- what a pack is made of -------------------------------------------------
@@ -467,6 +576,8 @@ def tests_packs():
     layout()
 
 
+
+
 # --- deploy-mod -------------------------------------------------------------
 
 def tests_deploy():
@@ -507,6 +618,8 @@ def tests_deploy():
         p.unlink()
 
 
+
+
 # --- doctor -----------------------------------------------------------------
 
 def tests_doctor():
@@ -522,6 +635,9 @@ def tests_doctor():
           any(l == "server mod answers" and ok is False for l, ok, _ in checks))
     check("shared and the marionette jar are found",
           any(l == "shared/mods/marionette" and ok for l, ok, _ in checks))
+    check("bots and instances are checked apart",
+          any(l == "bots/alice" and ok for l, ok, _ in checks)
+          and any(l == "instances/alice" and ok for l, ok, _ in checks), [c for c in checks if "alice" in c.label])
     (TMP / "shared" / "mods" / "marionette-0.9.0.jar").write_bytes(b"old")
     checks = doctor.checks(WS)
     check("two marionette jars are a problem",
@@ -553,11 +669,27 @@ def tests_doctor():
           not any(l == "servers/test: veil" for l, ok, d in checks))
     (TMP / "shared" / "mods" / "marionette-veil-1.0.0.jar").unlink()
     carrier.unlink()
-    WS.bot("Bob").write("port", FIRST_PORT)          # same as Alice's
+
+    bob = WS.instance("bob")
+    data = bob.data
+    data["port"] = FIRST_PORT          # same as Alice's
+    bob.save(data)
     checks = doctor.checks(WS)
-    check("two bots on one port are a problem",
-          any(l == "bots/bob" and ok is False and "also belongs" in d for l, ok, d in checks))
-    WS.bot("Bob").write("port", FIRST_PORT + 1)
+    check("two instances on one port are a problem",
+          any(l == "instances/bob" and ok is False and "also belongs" in d for l, ok, d in checks))
+    data["port"] = FIRST_PORT + 1
+    bob.save(data)
+    settings.set_value(WS.bot("bob"), "account", "online")
+    checks = doctor.checks(WS)
+    check("an online instance whose accounts file is empty was never logged in",
+          any(l == "instances/bob" and ok is False and "never logged in" in d for l, ok, d in checks))
+    accounts = bob.hmc / "HeadlessMC" / "auth" / ".accounts.json"
+    accounts.parent.mkdir(parents=True, exist_ok=True)
+    accounts.write_text("")
+    checks = doctor.checks(WS)
+    check("...even when HeadlessMC made the (empty) file: the folder never meant a login",
+          any(l == "instances/bob" and ok is False and "never logged in" in d for l, ok, d in checks))
+    settings.set_value(WS.bot("bob"), "account", "offline")
     text, code = run_cli("doctor")
     check("the command line prints every check and fails when one fails",
           code == 1 and "!!  java 21" in text and "problem(s) above" in text, text[-300:])
@@ -576,33 +708,34 @@ def tests_pids():
     check("...and not by a mark it does not carry", not processes.is_ours(os.getpid(), "bridge.py"))
     check("a mark is a whole argument, not a piece of one", not processes.is_ours(os.getpid(), "sts.py"))
     check("no pid is nobody's", not processes.is_ours(None, "x") and processes.argv_of(None) is None)
-    bot = WS.bot("Alice")
-    bot.run.mkdir(parents=True, exist_ok=True)
+    inst = WS.instance("alice")
+    inst.run.mkdir(parents=True, exist_ok=True)
     other = stranger()
     try:
-        bot.keeper_pid_f.write_text(f"{other.pid}\n")
-        bot.client_pid_f.write_text(f"{other.pid}\n")
-        check("a stale keeper.pid naming a stranger is no keeper", keeper.keeper_pid(bot) is None)
-        check("...nor a stale client.pid a HeadlessMC", keeper.launcher_pid(bot) is None)
-        check("the bridge lock lives under the workspace's home", str(bot.bridge_lock).startswith(str(TMP)))
-        bot.bridge_lock.parent.mkdir(parents=True, exist_ok=True)
-        bot.bridge_lock.write_text(f"{other.pid}\n")
-        check("a bridge lock left with a stranger's pid is no bridge", ops.bridge_pid(bot) is None)
-        text, _ = said(ops.stop, bot)
+        inst.keeper_pid_f.write_text(f"{other.pid}\n")
+        inst.client_pid_f.write_text(f"{other.pid}\n")
+        check("a stale keeper.pid naming a stranger is no keeper", keeper.keeper_pid(inst) is None)
+        check("...nor a stale client.pid a HeadlessMC", keeper.launcher_pid(inst) is None)
+        check("the bridge lock lives in its server's state folder",
+              inst.bridge_lock == TMP / "state" / "servers" / "test" / "bridge_alice.lock")
+        inst.bridge_lock.parent.mkdir(parents=True, exist_ok=True)
+        inst.bridge_lock.write_text(f"{other.pid}\n")
+        check("a bridge lock left with a stranger's pid is no bridge", ops.bridge_pid(inst) is None)
+        text, _ = said(ops.stop, inst)
         check("stop leaves the stranger alone", other.poll() is None, text)
         check("...and says nothing was running", "client: nothing was running" in text
               and "bridge: nothing was running" in text, text)
-        check("...and clears the stale files", not bot.keeper_pid_f.exists() and not bot.client_pid_f.exists())
-        bot.bridge_lock.unlink()
+        check("...and clears the stale files", not inst.keeper_pid_f.exists() and not inst.client_pid_f.exists())
+        inst.bridge_lock.unlink()
     finally:
         other.kill()
         other.wait()
 
 
 def tests_lock():
-    print("\nLock: one launcher command at a time on a bot")
-    bot = WS.bot("Alice")
-    lock = bot.run / "launcher.lock"
+    print("\nLock: one launcher command at a time on an instance")
+    inst = WS.instance("alice")
+    lock = inst.run / "launcher.lock"
     holder = subprocess.Popen(
         [sys.executable, "-c",
          "import sys, time; sys.path.insert(0, sys.argv[1]); from launcher import files\n"
@@ -610,12 +743,12 @@ def tests_lock():
          str(REPO), str(lock)], stdout=subprocess.PIPE, text=True)
     try:
         check("another process takes the lock", holder.stdout.readline().strip() == "held")
-        text, result = said(ops.start, bot)
+        text, result = said(ops.start, inst)
         check("a start while it is held is refused, naming the holder",
               isinstance(result, Fail) and "another launcher command" in str(result)
               and str(holder.pid) in str(result) and result.code == "busy", str(result))
         check("...and refused before touching anything", "preparing" not in text, text)
-        check("so is a stop", isinstance(said(ops.stop, bot)[1], Fail))
+        check("so is a stop", isinstance(said(ops.stop, inst)[1], Fail))
     finally:
         holder.kill()
         holder.wait()
@@ -623,15 +756,15 @@ def tests_lock():
     check("the lock is free once its holder is gone, however it ended", handle is not None)
     if handle:
         handle.close()
-    with bots.operating(bot):
-        with bots.operating(bot):
+    with bots.operating(inst):
+        with bots.operating(inst):
             nested = True
     check("it is re-entrant in one thread (restart = stop + start)", nested)
 
     import threading
     seen = {}
-    with bots.operating(bot):
-        t = threading.Thread(target=lambda: seen.update(e=fails(ops.stop, bot)))
+    with bots.operating(inst):
+        t = threading.Thread(target=lambda: seen.update(e=fails(ops.stop, inst)))
         t.start()
         t.join(10)
     check("...and only in that one: another thread is another command",
@@ -641,36 +774,69 @@ def tests_lock():
 def tests_start_order():
     print("\nStart: whether it runs is asked before anything is touched")
     quick_server_env()
-    other = TMP / "servers" / "other"
-    (other / "mods").mkdir(parents=True, exist_ok=True)
-    (other / "server.conf").write_text("HOST=10.0.0.6\n")
-    (other / "mods" / "other-1.jar").write_bytes(b"o")
-    bot = start_keeper()
+    inst = start_keeper()
     try:
-        check("a keeper is up", wait(lambda: keeper.keeper_alive(bot), 10))
-        marker = bot.gamedir / "mods" / "in-use.jar"
+        check("a keeper is up", wait(lambda: keeper.keeper_alive(inst), 10))
+        marker = inst.gamedir / "mods" / "in-use.jar"
         marker.write_bytes(b"u")
-        text, result = said(ops.start, bot, "other")
-        check("starting a running bot is refused", isinstance(result, Fail)
+        text, result = said(ops.start, inst)
+        check("starting a running instance is refused", isinstance(result, Fail)
               and "already running" in str(result) and result.code == "running", f"{result!r} {text}")
         check("...with its mods folder left as the game has it", marker.exists())
-        check("...and its server not rewritten",
-              bot.read("server") == "test"
-              and (bot.gamedir / "config" / "marionette-server.txt").read_text().strip() == "test")
     finally:
-        said(ops.stop, bot)
-        for p in other.rglob("*"):
-            if p.is_file():
-                p.unlink()
-        (other / "mods").rmdir()
-        other.rmdir()
+        said(ops.stop, inst)
         layout()
+
+
+def tests_conflicts():
+    print("\nConflicts: instances are cloned freely, and two of one player never RUN at once")
+    quick_server_env()
+    second_server("other")
+    alice = WS.instance("alice")
+    _, same = said(ops.clone_instance, WS, "alice")                # alice-1: Alice on test
+    _, away = said(ops.clone_instance, WS, "alice", slug="other")  # alice-2: Alice on other
+    ops.take_place(alice)
+    check("the running instance is linked as its player in its server's state folder",
+          files.link_target(alice.place) == alice.dir
+          and alice.place == TMP / "state" / "servers" / "test" / "bots" / "alice")
+    start_keeper("alice")
+    try:
+        check("alice runs", wait(lambda: keeper.keeper_alive(alice), 10))
+        e = fails(ops.check_can_run, same)
+        check("the same player on the same server does not run twice",
+              e is not None and e.code == "player_taken" and "as the instance alice" in str(e), told(e))
+        text, result = said(ops.start, same)
+        check("...and start says so before touching anything",
+              isinstance(result, Fail) and result.code == "player_taken" and "preparing" not in text, text)
+        check("an offline player may be on another server at the same time",
+              fails(ops.check_can_run, away) is None)
+        settings.set_value(WS.bot("alice"), "account", "online")
+        e = fails(ops.check_can_run, away)
+        check("an online account may not: one Microsoft account, one game at a time",
+              e is not None and e.code == "account_in_use" and "on test" in str(e), told(e))
+        settings.set_value(WS.bot("alice"), "account", "offline")
+        _, ali = said(ops.create, WS, "Ali", "test", "offline")
+        e = fails(ops.check_can_run, ali)
+        check("a player whose name is inside a running one's, on the same server, is refused",
+              e is not None and e.code == "name_clash", told(e))
+        ali_elsewhere = said(ops.clone_instance, WS, ali.key, slug="other")[1]
+        check("...but not on another server, where they share no chat",
+              fails(ops.check_can_run, ali_elsewhere) is None)
+        for d in (ali.dir, ali_elsewhere.dir, WS.bot("ali").dir):
+            remove_tree(d)
+    finally:
+        said(ops.stop, alice)
+    check("stopping leaves the place", not alice.place.exists() and not alice.place.is_symlink())
+    check("stopped, the other copy may run", fails(ops.check_can_run, same) is None)
+    for d in (same.dir, away.dir):
+        remove_tree(d)
+    layout()
 
 
 def tests_keeper_failures():
     print("\nKeeper failures: said at once, not after five minutes")
     quick_server_env()
-    bot = WS.bot("Alice")
+    bot = WS.instance("alice")
     WS.environ["MARIONETTE_JAVA"] = str(TMP / "no-such-java")
     try:
         started = time.monotonic()
@@ -773,25 +939,6 @@ def tests_keeper_guarded():
     check("a keeper older than the token still gets the bare line", got.get("line") == "@ping" and answer == "ok 1")
 
 
-def tests_guard_rings():
-    print("\nGuards: a ring of escorts is stopped once each, not forever")
-    alice, bob = WS.bot("Alice"), WS.bot("Bob")
-    alice.write("escort", "bob")
-    bob.write("escort", "alice")
-    text, code = run_cli("stop", "Alice")
-    check("two bots guarding each other: stop ends", code == 0, text)
-    check("...having stopped each one once",
-          text.count("==> Alice stopped") == 1 and text.count("==> Bob stopped") == 1, text)
-    bob.write("escort", "bob")
-    (alice.dir / "escort").unlink()
-    text, code = run_cli("stop", "Bob")
-    check("a bot guarding itself: stop ends", code == 0, text)
-    checks = doctor.checks(WS)
-    check("doctor names a bot that guards itself",
-          any(l == "bots/bob" and ok is False and "escorts itself" in d for l, ok, d in checks))
-    (bob.dir / "escort").unlink()
-
-
 def tests_logwatch():
     print("\nLogWatch: a log read from where it was left, not whole every time")
     log = TMP / "watch.log"
@@ -811,41 +958,6 @@ def tests_logwatch():
     check("a missing log is simply not there yet", not files.LogWatch(TMP / "nope.log", "x").saw("x"))
 
 
-def tests_status():
-    print("\nStatus: what every bot is doing, as data and as a table")
-    quick_server_env()
-    problems, statuses = ops.survey(WS)
-    check("the survey says the server mod does not answer",
-          len(problems) == 1 and "does not answer" in problems[0], problems)
-    check("...and one status per bot, 'in server' unknown",
-          [s.name for s in statuses] == ["Alice", "Bob"] and all(s.inside is None for s in statuses))
-    check("a stopped bot: no client, no hands, no bridge",
-          not statuses[0].client and not statuses[0].hands and statuses[0].bridge is None)
-    text, code = run_cli("status")
-    check("status still returns 0", code == 0)
-    check("...and says the server mod does not answer", "does not answer" in text, text)
-    check("...above a table with a row per bot", "Alice" in text and "Bob" in text and "in server" in text, text)
-    layout()
-
-
-# --- the command line -------------------------------------------------------
-
-def tests_cli():
-    print("\nCommand line: the same door as before, printing what the core reports")
-    env = dict(WS.child_env())
-    r = subprocess.run([sys.executable, str(HERE / "marionette.py"), "servers"],
-                       capture_output=True, text=True, env=env)
-    check("marionette.py still works as a script", r.returncode == 0 and "test" in r.stdout, r.stdout + r.stderr)
-    r = subprocess.run([sys.executable, "-m", "launcher", "servers"],
-                       capture_output=True, text=True, env=env, cwd=str(REPO))
-    check("...and so does python -m launcher", r.returncode == 0 and "test" in r.stdout, r.stdout + r.stderr)
-    text, code = run_cli("start", "Nobody")
-    check("a Fail is printed, not raised, and the exit code is 1",
-          code == 1 and "does not exist" in text, text)
-    text, code = run_cli("create", "Eve", "nope")
-    check("...with its evidence under it (the servers there are)",
-          code == 1 and "unknown server" in text and "\n    test " in text, text)
-
 
 # --- cancelling -------------------------------------------------------------
 
@@ -863,7 +975,7 @@ def tests_cancel():
     import threading
     from launcher.events import Cancel, Cancelled
     quick_server_env()
-    bot = WS.bot("Alice")
+    bot = WS.instance("alice")
 
     cancel = Cancel()
     threading.Timer(0.3, cancel.set).start()
@@ -932,91 +1044,176 @@ def tests_cancel():
     layout()
 
 
+
+def tests_guard_rings():
+    print("\nGuards: a ring of escorts is stopped once each, not forever")
+    quick_server_env()
+    alice, bob = WS.instance("alice"), WS.instance("bob")
+    settings.set_value(alice, "escort", "bob")
+    settings.set_value(bob, "escort", "alice")
+    start_keeper("alice")
+    start_keeper("bob")
+    check("both run", wait(lambda: keeper.keeper_alive(alice) and keeper.keeper_alive(bob), 10))
+    text, code = run_cli("stop", "alice")
+    check("two instances guarding each other: stop ends", code == 0, text)
+    check("...having stopped each one once",
+          text.count("==> alice stopped") == 1 and text.count("==> bob stopped") == 1, text)
+    text, code = run_cli("stop", "bob")
+    check("a guard that is not running is not 'stopped' again", code == 0 and "guard" not in text, text)
+    data = bob.data
+    data["escort"] = "bob"                 # edited by hand: `set` refuses it
+    bob.save(data)
+    text, code = run_cli("stop", "bob")
+    check("an instance guarding itself: stop ends", code == 0, text)
+    checks = doctor.checks(WS)
+    check("doctor names an instance that guards itself",
+          any(l == "instances/bob" and ok is False and "escorts itself" in d for l, ok, d in checks))
+    settings.clear(alice, "escort")
+    settings.clear(bob, "escort")
+    layout()
+
+
+def tests_status():
+    print("\nStatus: what every instance is doing, as data and as a table")
+    quick_server_env()
+    problems, statuses = ops.survey(WS)
+    check("the survey says the server mod does not answer",
+          len(problems) == 1 and "does not answer" in problems[0], problems)
+    check("...and one status per instance, 'in server' unknown",
+          [(s.key, s.name) for s in statuses] == [("alice", "Alice"), ("bob", "Bob")]
+          and all(s.inside is None for s in statuses), statuses)
+    check("a stopped instance: no client, no hands, no bridge",
+          not statuses[0].client and not statuses[0].hands and statuses[0].bridge is None)
+    text, code = run_cli("status")
+    check("status still returns 0", code == 0)
+    check("...and says the server mod does not answer", "does not answer" in text, text)
+    check("...above a table with a row per instance",
+          "alice" in text and "Bob" in text and "plays as" in text, text)
+    text, code = run_cli("bots")
+    check("`bots` lists the characters and their instances", code == 0 and "plays as Alice" in text, text)
+    layout()
+
+
+# --- the command line -------------------------------------------------------
+
+def tests_cli():
+    print("\nCommand line: the same door as before, printing what the core reports")
+    env = dict(WS.child_env())
+    r = subprocess.run([sys.executable, str(HERE / "marionette.py"), "servers"],
+                       capture_output=True, text=True, env=env)
+    check("marionette.py still works as a script", r.returncode == 0 and "test" in r.stdout, r.stdout + r.stderr)
+    r = subprocess.run([sys.executable, "-m", "launcher", "servers"],
+                       capture_output=True, text=True, env=env, cwd=str(REPO))
+    check("...and so does python -m launcher", r.returncode == 0 and "test" in r.stdout, r.stdout + r.stderr)
+    text, code = run_cli("start", "Nobody")
+    check("a Fail is printed, not raised, and the exit code is 1",
+          code == 1 and "there is no instance Nobody" in text, text)
+    text, code = run_cli("create", "Eve", "nope")
+    check("...with its evidence under it (the servers there are)",
+          code == 1 and "unknown server" in text and "\n    test " in text, text)
+
+
 # --- settings ---------------------------------------------------------------
 
 def tests_settings():
-    print("\nSettings: one table says what each bot file accepts, for every face")
-    from launcher import settings
-    bot, bob = WS.bot("Alice"), WS.bot("Bob")
-    check("a value that applies without a file is the default",
-          settings.get(bot, "model") == "opus medium" and not settings.is_set(bot, "model"))
-    check("the owner's default comes from server.env", settings.get(bob, "owner") == "Owner")
-    for key, value, why in (("language", "english", "language code"),
-                            ("gender", "x", "one of f, m"),
-                            ("account", "maybe", "one of online, offline"),
-                            ("owner", "not a name!", "player name"),
-                            ("model", "haiku lowest", "effort is one of"),
-                            ("model", "a b c", "optional effort"),
-                            ("escort", "alice", "cannot escort itself"),
-                            ("escort", "nobody", "another bot here: bob"),
-                            ("heap", "512m", "at least 1g"),
-                            ("heap", "lots", "heap size"),
-                            ("port", "80", "between 1024"),
-                            ("port", str(FIRST_PORT + 1), "belongs to another bot"),
-                            ("server", "nope", "registered servers: test")):
-        e = fails(settings.set_value, bot, key, value)
-        check(f"{key} '{value}' is refused, saying what it takes",
+    print("\nSettings: in layers, bot < instance, and one table says what each accepts")
+    alice, bob = WS.instance("alice"), WS.instance("bob")
+    bot = alice.bot
+    check("a value no layer sets is the default",
+          settings.resolve(alice, "model") == ("opus medium", "default"))
+    check("the owner's default comes from server.env", settings.get(alice, "owner") == "Owner")
+    settings.set_value(bot, "model", "sonnet")
+    check("set in the bot, every instance of it has it", settings.resolve(alice, "model") == ("sonnet", "bot"))
+    settings.set_value(alice, "model", "haiku low")
+    check("set in the instance, it wins over the bot's", settings.resolve(alice, "model") == ("haiku low", "instance"))
+    settings.clear(alice, "model")
+    settings.clear(bot, "model")
+    for target, key, value, why in ((bot, "language", "english", "language code"),
+                                    (bot, "gender", "x", "one of f, m"),
+                                    (bot, "account", "maybe", "one of online, offline"),
+                                    (bot, "owner", "not a name!", "player name"),
+                                    (bot, "model", "haiku lowest", "effort is one of"),
+                                    (bot, "model", "a b c", "optional effort"),
+                                    (bot, "port", "9000", "set per instance"),
+                                    (bot, "escort", "bob", "set per instance"),
+                                    (alice, "escort", "alice", "cannot escort itself"),
+                                    (alice, "escort", "nobody", "instance on test: bob"),
+                                    (alice, "heap", "512m", "at least 1g"),
+                                    (alice, "heap", "lots", "heap size"),
+                                    (alice, "port", "80", "between 1024"),
+                                    (alice, "port", str(FIRST_PORT + 1), "belongs to another instance")):
+        e = fails(settings.set_value, target, key, value)
+        check(f"{key} '{value}' on the {settings.layer_of(target)} is refused, saying what it takes",
               e is not None and why in told(e) and e.code == "bad_setting", told(e))
     check("an unknown setting is refused, listing the ones there are",
           "language" in told(fails(settings.setting, "colour")))
-    check("a good value is written, as a plain file", settings.set_value(bot, "language", "ES") == "es"
-          and bot.read("language") == "es")
+    check("a good value is written into the layer's JSON",
+          settings.set_value(bot, "language", "ES") == "es" and bot.data.get("language") == "es")
     check("a model keeps its two words", settings.set_value(bot, "model", "haiku   low") == "haiku low")
     check("an escort keeps its capitals (the game shows names as they are)",
-          settings.set_value(bot, "escort", "Bob") == "Bob")
-    settings.clear(bot, "escort")
+          settings.set_value(alice, "escort", "Bob") == "Bob")
+    settings.clear(alice, "escort")
     settings.clear(bot, "model")
-    check("clearing goes back to the default", not settings.is_set(bot, "model")
-          and settings.get(bot, "model") == "opus medium")
-    check("a required one cannot be cleared", "no default" in told(fails(settings.clear, bot, "port")))
+    settings.set_value(bot, "language", "en")
+    check("the port cannot be cleared: every instance needs one",
+          "no default" in told(fails(settings.clear, alice, "port")))
     settings.set_value(bot, "account", "online")
-    props = files.read_java_properties(bot.hmc / "HeadlessMC" / "config.properties")
-    check("changing the account changes HeadlessMC's own config too", props.get("hmc.offline") == "false")
+    settings.render(alice)
+    props = files.read_java_properties(alice.hmc / "HeadlessMC" / "config.properties")
+    check("the account is written into HeadlessMC's own config at render", props.get("hmc.offline") == "false")
     settings.set_value(bot, "account", "offline")
-    props = files.read_java_properties(bot.hmc / "HeadlessMC" / "config.properties")
+    settings.render(alice)
+    props = files.read_java_properties(alice.hmc / "HeadlessMC" / "config.properties")
     check("...both ways, and nothing else in it is lost",
           props.get("hmc.offline") == "true" and props.get("hmc.offline.username") == "Alice")
-    settings.set_value(bot, "language", "en")
 
     # The operation: the lock, and no start-time setting under a running client.
-    text, now = said(ops.configure, bot, "heap", "4g")
+    text, now = said(ops.configure, alice, "heap", "4g")
     check("configure reports the value and when it counts",
-          now == "4g" and "Alice: heap = 4g" in text and "on its next start" in text, text)
-    kept = start_keeper()
+          now == "4g" and "alice: heap = 4g" in text and "on its next start" in text, text)
+    start_keeper("alice")
     try:
-        check("a keeper is up", wait(lambda: keeper.keeper_alive(kept), 10))
-        text, result = said(ops.configure, bot, "heap", "6g")
+        check("a keeper is up", wait(lambda: keeper.keeper_alive(alice), 10))
+        text, result = said(ops.configure, alice, "heap", "6g")
         check("a setting read at start is refused while the client runs",
-              isinstance(result, Fail) and result.code == "running" and bot.read("heap") == "4g", text)
-        text, result = said(ops.configure, bot, "owner", "SomePlayer")
+              isinstance(result, Fail) and result.code == "running" and alice.data.get("heap") == "4g", text)
+        text, result = said(ops.configure, bot, "heap", "6g")
+        check("...in the bot too, while any instance of it runs",
+              isinstance(result, Fail) and result.code == "running", text)
+        text, result = said(ops.configure, alice, "owner", "SomePlayer")
         check("...one read as it is used is not", result == "SomePlayer" and "right away" in text, text)
+        check("...and it is rendered for the bridge at once", alice.read("owner") == "SomePlayer")
     finally:
-        said(ops.stop, bot)
-    said(ops.configure, bot, "heap", clear=True)
-    said(ops.configure, bot, "owner", clear=True)
+        said(ops.stop, alice)
+    said(ops.configure, alice, "heap", clear=True)
+    said(ops.configure, alice, "owner", clear=True)
 
     # The command line.
-    text, code = run_cli("set", "Alice")
-    check("`set <bot>` lists every setting with its value",
-          code == 0 and all(k in text for k in settings.SETTINGS) and "(default)" in text, text)
-    text, code = run_cli("set", "Alice", "model", "sonnet", "low")
-    check("`set <bot> <key> <value...>` changes it (two words are one value)",
-          code == 0 and bot.read("model") == "sonnet low", text)
-    text, code = run_cli("set", "Alice", "model")
-    check("`set <bot> <key>` shows one, with its choices and when it counts",
-          "choices:" in text and "when its bridge restarts" in text, text)
-    text, code = run_cli("set", "Alice", "model", "--default")
-    check("`--default` puts it back", code == 0 and not settings.is_set(bot, "model"), text)
-    text, code = run_cli("set", "Alice", "gender", "x")
+    text, code = run_cli("set", "alice")
+    check("`set <instance>` lists every setting with its value and where it comes from",
+          code == 0 and all(k in text for k in settings.SETTINGS) and "(default)" in text and "(bot)" in text,
+          text)
+    text, code = run_cli("set", "--bot", "alice", "model", "sonnet", "low")
+    check("`set --bot <bot> <key> <value...>` changes the bot (two words are one value)",
+          code == 0 and bot.data.get("model") == "sonnet low", text)
+    text, code = run_cli("set", "alice", "model")
+    check("`set <instance> <key>` shows one: its choices, its layers, when it counts",
+          "choices:" in text and "when its bridge restarts" in text and "(bot)" in text, text)
+    text, code = run_cli("set", "--bot", "alice", "model", "--default")
+    check("`--default` takes it out of the layer", code == 0 and "model" not in bot.data, text)
+    text, code = run_cli("set", "alice", "gender", "x")
     check("a bad value is a failure of the command, with the reason", code == 1 and "one of f, m" in text, text)
 
-    bob.write("language", "Klingon!")
+    data = bob.bot.data
+    data["language"] = "Klingon!"
+    bob.bot.save(data)
     checks = doctor.checks(WS)
-    check("doctor names a file edited by hand into something `set` would refuse",
+    check("doctor names a JSON edited by hand into something `set` would refuse",
           any(l == "bots/bob" and ok is False and "language" in d for l, ok, d in checks))
-    text, code = run_cli("set", "Bob")
-    check("...and so does `set <bot>`", "!! 'Klingon!' is not a valid language" in text, text)
-    (bob.dir / "language").write_text("en\n")
+    text, code = run_cli("set", "--bot", "bob")
+    check("...and so does `set`", "!! 'Klingon!' is not a valid language" in text, text)
+    data["language"] = "en"
+    bob.bot.save(data)
 
 
 # --- one server mod per server ------------------------------------------------
@@ -1054,18 +1251,18 @@ def fake_server_mod(token, players):
 
 
 def tests_server_apis():
-    print("\nServer mods: each server can have its own, and each bot is looked for in its own")
+    print("\nServer mods: each server can have its own, and each instance is looked for in its own")
     quick_server_env()
     (TMP / "server.env").write_text((TMP / "server.env").read_text() + "MARIONETTE_OWNER=Owner\n")
-    other = TMP / "servers" / "other"
-    (other / "mods").mkdir(parents=True, exist_ok=True)
-    (other / "server.conf").write_text("HOST=10.0.0.6\n")
+    other = second_server("other")
     httpd, port = fake_server_mod("own-token", ["Bob"])
     own = other / "server.env"
     own.write_text(f"MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT={port}\nMARIONETTE_TOKEN=own-token\n")
     own.chmod(0o600)
-    alice, bob = WS.bot("Alice"), WS.bot("Bob")
-    bob.write("server", "other")
+    alice, bob = WS.instance("alice"), WS.instance("bob")
+    data = bob.data
+    data["server"] = "other"
+    bob.save(data)
     try:
         check("a server without its own server.env uses the global one",
               WS.api_for(WS.server("test")).address == "127.0.0.1:1")
@@ -1073,26 +1270,37 @@ def tests_server_apis():
         check("a server with its own uses it", api.address == f"127.0.0.1:{port}" and api.token == "own-token")
         check("...keeping the owner, which only the global file says", api.owner == "Owner")
 
+        start_keeper("bob")
+        check("bob runs", wait(lambda: keeper.keeper_alive(bob), 10))
         problems, statuses = ops.survey(WS)
-        by_name = {s.name: s for s in statuses}
-        check("status finds Bob in HIS server's /players", by_name["Bob"].inside is True, repr(by_name["Bob"]))
+        by_key = {s.key: s for s in statuses}
+        check("status finds Bob in HIS server's /players", by_key["bob"].inside is True, repr(by_key["bob"]))
         check("...while Alice's server does not answer, and only hers is unknown",
-              by_name["Alice"].inside is None and len(problems) == 1 and "of test" in problems[0], problems)
-
+              by_key["alice"].inside is None and len(problems) == 1 and "of test" in problems[0], problems)
         text, result = said(ops.start, bob)
-        check("start asks the bot's own server whether it is already in",
+        check("start asks the instance's own server whether it is already in",
               result == ops.ALREADY_IN and "already in" in text, text)
+        said(ops.stop, bob)
+        text, result = said(ops.start, bob)
+        check("in the server with no client of ours: somebody else plays as Bob there",
+              isinstance(result, Fail) and result.code == "player_taken"
+              and "not through this instance" in str(result), text)
 
         env = ops.bridge_env(bob)
-        check("the bridge of Bob is told the PATH of his server's file",
-              env.get("MARIONETTE_SERVER_ENV") == str(own) and env.get("BOT_NAME") == "Bob")
+        check("the bridge of bob reads its server's bots, keeps its server's state",
+              env["MARIONETTE_BOTS_DIR"] == str(TMP / "state" / "servers" / "other" / "bots")
+              and env["MARIONETTE_STATE_DIR"] == str(TMP / "state" / "servers" / "other"))
+        check("...knows which instance it is, for a restart ordered from the game",
+              env["MARIONETTE_INSTANCE"] == "bob" and env["BOT_NAME"] == "Bob")
+        check("...and is told the PATH of its server's file", env.get("MARIONETTE_SERVER_ENV") == str(own))
         check("...never the token itself", "own-token" not in "".join(env.values()))
-        check("a bot whose server has no file of its own is told nothing",
+        check("an instance whose server has no file of its own is told nothing",
               "MARIONETTE_SERVER_ENV" not in ops.bridge_env(alice))
 
         checks = doctor.checks(WS)
         check("doctor asks each server's own mod", any(
-            l == "servers/other: server mod" and ok is True for l, ok, _ in checks), [c for c in checks if "other" in c.label])
+            l == "servers/other: server mod" and ok is True for l, ok, _ in checks),
+            [c for c in checks if "other" in c.label])
         check("...and compares the pack with ITS server, not whichever answers",
               any(l == "servers/other: versions" and "with its server" in d for l, ok, d in checks))
         own.chmod(0o644)
@@ -1105,12 +1313,93 @@ def tests_server_apis():
         check("a wrong token is named as such",
               any(l == "servers/other: server mod" and ok is False and "wrong token" in d for l, ok, d in checks))
     finally:
+        said(ops.stop, bob)
         httpd.shutdown()
-        bob.write("server", "test")
-        for p in sorted(other.rglob("*"), reverse=True):
-            p.rmdir() if p.is_dir() else p.unlink()
-        other.rmdir()
+        data["server"] = "test"
+        bob.save(data)
+        remove_tree(other)
         layout()
+
+
+# --- the layout from before instances -----------------------------------------
+
+def tests_migrate():
+    print("\nMigrate: bots/<name>/ with the game inside becomes a bot and an instance")
+    layout()
+    old = TMP / "bots" / "old"
+    (old / "hmc" / "HeadlessMC").mkdir(parents=True)
+    (old / "gamedir" / "config").mkdir(parents=True)
+    (old / "run").mkdir()
+    for f, v in (("port", "8490"), ("server", "test"), ("account", "offline"), ("language", "es"),
+                 ("model", "haiku low"), ("owner", "Someone"), ("gender", "f")):
+        (old / f).write_text(v + "\n")
+    (old / "personality.txt").write_text("You are Old.\n")
+    (old / "hmc" / "HeadlessMC" / "config.properties").write_text(
+        f"hmc.offline=true\nhmc.offline.username=Old\nhmc.gamedir={old / 'gamedir'}\n")
+    (old / "gamedir" / "config" / "marionette-places-test.txt").write_text("home 1 2 3\n")
+    (old / "run" / "client.log").write_text("an old log\n")
+    state = TMP / "state"
+    state.mkdir(exist_ok=True)
+    for f in ("session_old", "pending_old.json", "internal_old.jsonl", "calls_old.log",
+              "horse_old_test.json", "internal_olden.jsonl"):
+        (state / f).write_text("x\n")
+
+    check("the old layout is recognized", WS.legacy_bots() == ["old"] and "old" not in WS.bot_keys())
+    check("an instance command on it says to migrate", "migrate" in told(fails(WS.instance, "old")))
+    text, code = run_cli("status")
+    check("...and so does status", "marionette.py migrate" in text or code == 0, text)
+    checks = doctor.checks(WS)
+    check("...and doctor", any(l == "layout" and ok is False and "old" in d for l, ok, d in checks))
+
+    import socket
+    busy = socket.socket()
+    busy.bind(("127.0.0.1", 8490))
+    busy.listen(1)
+    try:
+        e = fails(ops.migrate, WS)
+        check("a bot that is running is not migrated: stop it first",
+              e is not None and e.code == "running" and (old / "port").exists(), told(e))
+    finally:
+        busy.close()
+
+    text, made = said(ops.migrate, WS, dry_run=True)
+    check("a dry run says what it would do and does nothing",
+          made == [] and "old: bot old (plays as Old) + instance old on test, port 8490" in text
+          and (old / "port").exists() and not (TMP / "instances" / "old").exists(), text)
+
+    text, made = said(ops.migrate, WS)
+    inst = WS.instance("old")
+    bot = WS.bot("old")
+    check("migrated: a bot and an instance", [i.key for i in made] == ["old"] and bot.exists(), text)
+    check("the bot keeps its name, account, language, model, owner and gender",
+          bot.data == {"name": "Old", "account": "offline", "language": "es", "model": "haiku low",
+                       "owner": "Someone", "gender": "f"}, bot.data)
+    check("...and its personality, where it was", bot.personality.read_text() == "You are Old.\n")
+    check("the instance keeps its server and its port", inst.data == {"bot": "old", "server": "test", "port": 8490})
+    check("its game, HeadlessMC and logs were moved, not copied",
+          (inst.gamedir / "config" / "marionette-places-test.txt").exists()
+          and (inst.run / "client.log").exists() and not (old / "gamedir").exists())
+    check("HeadlessMC now points at the game folder where it is",
+          files.read_java_properties(inst.hmc / "HeadlessMC" / "config.properties").get("hmc.gamedir")
+          == str(inst.gamedir))
+    check("the old one-value files left the bot's folder",
+          sorted(p.name for p in old.iterdir()) == ["bot.json", "personality.txt"])
+    backups = list((state / "backups").glob("bots-before-instances-*.tar.gz"))
+    import tarfile
+    names = tarfile.open(backups[0]).getnames() if backups else []
+    check("a backup of the small files was made first",
+          "old/port" in names and "old/personality.txt" in names
+          and "old/hmc/HeadlessMC/config.properties" in names, names)
+    moved = sorted(p.name for p in (state / "servers" / "test").iterdir() if p.is_file())
+    check("its state moved to its server's state folder",
+          moved == sorted(["session_old", "pending_old.json", "internal_old.jsonl", "calls_old.log",
+                           "horse_old_test.json"]), moved)
+    check("...and another bot's, whose name starts the same, did not",
+          (state / "internal_olden.jsonl").exists())
+    check("nothing is left to migrate", WS.legacy_bots() == [] and
+          "nothing to migrate" in said(ops.migrate, WS)[0])
+    remove_tree(inst.dir)
+    remove_tree(bot.dir)
 
 
 if __name__ == "__main__":
@@ -1121,6 +1410,8 @@ if __name__ == "__main__":
     tests_ports()
     tests_mods()
     tests_create()
+    tests_clone()
+    tests_render()
     tests_prepare()
     tests_launch_line()
     tests_keeper()
@@ -1131,6 +1422,7 @@ if __name__ == "__main__":
     tests_pids()
     tests_lock()
     tests_start_order()
+    tests_conflicts()
     tests_keeper_failures()
     tests_keeper_guarded()
     tests_guard_rings()
@@ -1139,6 +1431,7 @@ if __name__ == "__main__":
     tests_cancel()
     tests_settings()
     tests_server_apis()
+    tests_migrate()
     tests_cli()
 
     print(f"\n{done - len(failures)}/{done} checks pass")

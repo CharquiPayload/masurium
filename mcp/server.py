@@ -29,6 +29,10 @@ import urllib.request
 
 HOME = os.path.expanduser("~")
 CONFIG = os.environ.get("MARIONETTE_ENV", f"{HOME}/.marionette/server.env")
+# The state folder the bridge uses (inherited from it): the marks, the jobs
+# left pending, the internal channel, the call log. Next to server.env when
+# nobody says otherwise, which is where they always were.
+STATE = os.environ.get("MARIONETTE_STATE_DIR") or os.path.dirname(CONFIG)
 BOT = os.environ.get("MARIONETTE_BOT", "http://127.0.0.1:8478")
 # Same BOT_NAME the bridge uses, from which we inherit the environment. A name
 # written by hand in three places is the same bug as the port: with two bots,
@@ -45,7 +49,7 @@ TASK_LIMIT = 45    # waiting cap inside a turn
 
 # The MCP is launched ONCE PER TURN: what happens in a turn is forgotten in
 # the next. This file is the only thing that survives, and `verbose` reads it.
-CALLS = os.path.join(os.path.dirname(CONFIG),
+CALLS = os.path.join(STATE,
                      "calls_%s.log" % os.environ.get("BOT_NAME", "bot").lower())
 CALLS_CAP = 400      # lines kept when trimming
 CHAT_WIDTH = 190     # the game chat does not swallow long lines
@@ -456,7 +460,7 @@ def _horse_file():
     # creatures, and the uuid of a horse from one server does not exist in
     # another. Without this `my_horse` would say "it must have died" right
     # after changing server.
-    return os.path.join(os.path.dirname(CONFIG),
+    return os.path.join(STATE,
                         f"horse_{NAME.lower()}_{_current_server()}.json")
 
 
@@ -1218,16 +1222,16 @@ def _bots_dir():
 
 def _mark(what):
     """A timestamped mark for the bridge (crafting, talking...): a file
-    .marionette/<what>_<bot> whose mtime says when it happened."""
+    <state>/<what>_<bot> whose mtime says when it happened."""
     try:
-        with open(os.path.join(os.path.dirname(CONFIG), f"{what}_{NAME.lower()}"), "w") as f:
+        with open(os.path.join(STATE, f"{what}_{NAME.lower()}"), "w") as f:
             f.write(time.strftime("%H:%M:%S"))
     except OSError:
         pass
 
 
 def _internal_file(bot):
-    return os.path.join(os.path.dirname(CONFIG), f"internal_{bot.lower()}.jsonl")
+    return os.path.join(STATE, f"internal_{bot.lower()}.jsonl")
 
 
 def t_internal(a):
@@ -1263,7 +1267,7 @@ def t_internal(a):
     # The "I am talking to another AI" mark for the TAB and the board: the
     # bridge reads it (ten seconds).
     try:
-        with open(os.path.join(os.path.dirname(CONFIG),
+        with open(os.path.join(STATE,
                                f"talking_{NAME.lower()}"), "w") as f:
             f.write(bot)
     except OSError:
@@ -2140,7 +2144,7 @@ def _spoken_to(since):
 
 def _pending_file():
     return os.environ.get("MARIONETTE_PENDING") or os.path.join(
-        os.path.dirname(CONFIG), f"pending_{NAME.lower()}.json")
+        STATE, f"pending_{NAME.lower()}.json")
 
 
 def _pending_read():

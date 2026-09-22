@@ -1,5 +1,7 @@
-"""What the launcher does to bots: create, start, connect, give a voice (the
-bridge), stop, restart, look at, and deploy a new mod for all of them.
+"""What the launcher does: create bots and instances, clone them, start an
+instance and put it on its server, give it a voice (the bridge), stop it,
+restart it, look at every instance, change settings, deploy a new mod, and
+move a workspace from the layout before instances.
 
 Every operation reports what it does through `on_event` (see events.py) and
 fails by raising Fail; none of them prints. The command line and, later, a
@@ -10,16 +12,18 @@ import pathlib
 import re
 import shutil
 import sys
+import tarfile
 import time
 from dataclasses import dataclass
 
 from . import settings
 from .api import UNREACHABLE
-from .bots import check_name, operating
+from .bots import Instance, check_key, check_name, operating, write_json
 from .diagnosis import complaints, crash_report, explain_crash
 from .events import Cancelled, Fail, pause, report_to, wait_for
-from .files import LogWatch, link_or_copy, log_has, read_pid, tail_lines, unlink_quietly
-from .keeper import (HMC_READY, KEEPER_ENDED, KEEPER_FAILED, GAME_OVER, clear_run_files,
+from .files import (LogWatch, link_dir, link_or_copy, link_target, log_has, read_java_properties,
+                    read_pid, tail_lines, unlink_quietly)
+from .keeper import (GAME_OVER, HMC_READY, KEEPER_ENDED, KEEPER_FAILED, clear_run_files,
                      keeper_alive, keeper_ask, keeper_pid, launcher_pid)
 from .packs import CORE_JAR, compare_packs, jar_family, pack_mods, sync_mods
 from .processes import ENTRY, game_pids, is_ours, port_in_use, spawn_free, stop_game, terminate
@@ -29,104 +33,229 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 JOINED = "joined"
 ALREADY_IN = "already in"
 
+PERSONALITY_TEMPLATE = (
+    "You are {name}. Write here who you are: how you talk, what you care about, who\n"
+    "you trust, what makes you laugh. In second person and in a few lines: this\n"
+    "goes at the start of the prompt, before the body's instructions.\n\n"
+    "For now: you talk plainly, correct and direct, without flourishes.\n")
 
-# --- create -------------------------------------------------------------------
 
-def create_bot(ws, name, slug, account=None, on_event=None):
-    """A bot costs a folder, a port and a few small files. Returns the Bot."""
+# --- bots and instances -------------------------------------------------------
+
+def create_bot(ws, name, key=None, account=None, on_event=None):
+    """A character: bots/<key>/bot.json and a personality to fill in.
+    `name` is its player name in the game, with its capitals."""
     report = report_to(on_event)
     check_name(name)
-    bot = ws.bot(name)
+    key = (key or name).lower()
+    check_key(key)
+    bot = ws.bot(key)
+    if bot.dir.exists():
+        raise Fail(f"{bot.dir} already exists.", code="exists")
     account = account or ws.environ.get("MARIONETTE_ACCOUNT") or "online"
     if account not in ("online", "offline"):
         raise Fail(f"the account must be online or offline, not '{account}'.", code="bad_account")
-    if bot.dir.exists():
-        raise Fail(f"{bot.dir} already exists. To make it again, delete it yourself first.",
-                   code="exists")
-    clash = ws.name_clash(bot.key)
-    if clash:
-        raise Fail(f"'{name}' clashes with the bot '{clash}': one name contains the other.",
-                   lines=["the bridge would mix them up in the chat. Choose another name."],
-                   code="name_clash")
-    server = ws.server(slug)
-    launcher_jar = ws.shared_dir / "headlessmc-launcher.jar"
-    if not (ws.shared_dir / "mods").is_dir() or not launcher_jar.is_file():
-        raise Fail(f"missing {ws.shared_dir}: it holds the launcher and the Marionette mods.",
-                   code="no_shared")
-    port = ws.free_port(bot.key)
-
-    report.step(f"creating {name}  (server {slug}, port {port})", stage="creating")
     try:
         bot.dir.mkdir(parents=True)
     except FileExistsError:
-        raise Fail(f"{bot.dir} already exists. To make it again, delete it yourself first.",
-                   code="exists")
-    (bot.gamedir / "mods").mkdir(parents=True)
-    (bot.hmc / "HeadlessMC").mkdir(parents=True)
-    link_or_copy(launcher_jar, bot.hmc / "headlessmc-launcher.jar")
-    # The only thing that CANNOT be shared is the hmc folder: the name used to
-    # join the game is fixed in its config.properties, so there is one per bot.
-    (bot.hmc / "HeadlessMC" / "config.properties").write_text(
-        "hmc.jline.enabled=false\n"
-        f"hmc.offline={'true' if account == 'offline' else 'false'}\n"
-        f"hmc.offline.username={name}\n"
-        "hmc.invert.command.modifiers=false\n"
-        f"hmc.gamedir={bot.gamedir}\n", encoding="utf-8")
-    bot.write("port", port)
-    bot.write("server", slug)
-    bot.write("account", account)
-    # The language the bot speaks in the chat: en or es.
-    bot.write("language", "en")
-    # Its character, in its own file from minute one. A template instead of
-    # an empty file, because a bot without a written character sounds like a
-    # manual. Editing this is all it takes for this bot not to sound like the
-    # others.
-    (bot.dir / "personality.txt").write_text(
-        f"You are {name}. Write here who you are: how you talk, what you care about, who\n"
-        "you trust, what makes you laugh. In second person and in a few lines: this\n"
-        "goes at the start of the prompt, before the body's instructions.\n\n"
-        "For now: you talk plainly, correct and direct, without flourishes.\n",
-        encoding="utf-8")
-    # The owner: whose delicate orders the bot accepts, and who can shut it
-    # down, restart it and manage its lists with /marionette bot on any
-    # server. It is born with the server owner, if the environment names one;
-    # to give the bot to someone else, write their EXACT player name here and
-    # restart the bridge.
-    owner = ws.env_values().get("MARIONETTE_OWNER", "")
-    if owner:
-        bot.write("owner", owner)
-    n = sync_mods(ws, bot.gamedir, server.pack)
-    report.detail(f"{n} mods linked from {server.mods_dir} and {ws.shared_dir / 'mods'}")
+        raise Fail(f"{bot.dir} already exists.", code="exists")
+    # The language it speaks in the chat, en or es; and its character, in its
+    # own file from minute one. A template instead of an empty file, because
+    # a bot without a written character sounds like a manual.
+    bot.save({"name": name, "account": account, "language": "en"})
+    bot.personality.write_text(PERSONALITY_TEMPLATE.format(name=name), encoding="utf-8")
+    report.step(f"bot {key} created (plays as {name}, {account} account)", stage="created")
     return bot
 
 
-def login_command(bot):
+def create_instance(ws, bot_key, slug, key=None, on_event=None):
+    """An instance of a bot on a server: its folder, a port of its own,
+    HeadlessMC and a game folder with the server's pack linked in."""
+    report = report_to(on_event)
+    bot = ws.bot(bot_key).require()
+    server = ws.server(slug)
+    launcher_jar = ws.shared_dir / "headlessmc-launcher.jar"
+    if not (ws.shared_dir / "mods").is_dir() or not launcher_jar.is_file():
+        raise Fail(f"missing {ws.shared_dir}: it holds HeadlessMC and the Marionette mods.",
+                   code="no_shared")
+    key = (key or ws.free_key(bot.key, ws.instance_keys())).lower()
+    check_key(key, "instance")
+    inst = Instance(ws, key)
+    if inst.dir.exists():
+        raise Fail(f"{inst.dir} already exists.", code="exists")
+    port = ws.free_port(key)
+    try:
+        inst.dir.mkdir(parents=True)
+    except FileExistsError:
+        raise Fail(f"{inst.dir} already exists.", code="exists")
+    (inst.gamedir / "mods").mkdir(parents=True)
+    (inst.hmc / "HeadlessMC").mkdir(parents=True)
+    # The only thing of HeadlessMC that CANNOT be shared is its folder: the
+    # name used to join and the login are kept there.
+    link_or_copy(launcher_jar, inst.hmc / "headlessmc-launcher.jar")
+    (inst.hmc / "HeadlessMC" / "config.properties").write_text("", encoding="utf-8")
+    inst.save({"bot": bot.key, "server": server.slug, "port": port})
+    settings.render(inst)
+    n = sync_mods(ws, inst.gamedir, server.pack, inst.extra_mods)
+    report.step(f"instance {key}: {bot.name} on {server.slug}, port {port}", stage="created")
+    report.detail(f"{n} mods linked from {server.mods_dir} and {ws.shared_dir / 'mods'}")
+    return inst
+
+
+def create(ws, name, slug, account=None, bot_key=None, key=None, on_event=None):
+    """The bot (if it is not there yet) and an instance of it on a server:
+    what `marionette.py create <name> <server>` does. Returns the instance."""
+    report = report_to(on_event)
+    bot_key = (bot_key or name).lower()
+    bot = ws.bot(bot_key)
+    if bot.exists():
+        if bot.name.lower() != name.lower():
+            raise Fail(f"the bot {bot_key} plays as {bot.name}, not as {name}.", code="exists")
+    else:
+        ws.server(slug)                  # an unknown server is said before anything is made
+        bot = create_bot(ws, name, bot_key, account, report)
+    return create_instance(ws, bot.key, slug, key, report)
+
+
+def clone_bot(ws, key, new_key=None, on_event=None):
+    """A new character from another: its settings and personality, under a
+    name of its own (alice -> alice-1, playing as Alice_1)."""
+    report = report_to(on_event)
+    src = ws.bot(key).require()
+    new_key = (new_key or ws.free_key(src.key, ws.bot_keys())).lower()
+    check_key(new_key)
+    dst = ws.bot(new_key)
+    if dst.dir.exists():
+        raise Fail(f"{dst.dir} already exists.", code="exists")
+    suffix = new_key[len(src.key):].replace("-", "_") if new_key.startswith(src.key) else ""
+    name = (src.name[:16 - len(suffix)] + suffix) if suffix else new_key.replace("-", "_")[:16]
+    check_name(name)
+    shutil.copytree(src.dir, dst.dir)
+    data = dst.data
+    data["name"] = name
+    dst.save(data)
+    report.step(f"bot {new_key} cloned from {src.key} (plays as {name})", stage="created")
+    return dst
+
+
+def clone_instance(ws, key, new_key=None, slug=None, on_event=None):
+    """The same bot again, on this server or another: the instance's own
+    settings, extra mods, and what it keeps about its world (its config
+    folder: places, chests, orders), with a port of its own. Not its login:
+    two copies of a login would drift apart, so a clone logs in again.
+
+    Two instances that would be the same player on the same server may
+    exist; `start` is what refuses to run both."""
+    report = report_to(on_event)
+    src = ws.instance(key)
+    data = src.data
+    slug = slug or data.get("server")
+    ws.server(slug)
+    new_key = (new_key or ws.free_key(src.key, ws.instance_keys())).lower()
+    check_key(new_key, "instance")
+    dst = Instance(ws, new_key)
+    if dst.dir.exists():
+        raise Fail(f"{dst.dir} already exists.", code="exists")
+    dst.dir.mkdir(parents=True)
+    (dst.gamedir / "mods").mkdir(parents=True)
+    (dst.hmc / "HeadlessMC").mkdir(parents=True)
+    link_or_copy(ws.shared_dir / "headlessmc-launcher.jar", dst.hmc / "headlessmc-launcher.jar")
+    (dst.hmc / "HeadlessMC" / "config.properties").write_text("", encoding="utf-8")
+    if src.extra_mods.is_dir():
+        shutil.copytree(src.extra_mods, dst.extra_mods)
+    if slug == data.get("server") and (src.gamedir / "config").is_dir():
+        shutil.copytree(src.gamedir / "config", dst.gamedir / "config")
+    if (src.gamedir / "options.txt").is_file():
+        shutil.copy2(src.gamedir / "options.txt", dst.gamedir / "options.txt")
+    data.update(server=slug, port=ws.free_port(new_key))
+    if slug != src.slug:
+        data.pop("escort", None)         # its boss's player is on the other server
+    dst.save(data)
+    settings.render(dst)
+    report.step(f"instance {new_key} cloned from {src.key}: {dst.name} on {slug}, port {dst.port}",
+                stage="created")
+    if settings.get(dst, "account") == "online":
+        report.detail(f"online account: log it in once:  marionette.py login {new_key}")
+    return dst
+
+
+def login_command(inst):
     """Online bots use a real, purchased Minecraft Java account (a Microsoft
-    account), like any player. HeadlessMC keeps the login in the bot's own hmc
-    folder, so each bot has its own account. What to run, interactively, to
-    log it in: (argv, cwd, env). None for an offline bot."""
-    if bot.read("account") == "offline":
+    account), like any player. HeadlessMC keeps the login in the instance's
+    hmc folder. What to run, interactively, to log it in: (argv, cwd, env).
+    None for an offline bot."""
+    if settings.get(inst, "account") == "offline":
         return None
-    return (bot.ws.java_command() + ["-jar", "headlessmc-launcher.jar"],
-            bot.hmc, bot.ws.child_env())
+    return (inst.ws.java_command() + ["-jar", "headlessmc-launcher.jar"],
+            inst.hmc, inst.ws.child_env())
+
+
+# --- who is running, and where ------------------------------------------------
+
+def client_running(inst):
+    return keeper_alive(inst) or launcher_pid(inst) is not None or bool(game_pids(inst.port))
+
+
+def check_can_run(inst):
+    """What would make this instance's start a second copy of somebody
+    already playing. Instances are cloned freely; this is where two of them
+    being the same player is refused:
+
+    - the same player on the same server (Minecraft takes one of each);
+    - an online account already playing anywhere: the same Microsoft account
+      in two games at once, which servers refuse and which would also let
+      two copies of its login drift apart;
+    - on the same server, a player whose name contains this one's or is
+      contained in it: the bridge reacts when its name appears in the chat,
+      and calling one would wake both."""
+    ws = inst.ws
+    online = settings.get(inst, "account") == "online"
+    for other in ws.instances():
+        if other == inst or not client_running(other):
+            continue
+        if other.player == inst.player and other.slug == inst.slug:
+            raise Fail(f"{inst.name} is already playing on {inst.slug}, as the instance {other.key}.",
+                       lines=[f"stop that one first:  marionette.py stop {other.key}"], code="player_taken")
+        if online and other.player == inst.player and settings.get(other, "account") == "online":
+            raise Fail(f"{inst.name}'s account is already playing, on {other.slug} (instance {other.key}): "
+                       "one Microsoft account plays in one game at a time.",
+                       lines=[f"stop that one first:  marionette.py stop {other.key}"], code="account_in_use")
+        if other.slug == inst.slug and (inst.player in other.player or other.player in inst.player):
+            raise Fail(f"'{inst.name}' and '{other.name}' would be on {inst.slug} together, and one "
+                       "name contains the other.",
+                       lines=["the bridge would mix them up in the chat. Rename one of the bots."],
+                       code="name_clash")
+
+
+def take_place(inst):
+    """The instance becomes the one that plays as its player on its server:
+    state/servers/<slug>/bots/<player> links to it. Its bridge reads that
+    folder as its bots folder: the bots of its server, under their player
+    names, as it always read them."""
+    link_dir(inst.dir, inst.place)
+
+
+def leave_place(inst):
+    target = link_target(inst.place)
+    if target is not None and pathlib.Path(target) == inst.dir:
+        unlink_quietly(inst.place)
 
 
 # --- start --------------------------------------------------------------------
 
-def prepare_gamedir(bot, server):
+def prepare_gamedir(inst, server):
     """Everything the mod reads from the gamedir before it starts. ALWAYS
-    rewritten, not only when switching servers: add a mod to a server's pack
-    and the bots would keep joining with the old one, which the server rejects
-    with "Incompatible client! Please use NeoForge ...", nothing like the real
-    cause. Rebuilding costs a second; not doing it costs a mysterious
-    disconnection."""
-    config = bot.gamedir / "config"
+    rewritten: add a mod to a server's pack and the instance would keep
+    joining with the old one, which the server rejects with "Incompatible
+    client! Please use NeoForge ...", nothing like the real cause. Rebuilding
+    costs a second; not doing it costs a mysterious disconnection."""
+    config = inst.gamedir / "config"
     config.mkdir(parents=True, exist_ok=True)
     # The mod has no way of knowing WHICH server it joined (they may all share
     # an address and port): the launcher tells it. Per-server memories
     # (places, chests, orders...) are keyed on this.
     (config / "marionette-server.txt").write_text(server.slug + "\n", encoding="utf-8")
-    escort = re.sub(r"\s", "", bot.read("escort"))
+    escort = re.sub(r"\s", "", settings.get(inst, "escort"))
     escort_f = config / "marionette-escort.txt"
     if escort:
         escort_f.write_text(escort + "\n", encoding="utf-8")
@@ -136,7 +265,7 @@ def prepare_gamedir(bot, server):
     # screen until somebody clicks, and nobody ever will: it is turned off in
     # options.txt, which the game reads on start. Every other option is left
     # as it is.
-    options = bot.gamedir / "options.txt"
+    options = inst.gamedir / "options.txt"
     try:
         lines = options.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -144,130 +273,127 @@ def prepare_gamedir(bot, server):
     kept = [l for l in lines if not l.startswith("onboardAccessibility:")]
     if kept != lines or not lines or "onboardAccessibility:false" not in lines:
         options.write_text("\n".join(kept + ["onboardAccessibility:false"]) + "\n", encoding="utf-8")
-    n = sync_mods(bot.ws, bot.gamedir, server.pack)
-    bot.write("server", server.slug)
-    return n
+    return sync_mods(inst.ws, inst.gamedir, server.pack, inst.extra_mods)
 
 
-def join(bot, server, api, report, attempts, patience=18, cancel=None):
+def join(inst, server, api, report, attempts, patience=18, cancel=None):
     """Send `connect` and wait for the server to list the bot. Each attempt
     waits `patience` x 10 s."""
     report.step(f"connecting to {server.slug} ({server.address})", stage="joining")
     for attempt in range(1, attempts + 1):
-        answer = keeper_ask(bot, f"connect {server.address}")
+        answer = keeper_ask(inst, f"connect {server.address}")
         if answer != "sent":
             report.detail(f"the keeper did not take the command ({answer}); is the client alive?")
             return False
         for i in range(1, patience + 1):
             pause(10, cancel)
-            if api.is_inside(bot.name):
-                report.step(f"{bot.name} is IN (attempt {attempt}, {i * 10}s)", stage="in")
+            if api.is_inside(inst.name):
+                report.step(f"{inst.name} is IN (attempt {attempt}, {i * 10}s)", stage="in")
                 return True
         report.detail(f"attempt {attempt} failed")
     return False
 
 
-def start(bot, switch_to=None, on_event=None, cancel=None):
-    """Start a bot's client and put it on its server (or on `switch_to`,
-    which rebuilds its mods). Returns JOINED, or ALREADY_IN when it was.
+def start(inst, on_event=None, cancel=None):
+    """Start an instance's client and put it on its server. Returns JOINED,
+    or ALREADY_IN when it was.
 
     With `cancel` set halfway, it stops what it started (the client it
     launched is stopped, not left loading with nobody waiting for it) and
     raises Cancelled."""
-    bot.require()
-    with operating(bot):
-        return _start(bot, switch_to, report_to(on_event), cancel)
+    inst.require()
+    with operating(inst):
+        return _start(inst, report_to(on_event), cancel)
 
 
-def _start(bot, switch_to, report, cancel=None):
+def _start(inst, report, cancel=None):
     launched = []
     try:
-        return _start_steps(bot, switch_to, report, cancel, launched)
+        return _start_steps(inst, report, cancel, launched)
     except Cancelled:
         if launched:
             report.step("cancelled: stopping the client it had started", stage="cancelling")
-            _stop_client(bot, report)
+            _stop_client(inst, report)
+            leave_place(inst)
         raise
 
 
-def _start_steps(bot, switch_to, report, cancel, launched):
-    ws = bot.ws
-    slug = switch_to or bot.read("server")
-    if not slug:
-        raise Fail(f"{bot.name} has no server noted. Say which one it joins:",
-                   lines=ws.servers_listing(), code="no_server")
-    server = ws.server(slug)
+def _start_steps(inst, report, cancel, launched):
+    ws = inst.ws
+    if not inst.bot.exists():
+        raise Fail(f"the instance {inst.key} is of the bot {inst.data.get('bot')}, which is not there.",
+                   code="no_bot")
+    server = ws.server(inst.slug)
     api = ws.api_for(server)
-    clash = ws.name_clash(bot.key)
-    if clash:
-        raise Fail(f"the name '{bot.name}' clashes with the bot '{clash}': one contains the other.",
-                   lines=["the bridge would mix them up in the chat. Choose another name."],
-                   code="name_clash")
 
     # Whether it is running is asked BEFORE anything is touched. Preparing
-    # first rebuilt the mods folder of a live game and noted a server it was
-    # not on; on Windows, where an open jar cannot be deleted, it failed.
-    moving = switch_to and switch_to != bot.read("server")
-    if api.is_inside(bot.name):
-        if moving:
-            raise Fail(f"{bot.name} is in the game, on {bot.read('server')}. To move it to "
-                       f"{slug}, stop it first:  marionette.py stop {bot.name}", code="running")
-        report.step(f"{bot.name} is already in. Nothing to do.", stage="in")
+    # first rebuilt the mods folder of a live game; on Windows, where an open
+    # jar cannot be deleted, it failed.
+    if api.is_inside(inst.name) and client_running(inst):
+        report.step(f"{inst.name} is already in. Nothing to do.", stage="in")
         return ALREADY_IN
-    # A keeper that answers holds a live client: either this same bot loaded
-    # but not connected, or a start that was cut halfway. Starting anyway
-    # would launch a second 3 GB java, which is how the OOM killer gets
-    # invited.
-    answer = keeper_ask(bot, "@ping")
+    check_can_run(inst)
+    if api.is_inside(inst.name):
+        raise Fail(f"{inst.name} is already on {inst.slug}, and not through this instance.",
+                   lines=["another launcher, or a player with that name, is in with it."],
+                   code="player_taken")
+    # A keeper that answers holds a live client: either this same instance
+    # loaded but not connected, or a start that was cut halfway. Starting
+    # anyway would launch a second 3 GB java, which is how the OOM killer
+    # gets invited.
+    answer = keeper_ask(inst, "@ping")
     if answer and answer.startswith("ok "):
-        if not port_in_use(bot.port) and log_has(bot.client_log, GAME_OVER):
+        if not port_in_use(inst.port) and log_has(inst.client_log, GAME_OVER):
             # A keeper around a game that already died: not a running bot.
             report.step("a keeper was left holding a game that had exited; stopping it first")
-            keeper_ask(bot, "@stop")
-            wait_for(lambda: keeper_pid(bot) is None, 30, every=0.5, cancel=cancel)
+            keeper_ask(inst, "@stop")
+            wait_for(lambda: keeper_pid(inst) is None, 30, every=0.5, cancel=cancel)
         else:
-            raise Fail(f"{bot.name} is already running (keeper pid {read_pid(bot.keeper_pid_f)}, "
+            raise Fail(f"{inst.key} is already running (keeper pid {read_pid(inst.keeper_pid_f)}, "
                        f"game pid {answer[3:]}) but not in the server.",
-                       lines=[f"try:  marionette.py connect {bot.name}   or   marionette.py stop {bot.name}"],
+                       lines=[f"try:  marionette.py connect {inst.key}   or   marionette.py stop {inst.key}"],
                        code="running")
-    if port_in_use(bot.port):
-        holders = game_pids(bot.port)
-        raise Fail(f"port {bot.port} is already taken by a live client this launcher does not "
+    if port_in_use(inst.port):
+        holders = game_pids(inst.port)
+        raise Fail(f"port {inst.port} is already taken by a live client this launcher does not "
                    f"hold (pids {holders or 'unknown'}).",
-                   lines=[f"marionette.py stop {bot.name} takes it down, or give this bot another port."],
+                   lines=[f"marionette.py stop {inst.key} takes it down, or give it another port:  "
+                          f"marionette.py set {inst.key} port <number>"],
                    code="port_taken")
-    clear_run_files(bot)
+    clear_run_files(inst)
     if cancel:
         cancel.check()
 
-    report.step(f"preparing the mods of {slug}", stage="preparing")
-    report.detail(f"{prepare_gamedir(bot, server)} mods")
+    settings.render(inst)
+    report.step(f"preparing the mods of {inst.slug}", stage="preparing")
+    report.detail(f"{prepare_gamedir(inst, server)} mods")
     # Said now, from /mods, instead of by the server three minutes from now
     # with a message that names NeoForge. Not refused: some mods take a
     # version they were not built with, and whoever runs this may know.
     theirs = api.mods()
     if theirs is not None:
-        diff = compare_packs(pack_mods(ws, server.pack), theirs)
+        diff = compare_packs(pack_mods(ws, server.pack, inst.extra_mods), theirs)
         if diff["mismatch"]:
             report.warning("the server runs other versions than this pack; expect a rejection:",
                            [f"{i}: pack {mine}, server {its}" for i, mine, its in diff["mismatch"]])
 
-    report.step(f"starting {bot.name} (port {bot.port})", stage="launching")
-    bot.run.mkdir(parents=True, exist_ok=True)
+    report.step(f"starting {inst.key}: {inst.name} on {inst.slug} (port {inst.port})", stage="launching")
+    inst.run.mkdir(parents=True, exist_ok=True)
     # Fresh logs: the signs waited for below ("initialized", "game exited")
     # must be this start's and not the last one's.
-    unlink_quietly(bot.client_log, bot.keeper_log)
+    unlink_quietly(inst.client_log, inst.keeper_log)
     if cancel:
         cancel.check()
-    spawn_free([sys.executable, str(ENTRY), "keeper", bot.name, slug],
-               bot.keeper_log, cwd=ws.home, env=ws.child_env())
+    take_place(inst)
+    spawn_free([sys.executable, str(ENTRY), "keeper", inst.key],
+               inst.keeper_log, cwd=ws.home, env=ws.child_env())
     launched.append(True)
 
     report.step("loading the game", stage="loading")
     # The right signal is NOT that the process exists: it is that the mod has
     # registered its commands. Sending `connect` before that talks to nobody.
-    ready = LogWatch(bot.client_log, HMC_READY)
-    ended = LogWatch(bot.keeper_log, KEEPER_ENDED, KEEPER_FAILED)
+    ready = LogWatch(inst.client_log, HMC_READY)
+    ended = LogWatch(inst.keeper_log, KEEPER_ENDED, KEEPER_FAILED)
     spawned = time.monotonic()
 
     def ready_or_dead():
@@ -277,39 +403,39 @@ def _start_steps(bot, switch_to, report, cancel, launched):
         # it could speak) leaves no line to wait for, and this used to wait
         # the whole five minutes for it. Its pid is the sign: written first
         # thing, gone or a stranger's when it is dead.
-        if read_pid(bot.keeper_pid_f) is None:
+        if read_pid(inst.keeper_pid_f) is None:
             return time.monotonic() - spawned > 20
-        return keeper_pid(bot) is None
+        return keeper_pid(inst) is None
 
     wait_for(ready_or_dead, 300, every=2, cancel=cancel)
     if ended.saw(KEEPER_FAILED) or (not ready.saw(HMC_READY) and not ended.saw(KEEPER_ENDED)
-                                    and keeper_pid(bot) is None):
-        raise Fail(f"the keeper of {bot.name} did not get the game going:",
-                   lines=tail_lines(bot.keeper_log, 6), code="keeper_failed")
+                                    and keeper_pid(inst) is None):
+        raise Fail(f"the keeper of {inst.key} did not get the game going:",
+                   lines=tail_lines(inst.keeper_log, 6), code="keeper_failed")
     if not ready.saw(HMC_READY):
-        crash = explain_crash(bot)
+        crash = explain_crash(inst)
         if crash:
             lines, code = crash[1], "crashed"
         else:
             lines, code = [], "not_initialized"
-            if bot.read("account", "online") == "online":
-                lines.append(f"(online account: if HeadlessMC asked for a login, run marionette.py login {bot.name})")
-            lines += tail_lines(bot.client_log, 5) + tail_lines(bot.keeper_log, 3)
+            if settings.get(inst, "account") == "online":
+                lines.append(f"(online account: if HeadlessMC asked for a login, run marionette.py login {inst.key})")
+            lines += tail_lines(inst.client_log, 5) + tail_lines(inst.keeper_log, 3)
         raise Fail("the hmc-specifics mod did not initialize. Without it there is no connect.",
                    lines=lines, code=code)
     # The bot can join the server without hands: if the mod could not open
     # its port, `connect` works anyway and the failure only shows much later,
     # when an order does nothing. Better to know here.
     report.step("waiting for the bot mod's port", stage="hands")
-    if not wait_for(lambda: port_in_use(bot.port), 20, every=2, cancel=cancel):
+    if not wait_for(lambda: port_in_use(inst.port), 20, every=2, cancel=cancel):
         # A mod that refused to construct (a missing add-on, say) shows up
         # here first: the game goes on loading without it, and crashes a
         # little later with the reason in its report.
-        wait_for(lambda: crash_report(bot) is not None, 15, every=3, cancel=cancel)
-        crash = explain_crash(bot)
-        raise Fail(f"the bot mod did not open port {bot.port}. It would join without hands.",
+        wait_for(lambda: crash_report(inst) is not None, 15, every=3, cancel=cancel)
+        crash = explain_crash(inst)
+        raise Fail(f"the bot mod did not open port {inst.port}. It would join without hands.",
                    lines=crash[1] if crash else tail_lines(
-                       bot.client_log, 5, r"marionette_bot|address already in use|BindException"),
+                       inst.client_log, 5, r"marionette_bot|address already in use|BindException"),
                    code="crashed" if crash else "no_hands")
 
     # `connect` sent while the game is still loading talks to nobody, and an
@@ -318,7 +444,7 @@ def _start_steps(bot, switch_to, report, cancel, launched):
     # nothing, and then the old way, straight in, is all there is.
     def readiness():
         try:
-            return bot.ask("/version")
+            return inst.ask("/version")
         except UNREACHABLE:
             return {}
 
@@ -338,216 +464,221 @@ def _start_steps(bot, switch_to, report, cancel, launched):
         else:
             report.detail(f"(still loading after 3 minutes, on {readiness().get('screen')!r}; trying anyway)")
 
-    if join(bot, server, api, report, attempts=3, cancel=cancel):
+    if join(inst, server, api, report, attempts=3, cancel=cancel):
         report.detail(api.players_text())
         return JOINED
-    n = len(list((bot.gamedir / "mods").glob("*.jar")))
+    n = len(list((inst.gamedir / "mods").glob("*.jar")))
     raise Fail("it did NOT join. Last complaints of the client:",
-               lines=complaints(bot) + [f"it joined with the '{slug}' pack ({n} mods). If the running "
-                                        "server is not that one, there is the reason."],
+               lines=complaints(inst) + [f"it joined with the '{inst.slug}' pack ({n} mods). If the "
+                                         "running server is not that one, there is the reason."],
                code="not_joined")
 
 
-def connect(bot, on_event=None, cancel=None):
-    """Puts back on the server a bot whose client is ALIVE at the title screen
-    (after /marionette bot <bot> logoff, or a failed connect). It starts
-    nothing, and on purpose it does NOT switch servers: switching servers
-    means switching packs, and the pack is only rebuilt by `start`."""
+def connect(inst, on_event=None, cancel=None):
+    """Puts back on the server an instance whose client is ALIVE at the title
+    screen (after /marionette bot <bot> logoff, or a failed connect). It
+    starts nothing."""
     report = report_to(on_event)
-    bot.require()
-    slug = bot.read("server")
-    if not slug:
-        raise Fail(f"{bot.name} has no server noted.", code="no_server")
-    server = bot.ws.server(slug)
-    api = bot.ws.api_for(server)
-    with operating(bot):
-        if not keeper_alive(bot):
-            raise Fail(f"no live client of {bot.name}: use  marionette.py start {bot.name}",
+    inst.require()
+    server = inst.ws.server(inst.slug)
+    api = inst.ws.api_for(server)
+    with operating(inst):
+        if not keeper_alive(inst):
+            raise Fail(f"no live client of {inst.key}: use  marionette.py start {inst.key}",
                        code="not_running")
-        if api.is_inside(bot.name):
-            report.step(f"{bot.name} is already in. Nothing to do.", stage="in")
+        if api.is_inside(inst.name):
+            report.step(f"{inst.name} is already in. Nothing to do.", stage="in")
             return ALREADY_IN
         # Cancelled, it only stops trying: the client was running before and
         # it still is.
-        if join(bot, server, api, report, attempts=3, patience=12, cancel=cancel):
+        if join(inst, server, api, report, attempts=3, patience=12, cancel=cancel):
             return JOINED
     raise Fail("it did NOT join.",
-               lines=[f"If the client is hung:  marionette.py restart {bot.name}"], code="not_joined")
+               lines=[f"If the client is hung:  marionette.py restart {inst.key}"], code="not_joined")
 
 
 # --- the bridge ---------------------------------------------------------------
 
-def bridge_pid(bot):
+def bridge_pid(inst):
     """The bridge's pid: from our pid file, or from the lock the bridge itself
     writes, which also covers one started by hand. The lock FILE stays after
     the bridge is gone, with its last pid inside: that pid counts only while
     it is still a bridge."""
-    for f in (bot.bridge_pid_f, bot.bridge_lock):
+    for f in (inst.bridge_pid_f, inst.bridge_lock):
         pid = read_pid(f)
         if is_ours(pid, "bridge.py"):
             return pid
     return None
 
 
-def bridge_env(bot):
-    """What the bridge (and the MCP server under it) is started with: the
-    workspace's folders, the bot's name, and the PATH of its server's own
-    server.env when that server has one. The path, never the token: the
-    bridge reads the file, over the global server.env, and talks to the
-    server this bot is on."""
-    env = bot.ws.child_env()
-    env["BOT_NAME"] = bot.name
+def bridge_env(inst):
+    """What the bridge (and the MCP server under it) is started with. Its
+    bots folder is its server's place folder: the instances playing there
+    now, under their player names, which is how it looks up its own port,
+    its guards and the other bots. Its state folder is its server's: two
+    instances of one bot on two servers are two lives, and do not share a
+    session or a channel. Its server's own server.env, by PATH, never the
+    token. And the instance, so that a restart ordered from the game
+    restarts THIS one."""
+    env = inst.ws.child_env()
+    env["BOT_NAME"] = inst.name
+    env["MARIONETTE_BOTS_DIR"] = str(inst.state / "bots")
+    env["MARIONETTE_STATE_DIR"] = str(inst.state)
+    env["MARIONETTE_INSTANCE"] = inst.key
     env.pop("MARIONETTE_SERVER_ENV", None)
-    slug = bot.read("server")
-    if slug:
-        own = bot.ws.servers_dir / slug / "server.env"
-        if own.is_file():
-            env["MARIONETTE_SERVER_ENV"] = str(own)
+    own = inst.ws.servers_dir / inst.slug / "server.env"
+    if inst.slug and own.is_file():
+        env["MARIONETTE_SERVER_ENV"] = str(own)
     return env
 
 
-def start_bridge(bot, on_event=None):
+def start_bridge(inst, on_event=None):
     """Starts the bridge, detached. It goes AFTER the client, and only if it
     joined: without a body in the game it has nobody to write to. Returns
     its pid, when it could be read."""
     report = report_to(on_event)
-    bot.require()
-    with operating(bot):
-        pid = bridge_pid(bot)
+    inst.require()
+    with operating(inst):
+        pid = bridge_pid(inst)
         if pid:
-            report.step(f"the bridge of {bot.name} is already running (pid {pid})", stage="bridge")
+            report.step(f"the bridge of {inst.key} is already running (pid {pid})", stage="bridge")
             return pid
-        bot.run.mkdir(parents=True, exist_ok=True)
-        unlink_quietly(bot.bridge_log)
-        env = bridge_env(bot)
-        report.step(f"starting the bridge of {bot.name}", stage="bridge")
-        spawn_free([sys.executable, str(REPO / "mcp" / "bridge.py"), bot.name],
-                   bot.bridge_log, cwd=bot.ws.home, env=env)
+        if link_target(inst.place) != inst.dir:
+            check_can_run(inst)
+            take_place(inst)
+        settings.render(inst)
+        inst.run.mkdir(parents=True, exist_ok=True)
+        inst.state.mkdir(parents=True, exist_ok=True)
+        unlink_quietly(inst.bridge_log)
+        report.step(f"starting the bridge of {inst.key}", stage="bridge")
+        spawn_free([sys.executable, str(REPO / "mcp" / "bridge.py"), inst.name],
+                   inst.bridge_log, cwd=inst.ws.home, env=bridge_env(inst))
         # The sign that it started is its own "listening" line, not that a
         # process exists: the bridge can exist and be dying. The log does not
         # lie. Its pid comes from the lock it writes (see bridge_pid).
-        if wait_for(lambda: log_has(bot.bridge_log, "listening"), 10, every=1):
-            first = tail_lines(bot.bridge_log, 1000)[:1]
+        if wait_for(lambda: log_has(inst.bridge_log, "listening"), 10, every=1):
+            first = tail_lines(inst.bridge_log, 1000)[:1]
             report.detail(f"bridge alive: {first[0] if first else ''}")
-            report.detail(f"log at {bot.bridge_log}")
-            return bridge_pid(bot)
-    raise Fail(f"the bridge did NOT start. {bot.name} is in the game but MUTE:",
-               lines=tail_lines(bot.bridge_log, 20), code="bridge_failed")
+            report.detail(f"log at {inst.bridge_log}")
+            return bridge_pid(inst)
+    raise Fail(f"the bridge did NOT start. {inst.name} is in the game but MUTE:",
+               lines=tail_lines(inst.bridge_log, 20), code="bridge_failed")
 
 
 # --- stop and restart ---------------------------------------------------------
 
-def _stop_client(bot, report):
+def _stop_client(inst, report):
     """The client alone: the keeper, the HeadlessMC under it and the game."""
-    keeper = keeper_pid(bot)
-    launcher = launcher_pid(bot)
-    answer = keeper_ask(bot, "@stop")
+    keeper = keeper_pid(inst)
+    launcher = launcher_pid(inst)
+    answer = keeper_ask(inst, "@stop")
     if answer == "stopping":
         # The keeper gives the game 25 s to shut down on its own before it
         # kills it, then leaves; a little more than that here.
-        if wait_for(lambda: not is_ours(keeper, "keeper") and not port_in_use(bot.port),
+        if wait_for(lambda: not is_ours(keeper, "keeper") and not port_in_use(inst.port),
                     45, every=0.5):
             report.detail("client: stopped")
         else:
             report.detail("client: the keeper did not leave nicely; insisting")
-            stop_game(bot.port, launcher)
-            if keeper_pid(bot):
+            stop_game(inst.port, launcher)
+            if keeper_pid(inst):
                 terminate(keeper)
-    elif launcher or keeper or game_pids(bot.port):
+    elif launcher or keeper or game_pids(inst.port):
         # No keeper answering, but something of the client is there: a keeper
-        # that died, or a game started some other way on this bot's port.
-        stop_game(bot.port, launcher)
+        # that died, or a game started some other way on this port.
+        stop_game(inst.port, launcher)
         if keeper:
             terminate(keeper)
         report.detail("client: stopped (the keeper was not answering)")
     else:
         report.detail("client: nothing was running")
-    clear_run_files(bot)
+    clear_run_files(inst)
 
 
-def stop(bot, keep_guards=False, on_event=None, _stopped=None):
-    """Stops a bot: the client (through its keeper) and its bridge. Processes
-    are found by what identifies THAT bot and no other: its own pid files,
-    each checked to still name the process it was written for. A bare kill
-    by pattern would take down every bot, which is exactly what must not
-    happen when there are two."""
+def stop(inst, keep_guards=False, on_event=None, _stopped=None):
+    """Stops an instance: the client (through its keeper) and its bridge.
+    Processes are found by what identifies THAT instance and no other: its
+    own pid files, each checked to still name the process it was written
+    for. A bare kill by pattern would take down every bot, which is exactly
+    what must not happen when there are two."""
     report = report_to(on_event)
-    bot.require()
+    inst.require()
     stopped = set() if _stopped is None else _stopped
-    stopped.add(bot.key)
-    with operating(bot):
-        report.step(f"stopping {bot.name} (port {bot.port})", stage="stopping")
-        _stop_client(bot, report)
-
-        pid = bridge_pid(bot)
+    stopped.add(inst.key)
+    with operating(inst):
+        report.step(f"stopping {inst.key} ({inst.name} on {inst.slug}, port {inst.port})", stage="stopping")
+        _stop_client(inst, report)
+        pid = bridge_pid(inst)
         if pid:
             terminate(pid)
             report.detail("bridge: stopped")
         else:
             report.detail("bridge: nothing was running")
-        unlink_quietly(bot.bridge_pid_f)
-        report.step(f"{bot.name} stopped", stage="stopped")
+        unlink_quietly(inst.bridge_pid_f)
+        leave_place(inst)
+        report.step(f"{inst.key} stopped", stage="stopped")
 
     # Its guards leave with it: a guard without a boss has nothing to do. A
-    # RESTART is not a disconnection: the guards stay. Each bot is stopped
-    # once: two bots guarding each other, or one guarding itself, used to
-    # send this round and round until Python gave up.
+    # RESTART is not a disconnection: the guards stay. Only guards that are
+    # running, and each once: two guarding each other, or one guarding
+    # itself, used to send this round and round until Python gave up.
     if not keep_guards:
-        for g in bot.guards():
-            if g.key in stopped:
+        for g in inst.guards():
+            if g.key in stopped or not client_running(g):
                 continue
-            report.step(f"{g.name} is a guard of {bot.name}: stopping it too")
+            report.step(f"{g.key} is a guard of {inst.name}: stopping it too")
             try:
                 stop(g, keep_guards=False, on_event=report, _stopped=stopped)
             except Fail as e:
                 report.warning(str(e), e.lines)
 
 
-def restart(bot, switch_to=None, on_event=None, cancel=None):
-    """Restarts a WHOLE bot: client and bridge. It exists because of an easy
-    mistake: after deploying a new mod both processes get killed, but only
-    the client gets started again. The bot stays in the game, visible in
-    /players, and mute, which from the chat looks exactly like a hang."""
+def restart(inst, on_event=None, cancel=None):
+    """Restarts a WHOLE instance: client and bridge. It exists because of an
+    easy mistake: after deploying a new mod both processes get killed, but
+    only the client gets started again. The bot stays in the game, visible
+    in /players, and mute, which from the chat looks exactly like a hang."""
     report = report_to(on_event)
-    bot.require()
-    with operating(bot):
-        stop(bot, keep_guards=True, on_event=report)
+    inst.require()
+    with operating(inst):
+        stop(inst, keep_guards=True, on_event=report)
         try:
-            _start(bot, switch_to, report, cancel)
+            _start(inst, report, cancel)
         except Cancelled:
             raise
         except Fail as e:
             raise Fail(str(e), lines=e.lines + ("the client did not join: the bridge was NOT started.",),
                        code=e.code)
-        return start_bridge(bot, on_event=report)
+        return start_bridge(inst, on_event=report)
 
 
 # --- settings -----------------------------------------------------------------
 
-def client_running(bot):
-    return keeper_alive(bot) or launcher_pid(bot) is not None or bool(game_pids(bot.port))
-
-
-def configure(bot, key, value=None, clear=False, on_event=None):
-    """Set one of a bot's settings (see settings.py), or with `clear` put it
-    back to its default. Returns the value that applies now. A setting read
-    when the client starts is refused while it runs: the file would say one
-    thing and the running game another, and `status` would believe the
-    file."""
+def configure(target, key, value=None, clear=False, on_event=None):
+    """Set one setting in a bot's layer or an instance's (see settings.py), or
+    with `clear` take it out of that layer. Returns the value that applies
+    now (for a bot: in its own layer, or the default). A setting read when
+    the client starts is refused while a client it concerns runs: the file
+    would say one thing and the running game another."""
     report = report_to(on_event)
-    bot.require()
+    target.require()
     s = settings.setting(key)
-    with operating(bot):
-        if s.at_start and client_running(bot):
-            raise Fail(f"{bot.name} is running, and its {key} is read when it starts. "
-                       f"Stop it first:  marionette.py stop {bot.name}", code="running")
-        if clear:
-            settings.clear(bot, key)
-        else:
-            settings.set_value(bot, key, value)
-    now = settings.get(bot, key)
-    report.step(f"{bot.name}: {key} = {now or '(nothing)'}"
-                + ("  (the default)" if not settings.is_set(bot, key) else ""), stage="configured")
+    affected = [target] if isinstance(target, Instance) else target.instances()
+    if s.at_start:
+        running = [i.key for i in affected if client_running(i)]
+        if running:
+            raise Fail(f"{', '.join(running)} running, and {key} is read when it starts. "
+                       f"Stop it first:  marionette.py stop {running[0]}", code="running")
+    if clear:
+        settings.clear(target, key)
+    else:
+        settings.set_value(target, key, value)
+    for inst in affected:
+        settings.render(inst)
+    now, layer = settings.resolve(target, key)
+    who = target.key if isinstance(target, Instance) else f"bot {target.key}"
+    report.step(f"{who}: {key} = {now or '(nothing)'}" + ("" if layer == settings.layer_of(target)
+                                                          else f"  (from the {layer})"), stage="configured")
     report.detail(f"it counts {settings.APPLIES[s.applies]}")
     return now
 
@@ -555,8 +686,9 @@ def configure(bot, key, value=None, clear=False, on_event=None):
 # --- looking ------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class BotStatus:
-    name: str
+class InstanceStatus:
+    key: str
+    name: str             # the player
     server: str
     port: int
     client: bool          # a keeper answers, or a game carries its port
@@ -566,32 +698,31 @@ class BotStatus:
     guard_of: str
 
 
-def status_of(bot, api=None):
-    return BotStatus(name=bot.name, server=bot.read("server") or "-", port=bot.port,
-                     client=keeper_alive(bot) or launcher_pid(bot) is not None
-                     or bool(game_pids(bot.port)),
-                     hands=port_in_use(bot.port),
-                     inside=api.is_inside(bot.name) if api else None,
-                     bridge=bridge_pid(bot), guard_of=bot.read("escort"))
+def status_of(inst, api=None):
+    running = client_running(inst)
+    return InstanceStatus(key=inst.key, name=inst.name, server=inst.slug or "-", port=inst.port,
+                          client=running, hands=port_in_use(inst.port),
+                          inside=(api.is_inside(inst.name) and running) if api else None,
+                          bridge=bridge_pid(inst), guard_of=settings.get(inst, "escort"))
 
 
-def survey(ws, name=None):
+def survey(ws, key=None):
     """(what is wrong with the server mods asked, as a list; the status of
-    every bot, or of one). Each bot is looked for in ITS server's mod, and
-    each server mod is asked once here, not once per bot with a 5 s timeout
-    each."""
-    bots = [ws.bot(name).require()] if name else ws.bots()
+    every instance, or of one). Each instance is looked for in ITS server's
+    mod, and each server mod is asked once here, not once per instance with
+    a 5 s timeout each."""
+    instances = [ws.instance(key)] if key else ws.instances()
     apis, problems = {}, []
 
-    def api_of(bot):
-        slug = bot.read("server")
+    def api_of(inst):
+        slug = inst.slug
         if slug not in apis:
             api = None
             try:
                 api = ws.api_for(ws.server(slug))
                 api.get("/players")
             except Fail as e:
-                problems.append(f"{slug or bot.name}: {e}")
+                problems.append(f"{slug or inst.key}: {e}")
                 api = None
             except UNREACHABLE as e:
                 problems.append(f"the server mod of {slug} at {api.address} does not answer: "
@@ -600,8 +731,119 @@ def survey(ws, name=None):
             apis[slug] = api
         return apis[slug]
 
-    statuses = [status_of(b, api_of(b)) for b in bots]
-    return problems, statuses
+    return problems, [status_of(i, api_of(i)) for i in instances]
+
+
+# --- the layout before instances ------------------------------------------------
+
+# The files of a bot folder from before instances, and where each one goes.
+LEGACY_BOT = ("account", "language", "gender", "model", "owner", "heap")
+LEGACY_INSTANCE = ("escort",)
+
+
+def migrate(ws, dry_run=False, on_event=None):
+    """bots/<name>/, which held the bot and its game in one folder, becomes a
+    bot (bots/<name>/bot.json and its personality) and an instance
+    (instances/<name>/: instance.json, and hmc/, gamedir/ and run/ MOVED, not
+    copied, so it takes a second and no space). The state its bridge kept
+    in the state folder moves to its server's. Before anything, a backup of
+    every small file (not the games) goes to state/backups/. A bot that is
+    running is left alone: stop it first. Returns the instances made."""
+    report = report_to(on_event)
+    legacy = ws.legacy_bots()
+    if not legacy:
+        report.step("nothing to migrate: no bot folder in the layout from before instances")
+        return []
+    plan = []
+    for key in legacy:
+        d = ws.bots_dir / key
+        props = read_java_properties(d / "hmc" / "HeadlessMC" / "config.properties")
+        name = props.get("hmc.offline.username") or key
+        slug = _read(d / "server")
+        try:
+            port = int(_read(d / "port"))
+        except ValueError:
+            port = None
+        game_port_busy = port is not None and (port_in_use(port) or bool(game_pids(port)))
+        if game_port_busy or is_ours(read_pid(d / "run" / "keeper.pid"), "keeper"):
+            raise Fail(f"{key} is running: stop it before migrating (with the launcher of before, "
+                       "or by closing its game).", code="running")
+        plan.append((key, name, slug, port))
+    report.step(f"migrating {len(plan)} bot(s): " + ", ".join(k for k, *_ in plan), stage="migrating")
+    if dry_run:
+        for key, name, slug, port in plan:
+            report.detail(f"{key}: bot {key} (plays as {name}) + instance {key} on {slug or '(no server!)'}, "
+                          f"port {port}")
+        return []
+
+    backups = ws.state_dir / "backups"
+    backups.mkdir(parents=True, exist_ok=True)
+    backup = backups / time.strftime("bots-before-instances-%Y%m%d-%H%M%S.tar.gz")
+    with tarfile.open(backup, "w:gz") as tar:
+        for key, *_ in plan:
+            for f in sorted((ws.bots_dir / key).iterdir()):
+                if f.is_file():
+                    tar.add(f, arcname=f"{key}/{f.name}")
+            cfg = ws.bots_dir / key / "hmc" / "HeadlessMC" / "config.properties"
+            if cfg.is_file():
+                tar.add(cfg, arcname=f"{key}/hmc/HeadlessMC/config.properties")
+    report.detail(f"backup of the small files: {backup}")
+
+    made = []
+    for key, name, slug, port in plan:
+        d = ws.bots_dir / key
+        bot_data = {"name": name}
+        for k in LEGACY_BOT:
+            v = _read(d / k)
+            if v:
+                bot_data[k] = v
+        inst_key = ws.free_key(key, ws.instance_keys())
+        inst = Instance(ws, inst_key)
+        inst.dir.mkdir(parents=True, exist_ok=True)
+        for sub in ("hmc", "gamedir", "run"):
+            if (d / sub).exists():
+                shutil.move(str(d / sub), str(inst.dir / sub))
+        inst_data = {"bot": key, "server": slug, "port": port or ws.free_port(inst_key)}
+        for k in LEGACY_INSTANCE:
+            v = _read(d / k)
+            if v:
+                inst_data[k] = v
+        write_json(ws.bots_dir / key / "bot.json", bot_data)
+        inst.save(inst_data)
+        for k in LEGACY_BOT + LEGACY_INSTANCE + ("port", "server"):
+            unlink_quietly(d / k)
+        moved = _move_state(ws, name.lower(), slug) if slug else 0
+        settings.render(inst)
+        made.append(inst)
+        report.detail(f"{key}: bot {key} (plays as {name}) + instance {inst_key} on {slug or '(no server!)'}"
+                      + (f"; {moved} state file(s) moved to {ws.server_state(slug)}" if moved else ""))
+    report.step("migrated. `marionette.py status` lists the instances.", stage="migrated")
+    return made
+
+
+def _read(path):
+    try:
+        return pathlib.Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _move_state(ws, player, slug):
+    """What a bridge and its MCP server kept about this player in the state
+    folder (session, jobs left pending, the internal channel, the marks,
+    the horse, the call log) moves to its server's state folder, where the
+    bridge of the instance looks now."""
+    src, dst = ws.state_dir, ws.server_state(slug)
+    rx = re.compile(rf"^[a-z]+_{re.escape(player)}(\.[A-Za-z.]+|_.+)?$")
+    moved = 0
+    if not src.is_dir():
+        return 0
+    for f in sorted(src.iterdir()):
+        if f.is_file() and rx.match(f.name) and not f.name.endswith(".lock"):
+            dst.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(f), str(dst / f.name))
+            moved += 1
+    return moved
 
 
 # --- deploy -------------------------------------------------------------------

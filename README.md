@@ -105,12 +105,16 @@ inline, a lambda, or a return type that no `import` would reveal.
 - A per-bot configuration file generated on first start, with the behaviour
   toggles as `true`/`false`.
 - Release builds of the jar.
-- **Launcher**: the command line is done (`launcher/marionette.py`: one place to
-  create, start, stop and watch bots, choosing the server and its pack; a bot
-  that is already running is shown as running instead of started a second
-  time; it compares the pack with the server's `/mods` before joining). To do:
-  groups of bots that share one configuration, a graphical front end on the
-  same code, and a run on Windows.
+- **Launcher**: the command line is done (`launcher/marionette.py`: bots, which
+  are characters, and instances, a bot on a server, created, cloned, started,
+  stopped and watched; settings in layers, bot < instance; each server with its
+  own server mod; it compares the pack with the server's `/mods` before
+  joining, and refuses to run one player twice). To do: groups (plain ones that
+  start together, and a leader with its guards) with settings that impose on
+  their instances, a global layer on top; accounts logged in once in the
+  launcher and shared by a bot's instances; the food, break and toggle lists
+  editable from the launcher and live, as one JSON on the server; a graphical
+  front end on the same code; and a run on Windows.
 - **Add-ons**: separate jars that teach the bots one mod each. The first one is
   there, `addons/veil` (compatibility: Veil without a GPU); the next ones teach
   *abilities* (`marionette-create`, `marionette-watut`...). To do for those: the

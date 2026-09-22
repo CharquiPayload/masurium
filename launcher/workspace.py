@@ -1,15 +1,22 @@
 """Where everything is.
 
-Three folders, outside the repo because they are heavy and are not code:
+Four folders, outside the repo because they are heavy and are not code:
 
-    bots/<name>/      what belongs to each bot: port, server, gamedir, hmc, run/
-    servers/<slug>/   one server and ITS pack of client mods
-    shared/           what every bot uses: the launcher and the Marionette mods
+    servers/<slug>/        one server: how to get in, and ITS pack of client mods
+    bots/<bot>/            a character: its name, personality and settings
+    instances/<name>/      a bot on a server, which is what runs: its game, its
+                           HeadlessMC, its logs and its own settings
+    shared/                what every instance uses: HeadlessMC and the Marionette mods
 
-plus server.env, the way to the server mod's API, and the environment
+plus server.env, the way to the server mod's API; the state folder, where
+each server's bridges keep their sessions and channels; and the environment
 variables that override the defaults. All of it held by one Workspace object
 instead of module globals resolved at import: a window can change a folder
 without restarting, and a test gets a workspace of its own.
+
+Instances are named freely and cloned freely: two of them may be the same
+bot on the same server. What cannot happen is both RUNNING, since that is one
+player joining twice; `start` is where that is refused (see operations).
 """
 import os
 import pathlib
@@ -56,13 +63,18 @@ class Server:
 
 
 class Workspace:
-    def __init__(self, bots_dir, servers_dir, shared_dir, env_file, home=None, environ=None):
+    def __init__(self, bots_dir, servers_dir, shared_dir, env_file, home=None, environ=None,
+                 instances_dir=None, state_dir=None):
         self.bots_dir = pathlib.Path(bots_dir)
         self.servers_dir = pathlib.Path(servers_dir)
         self.shared_dir = pathlib.Path(shared_dir)
         self.env_file = pathlib.Path(env_file)
         self.home = pathlib.Path(home) if home else pathlib.Path.home()
         self.environ = dict(os.environ if environ is None else environ)
+        self.instances_dir = pathlib.Path(instances_dir) if instances_dir else self.bots_dir.parent / "instances"
+        # Next to server.env by default, which is where the bridge and the MCP
+        # server always kept their state (~/.marionette).
+        self.state_dir = pathlib.Path(state_dir) if state_dir else self.env_file.parent
 
     @classmethod
     def from_environment(cls, environ=None, home=None):
@@ -82,10 +94,13 @@ class Workspace:
         return cls(pick("MARIONETTE_BOTS_DIR", home / "bots"),
                    pick("MARIONETTE_SERVERS_DIR", home / "servers"),
                    pick("MARIONETTE_COMMON_DIR", home / "shared"),
-                   env_file, home, environ)
+                   env_file, home, environ,
+                   instances_dir=pick("MARIONETTE_INSTANCES_DIR", home / "instances"),
+                   state_dir=pick("MARIONETTE_STATE_DIR", env_file.parent))
 
     def __repr__(self):
-        return f"Workspace(bots={self.bots_dir}, servers={self.servers_dir}, shared={self.shared_dir})"
+        return (f"Workspace(bots={self.bots_dir}, instances={self.instances_dir}, "
+                f"servers={self.servers_dir}, shared={self.shared_dir})")
 
     # --- what the environment overrides ---------------------------------------
 
@@ -113,6 +128,8 @@ class Workspace:
         env["MARIONETTE_BOTS_DIR"] = str(self.bots_dir)
         env["MARIONETTE_SERVERS_DIR"] = str(self.servers_dir)
         env["MARIONETTE_COMMON_DIR"] = str(self.shared_dir)
+        env["MARIONETTE_INSTANCES_DIR"] = str(self.instances_dir)
+        env["MARIONETTE_STATE_DIR"] = str(self.state_dir)
         env["MARIONETTE_ENV"] = str(self.env_file)
         local_bin = str(self.home / ".local" / "bin")
         env["PATH"] = local_bin + os.pathsep + env.get("PATH", "")
@@ -185,44 +202,88 @@ class Workspace:
                  for s in self.servers()]
         return lines or [f"(none: no servers/<slug>/server.conf under {self.servers_dir})"]
 
-    # --- bots -------------------------------------------------------------------
+    def server_state(self, slug):
+        """Where the bridges of one server keep their state: sessions, jobs
+        left pending, the internal channel between bots, the marks the MCP
+        leaves. Per server, because two instances of a bot on two servers are
+        two different lives, and per bot name inside, which a server keeps
+        unique."""
+        return self.state_dir / "servers" / slug
 
-    def bot(self, name):
-        from .bots import Bot
-        return Bot(self, name)
+    # --- bots (characters) ------------------------------------------------------
+
+    def bot(self, key):
+        from .bots import Character
+        return Character(self, key)
 
     def bot_keys(self):
+        """The characters: folders of bots/ with a bot.json. A folder of the
+        layout before instances has none (see `legacy_bots`)."""
         if not self.bots_dir.is_dir():
             return []
-        return sorted(d.name for d in self.bots_dir.iterdir() if d.is_dir())
+        return sorted(d.name for d in self.bots_dir.iterdir() if (d / "bot.json").is_file())
 
     def bots(self):
         return [self.bot(k) for k in self.bot_keys()]
 
-    def name_clash(self, key):
-        """A name that is a substring of another does not break the launcher but
-        the bridge, which reacts when `NAME in text`: with "Ada" and "Adam" in the
-        same chat, calling one answers with both. Better to refuse now than to
-        find out in the chat."""
-        for other in self.bot_keys():
-            if other == key:
-                continue
-            if key in other or other in key:
-                return other
-        return None
+    def legacy_bots(self):
+        """Folders of bots/ still in the layout from before instances: the
+        bot and its game in one folder (a `port` file, an `hmc/`)."""
+        if not self.bots_dir.is_dir():
+            return []
+        return sorted(d.name for d in self.bots_dir.iterdir()
+                      if d.is_dir() and not (d / "bot.json").is_file()
+                      and ((d / "port").is_file() or (d / "hmc").is_dir()))
+
+    # --- instances --------------------------------------------------------------
+
+    def instance_keys(self):
+        if not self.instances_dir.is_dir():
+            return []
+        return sorted(d.name for d in self.instances_dir.iterdir() if (d / "instance.json").is_file())
+
+    def instances(self, slug=None):
+        from .bots import Instance
+        out = [Instance(self, k) for k in self.instance_keys()]
+        return [i for i in out if i.slug == slug] if slug else out
+
+    def instance(self, key):
+        from .bots import Instance
+        inst = Instance(self, key)
+        if inst.exists():
+            return inst
+        hint = []
+        if key.lower() in self.legacy_bots():
+            hint = [f"{key} is in the layout from before instances: marionette.py migrate"]
+        raise Fail(f"there is no instance {key}.",
+                   lines=hint or ["these are: " + (", ".join(self.instance_keys()) or "(none yet)")],
+                   code="no_instance")
+
+    def free_key(self, wanted, taken):
+        """`wanted`, or wanted-1, wanted-2... the first not in `taken`: what a
+        clone is called."""
+        if wanted not in taken:
+            return wanted
+        n = 1
+        while f"{wanted}-{n}" in taken:
+            n += 1
+        return f"{wanted}-{n}"
 
     def port_reserved(self, port, me=None):
-        """Busy is not enough: a stopped bot does not listen, but its port is
-        still its own."""
-        for key in self.bot_keys():
-            if key == me:
+        """Busy is not enough: a stopped instance does not listen, but its port
+        is still its own. Across every server: they may all run on this
+        machine at once."""
+        for inst in self.instances():
+            if inst.key == me:
                 continue
-            if self.bot(key).read("port") == str(port):
+            if str(inst.data.get("port", "")) == str(port):
                 return True
         return False
 
-    def free_port(self, me=None):
-        for p in range(FIRST_PORT, FIRST_PORT + 50):
+    def free_port(self, me=None, also_taken=()):
+        for p in range(FIRST_PORT, FIRST_PORT + 100):
+            if p in also_taken or p == 8477:
+                continue
             if not self.port_reserved(p, me) and not port_in_use(p):
                 return p
         raise Fail(f"no free ports from {FIRST_PORT} on. Something odd is going on.", code="no_port")
