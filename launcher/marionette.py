@@ -39,10 +39,13 @@ and the bridge send it lines; it writes them to the game. Its pid file is also
 what says "this bot is already running" before a second 3 GB java is started.
 """
 import argparse
+import contextlib
+import hmac
 import json
 import os
 import pathlib
 import re
+import secrets
 import shutil
 import signal
 import socket
@@ -51,6 +54,12 @@ import sys
 import time
 import urllib.error
 import urllib.request
+
+try:
+    import fcntl
+except ImportError:          # Windows
+    fcntl = None
+    import msvcrt
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent
@@ -508,6 +517,44 @@ def pid_alive(pid):
     return True
 
 
+def argv_of(pid):
+    """The command line of a live process, as a list; None when there is no
+    such process or it cannot be read. Linux reads /proc; elsewhere `ps`, and
+    on Windows PowerShell (wmic is gone from recent Windows)."""
+    if not pid:
+        return None
+    proc = pathlib.Path("/proc") / str(int(pid)) / "cmdline"
+    if proc.parent.parent.is_dir():
+        try:
+            raw = proc.read_bytes()
+        except OSError:
+            return None
+        # A zombie has an empty command line: it is not a process any more.
+        return [a.decode("utf-8", "replace") for a in raw.split(b"\0") if a] or None
+    if WINDOWS:
+        code, out = run_quiet(["powershell", "-NoProfile", "-Command",
+                               f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').CommandLine"])
+    else:
+        code, out = run_quiet(["ps", "-o", "args=", "-p", str(int(pid))])
+    return out.split() if code == 0 and out else None
+
+
+def is_ours(pid, *marks):
+    """pid is alive AND is the process we take it for: its command line
+    carries every mark, as a whole argument or as the end of a path.
+
+    A pid file outlives a process killed without warning (the OOM killer, a
+    reboot) and the kernel hands its number to somebody else. Alive is not
+    enough, then: trusting a stale pid file means saying "already running"
+    about a stranger, and sending that stranger the SIGTERM meant for a bot."""
+    argv = argv_of(pid)
+    if not argv:
+        return False
+    args = [a.lower().replace("\\", "/") for a in argv]
+    return all(any(a == k or a.endswith("/" + k) for a in args)
+               for k in (m.lower() for m in marks))
+
+
 def terminate(pid, grace=10):
     """Ask nicely, wait, then insist. Returns once the process is gone."""
     if not pid_alive(pid):
@@ -665,6 +712,100 @@ def wait_for(predicate, seconds, every=1.0):
         time.sleep(every)
 
 
+class LogWatch:
+    """A growing log, read from where the last look left off, for the lines
+    being waited for. Reading it whole on every look was the old way, and a
+    client log with a big pack is megabytes, looked at every 2 s for as long
+    as the game runs. A log that shrank was started over: it is read again
+    from the top, and what was seen in the old one is forgotten."""
+
+    def __init__(self, path, *needles):
+        self.path = pathlib.Path(path)
+        self.needles = needles
+        self.pos = 0
+        self.carry = ""          # the end of the last read, for a needle cut in two
+        self.found = set()
+
+    def saw(self, needle):
+        try:
+            size = self.path.stat().st_size
+        except OSError:
+            return needle in self.found
+        if size < self.pos:
+            self.pos, self.carry, self.found = 0, "", set()
+        if size > self.pos:
+            with open(self.path, "rb") as f:
+                f.seek(self.pos)
+                data = f.read(size - self.pos)
+            self.pos += len(data)
+            text = self.carry + data.decode("utf-8", "replace")
+            self.found.update(n for n in self.needles if n in text)
+            keep = max(len(n) for n in self.needles) - 1
+            self.carry = text[-keep:] if keep > 0 else ""
+        return needle in self.found
+
+
+def try_lock(path):
+    """An exclusive lock on a file, with this pid written in it; None when
+    somebody else holds it. The kernel lets go of the lock however its holder
+    ends, so unlike a pid file it can never be stale (mcp/bridge.py,
+    only_one_bridge, is the same device)."""
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+")
+    try:
+        if fcntl:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        handle.close()
+        return None
+    handle.seek(0)
+    handle.truncate()
+    handle.write(f"{os.getpid()}\n")
+    handle.flush()
+    return handle
+
+
+_OPERATING = {}
+
+
+@contextlib.contextmanager
+def operating(bot):
+    """One launcher command at a time on a bot. Two `start`s of the same bot
+    run side by side (two terminals; a double click, the day there is a
+    window) both find no keeper and both launch a 3 GB java. The pid file
+    cannot prevent that, it is written seconds later; a lock taken before
+    looking can. Re-entrant: `restart` holds it through its stop and start."""
+    if bot.key in _OPERATING:
+        yield
+        return
+    lock = bot.run / "launcher.lock"
+    handle = try_lock(lock)
+    if handle is None:
+        raise Fail(f"another launcher command is working on {bot.name} right now "
+                   f"(pid {read_pid(lock) or '?'}). Wait for it, or see  marionette.py status")
+    _OPERATING[bot.key] = handle
+    try:
+        yield
+    finally:
+        del _OPERATING[bot.key]
+        handle.close()
+
+
+def write_private(path, text):
+    """A file only this user can read, written whole or not at all: whoever
+    reads it never sees half of it."""
+    path = pathlib.Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
 def tail_lines(path, n, pattern=None, width=160):
     try:
         lines = pathlib.Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
@@ -709,8 +850,12 @@ def sync_mods(gamedir, pack):
 
 # --- the keeper ---------------------------------------------------------------
 #
-# Protocol, one line per request, one line back: anything is written to the
-# game's stdin as it came ("connect 1.2.3.4", "msg hello"), except lines
+# Protocol, one line per request, one line back. run/keeper.port holds
+# "<port> <token>", readable only by this user, and every request starts with
+# the token: a localhost port is open to every user of the machine, and what
+# reaches HeadlessMC's console can launch a JVM with any arguments. A request
+# with the wrong token gets "denied". After the token, anything is written to
+# the game's stdin as it came ("connect 1.2.3.4", "msg hello"), except lines
 # starting with "@", which are for the keeper itself:
 #
 #   @ping   ->  "ok <client pid>"
@@ -742,29 +887,52 @@ def launch_line(bot, server):
     return f"launch {version} -lwjgl{offline} -paulscode --jvm \"{' '.join(jvm)}\""
 
 
+KEEPER_FAILED = "keeper failed"
+
+
 def keeper_main(bot, server):
     bot.run.mkdir(parents=True, exist_ok=True)
 
     def note(m):
         print(time.strftime("%H:%M:%S"), m, flush=True)
 
+    # Its pid FIRST: from here on `start` can tell a keeper that is loading
+    # the game from one that never got going.
+    bot.keeper_pid_f.write_text(f"{os.getpid()}\n")
+    if not WINDOWS:
+        # A plain SIGTERM would end Python on the spot, skipping the finally
+        # below, and leave the game running with nobody at its stdin. As an
+        # exception it goes through the finally, which stops the game.
+        def on_term(signum, frame):
+            raise SystemExit(0)
+        signal.signal(signal.SIGTERM, on_term)
+
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.bind(("127.0.0.1", 0))
     listener.listen(8)
     listener.settimeout(0.5)
     control_port = listener.getsockname()[1]
+    token = secrets.token_hex(16)
 
     client_log = open(bot.client_log, "ab")
     # In a group of its own: HeadlessMC starts the game as a child java, and
     # the group is how both are stopped together (kill_tree).
-    game = subprocess.Popen(
-        java_command() + ["-jar", "headlessmc-launcher.jar"],
-        cwd=str(bot.hmc), stdin=subprocess.PIPE, stdout=client_log,
-        stderr=subprocess.STDOUT, env=child_env(), **own_group())
-    bot.keeper_pid_f.write_text(f"{os.getpid()}\n")
+    try:
+        game = subprocess.Popen(
+            java_command() + ["-jar", "headlessmc-launcher.jar"],
+            cwd=str(bot.hmc), stdin=subprocess.PIPE, stdout=client_log,
+            stderr=subprocess.STDOUT, env=child_env(), **own_group())
+    except OSError as e:
+        # No java, or not that one. Said in one line `start` is waiting for,
+        # instead of a traceback it is not.
+        note(f"{KEEPER_FAILED}: could not run {' '.join(java_command())}: {e}")
+        client_log.close()
+        listener.close()
+        clear_run_files(bot)
+        return 1
     bot.client_pid_f.write_text(f"{game.pid}\n")
     # The port file goes LAST: whoever sees it may talk to a keeper that is whole.
-    bot.keeper_port_f.write_text(f"{control_port}\n")
+    write_private(bot.keeper_port_f, f"{control_port} {token}\n")
     note(f"keeper of {bot.name}: game pid {game.pid}, control port {control_port}")
 
     def to_game(line):
@@ -779,13 +947,14 @@ def keeper_main(bot, server):
     # startup it can stay at its prompt, alive, with nothing behind it. The
     # line it prints then is the sign that the game is gone, not the process.
     game_over = "Minecraft exited with code"
+    watch = LogWatch(bot.client_log, game_over)
     stopping = False
     last_look = 0.0
     try:
         while game.poll() is None and not stopping:
             if time.monotonic() - last_look > 2:
                 last_look = time.monotonic()
-                if log_has(bot.client_log, game_over):
+                if watch.saw(game_over):
                     note("the game exited under the launcher; leaving too")
                     stopping = True
                     break
@@ -804,10 +973,12 @@ def keeper_main(bot, server):
                         data += chunk
                 except OSError:
                     continue
-                request = data.decode("utf-8", "replace").strip()
-                if not request:
+                given, _, request = data.decode("utf-8", "replace").strip().partition(" ")
+                if not hmac.compare_digest(given.encode(), token.encode()):
+                    reply = "denied"
+                elif not request:
                     continue
-                if request == "@ping":
+                elif request == "@ping":
                     reply = f"ok {game.pid}"
                 elif request == "@stop":
                     reply = "stopping"
@@ -825,6 +996,9 @@ def keeper_main(bot, server):
                 except OSError:
                     pass
     finally:
+        if not WINDOWS:
+            # A second SIGTERM must not cut this cleanup short.
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
         # The launcher AND the game under it. A JVM asked to stop runs the
         # game's shutdown hooks first (it saves), which takes a while with a
         # world loaded; kill_game has the patience for that.
@@ -849,9 +1023,15 @@ def keeper_main(bot, server):
 def keeper_ask(bot, line, timeout=5):
     """One line to this bot's keeper; its one-line answer. None when there is
     no keeper to talk to."""
-    port = read_pid(bot.keeper_port_f)
-    if not port:
+    try:
+        fields = bot.keeper_port_f.read_text().split()
+        port = int(fields[0])
+    except (OSError, ValueError, IndexError):
         return None
+    # A keeper older than the token writes the port alone, and takes the
+    # line bare: it goes on working until its bot is restarted.
+    if len(fields) > 1:
+        line = f"{fields[1]} {line}"
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=timeout) as s:
             s.sendall((line + "\n").encode("utf-8"))
@@ -871,6 +1051,18 @@ def keeper_alive(bot):
     """The keeper answers, and the game it holds is the pid it claims."""
     answer = keeper_ask(bot, "@ping")
     return bool(answer and answer.startswith("ok "))
+
+
+def keeper_pid(bot):
+    """The pid in keeper.pid, only while it still is this bot's keeper."""
+    pid = read_pid(bot.keeper_pid_f)
+    return pid if is_ours(pid, "marionette.py", "keeper", bot.name) else None
+
+
+def launcher_pid(bot):
+    """The pid in client.pid, only while it still is a HeadlessMC launcher."""
+    pid = read_pid(bot.client_pid_f)
+    return pid if is_ours(pid, "headlessmc-launcher.jar") else None
 
 
 def clear_run_files(bot):
@@ -970,10 +1162,11 @@ def cmd_login(args):
     if bot.read("account") == "offline":
         say(f"{bot.name} uses an offline account; there is nothing to log in.")
         return 0
-    say(f"==> HeadlessMC for {bot.name}. Type:  login   (then follow the instructions)")
-    say("    and when the account is saved:  quit")
-    return subprocess.call(java_command() + ["-jar", "headlessmc-launcher.jar"],
-                           cwd=str(bot.hmc), env=child_env())
+    with operating(bot):
+        say(f"==> HeadlessMC for {bot.name}. Type:  login   (then follow the instructions)")
+        say("    and when the account is saved:  quit")
+        return subprocess.call(java_command() + ["-jar", "headlessmc-launcher.jar"],
+                               cwd=str(bot.hmc), env=child_env())
 
 
 def prepare_gamedir(bot, server):
@@ -1114,7 +1307,12 @@ def complaints(bot):
 
 def cmd_start(args):
     bot = Bot(args.name).require()
-    slug = args.server or bot.read("server")
+    with operating(bot):
+        return start_bot(bot, args.server)
+
+
+def start_bot(bot, switch_to=None):
+    slug = switch_to or bot.read("server")
     if not slug:
         raise Fail(f"{bot.name} has no server noted. Tell me which one it joins:\n"
                    + format_servers())
@@ -1124,6 +1322,38 @@ def cmd_start(args):
     if clash:
         raise Fail(f"the name '{bot.name}' clashes with the bot '{clash}': one contains "
                    "the other.\nthe bridge would mix them up in the chat. Choose another name.")
+
+    # Whether it is running is asked BEFORE anything is touched. Preparing
+    # first rebuilt the mods folder of a live game and noted a server it was
+    # not on; on Windows, where an open jar cannot be deleted, it failed.
+    moving = switch_to and switch_to != bot.read("server")
+    if is_inside(bot.name, env):
+        if moving:
+            raise Fail(f"{bot.name} is in the game, on {bot.read('server')}. To move it to "
+                       f"{slug}, stop it first:  marionette.py stop {bot.name}")
+        say(f"{bot.name} is already in. Nothing to do.")
+        return 0
+    # A keeper that answers holds a live client: either this same bot loaded
+    # but not connected, or a start that was cut halfway. Starting anyway
+    # would launch a second 3 GB java, which is how the OOM killer gets
+    # invited.
+    answer = keeper_ask(bot, "@ping")
+    if answer and answer.startswith("ok "):
+        if not port_in_use(bot.port) and log_has(bot.client_log, "Minecraft exited with code"):
+            # A keeper around a game that already died: not a running bot.
+            say("==> a keeper was left holding a game that had exited; stopping it first")
+            keeper_ask(bot, "@stop")
+            wait_for(lambda: keeper_pid(bot) is None, 30, every=0.5)
+        else:
+            raise Fail(f"{bot.name} is already running (keeper pid {read_pid(bot.keeper_pid_f)}, "
+                       f"game pid {answer[3:]}) but not in the server.\n"
+                       f"try:  marionette.py connect {bot.name}   or   marionette.py stop {bot.name}")
+    if port_in_use(bot.port):
+        holders = game_pids(bot.port)
+        raise Fail(f"port {bot.port} is already taken by a live client this launcher does not "
+                   f"hold (pids {holders or 'unknown'}).\n"
+                   f"marionette.py stop {bot.name} takes it down, or give this bot another port.")
+    clear_run_files(bot)
 
     say(f"==> preparing the mods of {slug}")
     say(f"    {prepare_gamedir(bot, server)} mods")
@@ -1137,31 +1367,6 @@ def cmd_start(args):
             say("==> the server runs other versions than this pack; expect a rejection:")
             for mod_id, mine, its in diff["mismatch"]:
                 say(f"    {mod_id}: pack {mine}, server {its}")
-
-    if is_inside(bot.name, env):
-        say(f"{bot.name} is already in. Nothing to do.")
-        return 0
-    # A keeper that answers holds a live client: either this same bot loaded
-    # but not connected, or a start that was cut halfway. Starting anyway
-    # would launch a second 3 GB java, which is how the OOM killer gets
-    # invited.
-    answer = keeper_ask(bot, "@ping")
-    if answer and answer.startswith("ok "):
-        if not port_in_use(bot.port) and log_has(bot.client_log, "Minecraft exited with code"):
-            # A keeper around a game that already died: not a running bot.
-            say("==> a keeper was left holding a game that had exited; stopping it first")
-            keeper_ask(bot, "@stop")
-            wait_for(lambda: not pid_alive(read_pid(bot.keeper_pid_f)), 30, every=0.5)
-        else:
-            raise Fail(f"{bot.name} is already running (keeper pid {read_pid(bot.keeper_pid_f)}, "
-                       f"game pid {answer[3:]}) but not in the server.\n"
-                       f"try:  marionette.py connect {bot.name}   or   marionette.py stop {bot.name}")
-    if port_in_use(bot.port):
-        holders = game_pids(bot.port)
-        raise Fail(f"port {bot.port} is already taken by a live client this launcher does not "
-                   f"hold (pids {holders or 'unknown'}).\n"
-                   f"marionette.py stop {bot.name} takes it down, or give this bot another port.")
-    clear_run_files(bot)
 
     say(f"==> starting {bot.name} (port {bot.port})")
     bot.run.mkdir(parents=True, exist_ok=True)
@@ -1178,12 +1383,29 @@ def cmd_start(args):
     say("==> loading the game")
     # The right signal is NOT that the process exists: it is that the mod has
     # registered its commands. Sending `connect` before that talks to nobody.
-    def ready_or_dead():
-        # A game that died takes its pid file with it (the keeper cleans up).
-        return log_has(bot.client_log, HMC_READY) or log_has(bot.keeper_log, "game exited")
+    ready = LogWatch(bot.client_log, HMC_READY)
+    ended = LogWatch(bot.keeper_log, "game exited", KEEPER_FAILED)
+    spawned = time.monotonic()
 
-    wait_for(ready_or_dead, 300, every=5)
-    if not log_has(bot.client_log, HMC_READY):
+    def ready_or_dead():
+        if ready.saw(HMC_READY) or ended.saw("game exited") or ended.saw(KEEPER_FAILED):
+            return True
+        # A keeper that died without a word (killed, or Python failing before
+        # it could speak) leaves no line to wait for, and this used to wait
+        # the whole five minutes for it. Its pid is the sign: written first
+        # thing, gone or a stranger's when it is dead.
+        if read_pid(bot.keeper_pid_f) is None:
+            return time.monotonic() - spawned > 20
+        return keeper_pid(bot) is None
+
+    wait_for(ready_or_dead, 300, every=2)
+    if ended.saw(KEEPER_FAILED) or (not ready.saw(HMC_READY) and not ended.saw("game exited")
+                                    and keeper_pid(bot) is None):
+        say(f"==> the keeper of {bot.name} did not get the game going:")
+        for l in tail_lines(bot.keeper_log, 6):
+            say("    " + l)
+        return 1
+    if not ready.saw(HMC_READY):
         say("==> the hmc-specifics mod did not initialize. Without it there is no connect.")
         if not explain_crash(bot):
             if bot.read("account", "online") == "online":
@@ -1254,23 +1476,26 @@ def cmd_connect(args):
         raise Fail(f"{bot.name} has no server noted.")
     server = load_server(slug)
     env = mod_env()
-    if not keeper_alive(bot):
-        raise Fail(f"no live client of {bot.name}: use  marionette.py start {bot.name}")
-    if is_inside(bot.name, env):
-        say(f"{bot.name} is already in. Nothing to do.")
-        return 0
-    if join(bot, server, env, attempts=3, patience=12):
-        return 0
+    with operating(bot):
+        if not keeper_alive(bot):
+            raise Fail(f"no live client of {bot.name}: use  marionette.py start {bot.name}")
+        if is_inside(bot.name, env):
+            say(f"{bot.name} is already in. Nothing to do.")
+            return 0
+        if join(bot, server, env, attempts=3, patience=12):
+            return 0
     say(f"==> it did NOT join. If the client is hung:  marionette.py restart {bot.name}")
     return 1
 
 
 def bridge_pid(bot):
     """The bridge's pid: from our pid file, or from the lock the bridge itself
-    writes, which also covers one started by hand."""
+    writes, which also covers one started by hand. The lock FILE stays after
+    the bridge is gone, with its last pid inside: that pid counts only while
+    it is still a bridge."""
     for f in (bot.bridge_pid_f, bot.bridge_lock):
         pid = read_pid(f)
-        if pid_alive(pid):
+        if is_ours(pid, "bridge.py"):
             return pid
     return None
 
@@ -1279,6 +1504,11 @@ def cmd_bridge(args):
     """Starts the bridge, detached. It goes AFTER the client, and only if it
     joined: without a body in the game it has nobody to write to."""
     bot = Bot(args.name).require()
+    with operating(bot):
+        return start_bridge(bot)
+
+
+def start_bridge(bot):
     pid = bridge_pid(bot)
     if pid:
         say(f"==> the bridge of {bot.name} is already running (pid {pid})")
@@ -1307,52 +1537,66 @@ def cmd_bridge(args):
     return 1
 
 
-def stop_bot(bot, keep_guards=False):
+def stop_bot(bot, keep_guards=False, _stopped=None):
     """Stops a bot: the client (through its keeper) and its bridge. Processes
-    are found by what identifies THAT bot and no other: its own pid files. A
-    bare kill by pattern would take down every bot, which is exactly what
-    must not happen when there are two."""
-    say(f"==> stopping {bot.name} (port {bot.port})")
-    keeper = read_pid(bot.keeper_pid_f)
-    launcher = read_pid(bot.client_pid_f)
-    answer = keeper_ask(bot, "@stop")
-    if answer == "stopping":
-        # The keeper gives the game 25 s to shut down on its own before it
-        # kills it, then leaves; a little more than that here.
-        if wait_for(lambda: not pid_alive(keeper) and not port_in_use(bot.port), 45, every=0.5):
-            say("==> client: stopped")
-        else:
-            say("==> client: the keeper did not leave nicely; insisting")
+    are found by what identifies THAT bot and no other: its own pid files,
+    each checked to still name the process it was written for. A bare kill
+    by pattern would take down every bot, which is exactly what must not
+    happen when there are two."""
+    stopped = set() if _stopped is None else _stopped
+    stopped.add(bot.key)
+    with operating(bot):
+        say(f"==> stopping {bot.name} (port {bot.port})")
+        keeper = keeper_pid(bot)
+        launcher = launcher_pid(bot)
+        answer = keeper_ask(bot, "@stop")
+        if answer == "stopping":
+            # The keeper gives the game 25 s to shut down on its own before it
+            # kills it, then leaves; a little more than that here.
+            if wait_for(lambda: not is_ours(keeper, "keeper") and not port_in_use(bot.port),
+                        45, every=0.5):
+                say("==> client: stopped")
+            else:
+                say("==> client: the keeper did not leave nicely; insisting")
+                kill_game(bot, launcher)
+                if keeper_pid(bot):
+                    terminate(keeper)
+        elif launcher or keeper or game_pids(bot.port):
+            # No keeper answering, but something of the client is there: a keeper
+            # that died, or a game started some other way on this bot's port.
             kill_game(bot, launcher)
-            terminate(keeper)
-    elif pid_alive(launcher) or pid_alive(keeper) or game_pids(bot.port):
-        # No keeper answering, but something of the client is there: a keeper
-        # that died, or a game started some other way on this bot's port.
-        kill_game(bot, launcher)
-        terminate(keeper)
-        say("==> client: stopped (the keeper was not answering)")
-    else:
-        say("==> client: nothing was running")
-    clear_run_files(bot)
+            if keeper:
+                terminate(keeper)
+            say("==> client: stopped (the keeper was not answering)")
+        else:
+            say("==> client: nothing was running")
+        clear_run_files(bot)
 
-    pid = bridge_pid(bot)
-    if pid:
-        terminate(pid)
-        say("==> bridge: stopped")
-    else:
-        say("==> bridge: nothing was running")
-    try:
-        bot.bridge_pid_f.unlink()
-    except OSError:
-        pass
-    say(f"==> {bot.name} stopped")
+        pid = bridge_pid(bot)
+        if pid:
+            terminate(pid)
+            say("==> bridge: stopped")
+        else:
+            say("==> bridge: nothing was running")
+        try:
+            bot.bridge_pid_f.unlink()
+        except OSError:
+            pass
+        say(f"==> {bot.name} stopped")
 
     # Its guards leave with it: a guard without a boss has nothing to do. A
-    # RESTART is not a disconnection: the guards stay.
+    # RESTART is not a disconnection: the guards stay. Each bot is stopped
+    # once: two bots guarding each other, or one guarding itself, used to
+    # send this round and round until Python gave up.
     if not keep_guards:
         for g in bot.guards():
+            if g.key in stopped:
+                continue
             say(f"==> {g.name} is a guard of {bot.name}: stopping it too")
-            stop_bot(g, keep_guards=False)
+            try:
+                stop_bot(g, keep_guards=False, _stopped=stopped)
+            except Fail as e:
+                say(f"    {e}")
 
 
 def cmd_stop(args):
@@ -1366,18 +1610,19 @@ def cmd_restart(args):
     the client gets started again. The bot stays in the game, visible in
     /players, and mute, which from the chat looks exactly like a hang."""
     bot = Bot(args.name).require()
-    stop_bot(bot, keep_guards=True)
-    say("")
-    if cmd_start(args) != 0:
-        say("==> the client did not join; NOT starting the bridge.")
-        return 1
-    say("")
-    return cmd_bridge(args)
+    with operating(bot):
+        stop_bot(bot, keep_guards=True)
+        say("")
+        if start_bot(bot, args.server) != 0:
+            say("==> the client did not join; NOT starting the bridge.")
+            return 1
+        say("")
+        return start_bridge(bot)
 
 
 def status_of(bot, env):
     keeper = keeper_alive(bot)
-    game = pid_alive(read_pid(bot.client_pid_f)) or bool(game_pids(bot.port))
+    game = launcher_pid(bot) is not None or bool(game_pids(bot.port))
     hands = port_in_use(bot.port)
     inside = is_inside(bot.name, env) if env else None
     bridge = bridge_pid(bot)
@@ -1393,12 +1638,19 @@ def cmd_status(args):
         return 0
     try:
         env = mod_env()
-        server_reachable = bool(players_text(env)) or mod_get("/players", env) is not None
-    except (Fail, Exception):
-        env, server_reachable = None, False
-    if env and not server_reachable:
-        say(f"(the server mod at {env['host']}:{env['port']} does not answer; "
-            "'in server' is unknown)")
+    except Fail as e:
+        env = None
+        say(f"({e} 'in server' is unknown)")
+    if env:
+        # Asked once here, not once per bot with a 5 s timeout each. The
+        # message used to be unreachable: the failure that should print it
+        # was the one that emptied `env` first.
+        try:
+            mod_get("/players", env)
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            say(f"(the server mod at {env['host']}:{env['port']} does not answer: "
+                f"{getattr(e, 'reason', e)}; 'in server' is unknown)")
+            env = None
     yes_no = lambda v: "-" if v is None else ("yes" if v else "no")
     say(f"  {'bot':<16} {'server':<14} {'port':<5} {'client':<7} {'hands':<6} "
         f"{'in server':<10} {'bridge':<7} {'guard of'}")
@@ -1669,6 +1921,8 @@ def doctor_checks():
         escort = bot.read("escort").lower()
         if escort and escort not in keys:
             problems.append(f"escorts '{escort}', which is not a bot here")
+        elif escort == key:
+            problems.append("escorts itself")
         add(f"bots/{key}", not problems, "; ".join(problems) or f"port {port}, server {bot.read('server')}")
 
     heap = heap_gb(os.environ.get("HEAP") or DEFAULT_HEAP)

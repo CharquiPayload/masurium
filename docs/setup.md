@@ -203,7 +203,9 @@ A running bot leaves its tracks in `bots/<name>/run/`: `client.log` (the game),
 `bridge.log` (the brain's side), `keeper.log`, and the pid files. The
 **keeper** is a small process per bot, started by `start`, that holds the
 game's console open and takes lines for it on a localhost socket; it is how the
-launcher knows a bot is already running instead of starting it twice.
+launcher knows a bot is already running instead of starting it twice. While a
+command works on a bot it holds `run/launcher.lock`, and a second command on the
+same bot is refused until the first one ends.
 
 ## Configuring a bot
 

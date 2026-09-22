@@ -1202,14 +1202,18 @@ def say(text):
 def console(line):
     """A line to the client console, through the launcher's keeper: the
     process that holds the game's stdin and listens on a localhost port,
-    written in bots/<name>/run/keeper.port (see launcher/marionette.py).
-    It used to be a FIFO in /tmp; a FIFO does not exist on Windows."""
+    written in bots/<name>/run/keeper.port (see launcher/marionette.py)
+    with the token every line has to start with. It used to be a FIFO in
+    /tmp; a FIFO does not exist on Windows."""
     port_f = pathlib.Path(BOTS_HOME) / NAME.lower() / "run" / "keeper.port"
     try:
-        port = int(port_f.read_text().strip())
-    except (OSError, ValueError):
+        fields = port_f.read_text().split()
+        port = int(fields[0])
+    except (OSError, ValueError, IndexError):
         raise RuntimeError(f"no keeper for {NAME}: {port_f} is missing; the client "
                            "is not running under the launcher")
+    if len(fields) > 1:          # a keeper older than the token has none
+        line = f"{fields[1]} {line}"
     with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
         s.sendall((line + "\n").encode("utf-8"))
         s.settimeout(5)

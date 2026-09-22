@@ -483,6 +483,285 @@ def tests_doctor():
     m.Bot("Bob").write("port", m.FIRST_PORT + 1)
 
 
+# --- the traps of a launcher that is left running -----------------------------
+
+def quick_server_env():
+    """A server mod that refuses at once (127.0.0.1:1) instead of one that
+    times out, so a `start` under test fails in a second, not in ten."""
+    (TMP / "server.env").write_text("MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT=1\n"
+                                    "MARIONETTE_TOKEN=t\n")
+
+
+def said(fn, *args):
+    """What a command printed, and what it returned (or the Fail it raised)."""
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        try:
+            result = fn(*args)
+        except m.Fail as e:
+            result = e
+    return out.getvalue(), result
+
+
+def stranger():
+    """A live process that is nobody's bot, keeper nor bridge."""
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+
+def tests_pids():
+    print("\nPids: a number in a file is trusted only while it names the same process")
+    check("this process is ours by its own command line", m.is_ours(os.getpid(), "tests.py"))
+    check("...and not by a mark it does not carry", not m.is_ours(os.getpid(), "bridge.py"))
+    check("a mark is a whole argument, not a piece of one", not m.is_ours(os.getpid(), "sts.py"))
+    check("no pid is nobody's", not m.is_ours(None, "x") and m.argv_of(None) is None)
+    bot = m.Bot("Alice")
+    bot.run.mkdir(parents=True, exist_ok=True)
+    other = stranger()
+    real_home, m.HOME = m.HOME, TMP          # the bridge lock lives under HOME
+    try:
+        bot.keeper_pid_f.write_text(f"{other.pid}\n")
+        bot.client_pid_f.write_text(f"{other.pid}\n")
+        check("a stale keeper.pid naming a stranger is no keeper", m.keeper_pid(bot) is None)
+        check("...nor a stale client.pid a HeadlessMC", m.launcher_pid(bot) is None)
+        bot.bridge_lock.parent.mkdir(parents=True, exist_ok=True)
+        bot.bridge_lock.write_text(f"{other.pid}\n")
+        check("a bridge lock left with a stranger's pid is no bridge", m.bridge_pid(bot) is None)
+        text, _ = said(m.stop_bot, bot)
+        check("stop leaves the stranger alone", other.poll() is None, text)
+        check("...and says nothing was running", "client: nothing was running" in text
+              and "bridge: nothing was running" in text, text)
+        check("...and clears the stale files", not bot.keeper_pid_f.exists() and not bot.client_pid_f.exists())
+        bot.bridge_lock.unlink()
+    finally:
+        m.HOME = real_home
+        other.kill()
+        other.wait()
+
+
+def tests_lock():
+    print("\nLock: one launcher command at a time on a bot")
+    bot = m.Bot("Alice")
+    lock = bot.run / "launcher.lock"
+    holder = subprocess.Popen(
+        [sys.executable, "-c",
+         "import sys, time; sys.path.insert(0, sys.argv[1]); import marionette as m\n"
+         "h = m.try_lock(sys.argv[2]); print('held' if h else 'not', flush=True); time.sleep(30)",
+         str(HERE), str(lock)], stdout=subprocess.PIPE, text=True)
+    try:
+        check("another process takes the lock", holder.stdout.readline().strip() == "held")
+        text, result = said(m.cmd_start, Args(name="Alice", server=None))
+        check("a start while it is held is refused, naming the holder",
+              isinstance(result, m.Fail) and "another launcher command" in str(result)
+              and str(holder.pid) in str(result), str(result))
+        check("...and refused before touching anything", "preparing" not in text, text)
+        _, result = said(m.cmd_stop, Args(name="Alice", keep_guards=False))
+        check("so is a stop", isinstance(result, m.Fail))
+    finally:
+        holder.kill()
+        holder.wait()
+    handle = m.try_lock(lock)
+    check("the lock is free once its holder is gone, however it ended", handle is not None)
+    if handle:
+        handle.close()
+    with m.operating(bot):
+        with m.operating(bot):
+            nested = True
+    check("it is re-entrant in one process (restart = stop + start)", nested)
+
+
+def tests_start_order():
+    print("\nStart: whether it runs is asked before anything is touched")
+    quick_server_env()
+    other = TMP / "servers" / "other"
+    (other / "mods").mkdir(parents=True, exist_ok=True)
+    (other / "server.conf").write_text("HOST=10.0.0.6\n")
+    (other / "mods" / "other-1.jar").write_bytes(b"o")
+    bot = m.Bot("Alice")
+    for f in (bot.client_log, bot.keeper_log):
+        if f.exists():
+            f.unlink()
+    m.spawn_free([sys.executable, str(HERE / "marionette.py"), "keeper", "Alice", "test"],
+                 bot.keeper_log, cwd=TMP, env=m.child_env())
+    try:
+        check("a keeper is up", wait(lambda: m.keeper_alive(bot), 10))
+        marker = bot.gamedir / "mods" / "in-use.jar"
+        marker.write_bytes(b"u")
+        text, result = said(m.cmd_start, Args(name="Alice", server="other"))
+        check("starting a running bot is refused", isinstance(result, m.Fail)
+              and "already running" in str(result), f"{result!r} {text}")
+        check("...with its mods folder left as the game has it", marker.exists())
+        check("...and its server not rewritten",
+              bot.read("server") == "test"
+              and (bot.gamedir / "config" / "marionette-server.txt").read_text().strip() == "test")
+    finally:
+        said(m.cmd_stop, Args(name="Alice", keep_guards=False))
+        for p in other.rglob("*"):
+            if p.is_file():
+                p.unlink()
+        (other / "mods").rmdir()
+        other.rmdir()
+        layout()
+
+
+def tests_keeper_failures():
+    print("\nKeeper failures: said at once, not after five minutes")
+    quick_server_env()
+    bot = m.Bot("Alice")
+    os.environ["MARIONETTE_JAVA"] = str(TMP / "no-such-java")
+    try:
+        started = time.monotonic()
+        text, result = said(m.cmd_start, Args(name="Alice", server=None))
+        took = time.monotonic() - started
+    finally:
+        os.environ["MARIONETTE_JAVA"] = str(FAKE_JAVA)
+    check("no java: start fails", result == 1, f"{result!r}")
+    check("...in seconds", took < 30, f"{took:.0f}s")
+    check("...saying it could not run java", "could not run" in text and "no-such-java" in text, text)
+    check("...and leaving no run files behind",
+          not bot.keeper_pid_f.exists() and not bot.keeper_port_f.exists())
+
+    # A keeper killed outright leaves no line behind: its pid is the sign.
+    slow = TMP / "slow_java.py"
+    slow.write_text("#!" + sys.executable + "\nimport time\ntime.sleep(60)\n")
+    slow.chmod(slow.stat().st_mode | stat.S_IEXEC)
+    os.environ["MARIONETTE_JAVA"] = str(slow)
+    import signal
+    import threading
+    game = {}
+
+    def kill_the_keeper():
+        if wait(lambda: m.keeper_pid(bot) and bot.client_pid_f.exists(), 20):
+            game["pid"] = m.read_pid(bot.client_pid_f)
+            os.kill(m.keeper_pid(bot), signal.SIGKILL)
+
+    killer = threading.Thread(target=kill_the_keeper)
+    killer.start()
+    try:
+        started = time.monotonic()
+        text, result = said(m.cmd_start, Args(name="Alice", server=None))
+        took = time.monotonic() - started
+    finally:
+        killer.join()
+        os.environ["MARIONETTE_JAVA"] = str(FAKE_JAVA)
+        if game.get("pid"):
+            try:
+                os.killpg(game["pid"], signal.SIGKILL)
+            except OSError:
+                pass
+    check("a keeper killed while loading: start notices", result == 1 and took < 30,
+          f"{result!r} after {took:.0f}s")
+    check("...and says the keeper did not get the game going", "did not get the game going" in text, text)
+    m.clear_run_files(bot)
+    layout()
+
+
+def tests_keeper_guarded():
+    print("\nKeeper: only the holder of the token talks to it; SIGTERM still stops the game")
+    bot = m.Bot("Alice")
+    for f in (bot.client_log, bot.keeper_log):
+        if f.exists():
+            f.unlink()
+    m.spawn_free([sys.executable, str(HERE / "marionette.py"), "keeper", "Alice", "test"],
+                 bot.keeper_log, cwd=TMP, env=m.child_env())
+    check("a keeper is up", wait(lambda: m.keeper_alive(bot), 10))
+    fields = bot.keeper_port_f.read_text().split()
+    check("keeper.port holds the port and a token", len(fields) == 2 and len(fields[1]) == 32)
+    if os.name != "nt":
+        check("...readable by this user only", stat.S_IMODE(bot.keeper_port_f.stat().st_mode) == 0o600)
+
+    def raw(line):
+        import socket
+        with socket.create_connection(("127.0.0.1", int(fields[0])), timeout=5) as s:
+            s.sendall((line + "\n").encode())
+            return s.recv(64).decode().strip()
+
+    check("a line without the token is denied", raw("@ping") == "denied")
+    check("...and with a wrong one", raw("0" * 32 + " @ping") == "denied")
+    check("a denied line does not reach the game", raw("msg sneaky") == "denied"
+          and not m.log_has(bot.client_log, "sneaky"))
+    check("with the token it answers", raw(f"{fields[1]} @ping").startswith("ok "))
+    if os.name != "nt":
+        import signal
+        game_pid = m.read_pid(bot.client_pid_f)
+        os.kill(m.keeper_pid(bot), signal.SIGTERM)
+        check("SIGTERM to the keeper takes the game down with it", wait(lambda: not m.pid_alive(game_pid), 15))
+        check("...and the keeper cleans up", wait(lambda: not bot.keeper_port_f.exists()
+                                                   and not bot.keeper_pid_f.exists(), 10))
+
+    # A keeper from before the token writes the port alone and takes the
+    # line bare: keeper_ask keeps talking to it until the bot is restarted.
+    import socket
+    import threading
+    got = {}
+    old = socket.socket()
+    old.bind(("127.0.0.1", 0))
+    old.listen(1)
+
+    def serve():
+        conn, _ = old.accept()
+        with conn:
+            got["line"] = conn.recv(64).decode().strip()
+            conn.sendall(b"ok 1\n")
+
+    t = threading.Thread(target=serve)
+    t.start()
+    bot.keeper_port_f.write_text(f"{old.getsockname()[1]}\n")
+    answer = m.keeper_ask(bot, "@ping")
+    t.join(5)
+    old.close()
+    bot.keeper_port_f.unlink()
+    check("a keeper older than the token still gets the bare line", got.get("line") == "@ping" and answer == "ok 1")
+
+
+def tests_guard_rings():
+    print("\nGuards: a ring of escorts is stopped once each, not forever")
+    alice, bob = m.Bot("Alice"), m.Bot("Bob")
+    alice.write("escort", "bob")
+    bob.write("escort", "alice")
+    text, result = said(m.cmd_stop, Args(name="Alice", keep_guards=False))
+    check("two bots guarding each other: stop ends", result == 0, repr(result))
+    check("...having stopped each one once",
+          text.count("==> Alice stopped") == 1 and text.count("==> Bob stopped") == 1, text)
+    bob.write("escort", "bob")
+    (alice.dir / "escort").unlink()
+    _, result = said(m.cmd_stop, Args(name="Bob", keep_guards=False))
+    check("a bot guarding itself: stop ends", result == 0, repr(result))
+    checks = m.doctor_checks()
+    check("doctor names a bot that guards itself",
+          any(l == "bots/bob" and ok is False and "escorts itself" in d for l, ok, d in checks))
+    (bob.dir / "escort").unlink()
+
+
+def tests_logwatch():
+    print("\nLogWatch: a log read from where it was left, not whole every time")
+    log = TMP / "watch.log"
+    log.write_text("starting\n")
+    w = m.LogWatch(log, "READY now", "dead")
+    check("nothing yet", not w.saw("READY now"))
+    with open(log, "a") as f:
+        f.write("... REA")
+    check("half a line is not the line", not w.saw("READY now"))
+    with open(log, "a") as f:
+        f.write("DY now\n")
+    check("a line cut between two reads is still seen", w.saw("READY now"))
+    check("the position moved to the end, nothing is read twice", w.pos == log.stat().st_size)
+    check("a needle it was not told to watch is not invented", not w.saw("dead"))
+    log.write_text("new\n")
+    check("a log started over forgets what the old one said", not w.saw("READY now"))
+    check("a missing log is simply not there yet", not m.LogWatch(TMP / "nope.log", "x").saw("x"))
+
+
+def tests_status_unreachable():
+    print("\nStatus: says when the server mod does not answer")
+    quick_server_env()
+    text, result = said(m.cmd_status, Args(name=None))
+    check("status still returns 0", result == 0)
+    check("...and says the server mod does not answer", "does not answer" in text, text)
+    layout()
+
+
 if __name__ == "__main__":
     tests_files()
     tests_names()
@@ -497,6 +776,14 @@ if __name__ == "__main__":
     tests_packs()
     tests_deploy()
     tests_doctor()
+    tests_pids()
+    tests_lock()
+    tests_start_order()
+    tests_keeper_failures()
+    tests_keeper_guarded()
+    tests_guard_rings()
+    tests_logwatch()
+    tests_status_unreachable()
 
     print(f"\n{done - len(failures)}/{done} checks pass")
     if failures:

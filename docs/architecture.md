@@ -315,10 +315,23 @@ Windows. Now it is a process per bot, the keeper (`marionette.py keeper`,
 started by `start`), that owns the java process and listens on a localhost
 socket whose port is written in `bots/<name>/run/keeper.port`. The launcher
 sends it `connect`; the bridge sends it `msg`; `@ping` and `@stop` are for the
-keeper itself. Its pid file is what says "already running". HeadlessMC starts
-the game as a child java, so the keeper starts the launcher in a process group
-of its own and stops the group, not the process: stopping the launcher alone
-left the game alive, holding the port, with nobody at its stdin.
+keeper itself. HeadlessMC starts the game as a child java, so the keeper
+starts the launcher in a process group of its own and stops the group, not the
+process: stopping the launcher alone left the game alive, holding the port,
+with nobody at its stdin.
+
+A localhost port is open to every user of the machine, and HeadlessMC's
+console can launch a JVM with any arguments, so `keeper.port` also holds a
+token, readable by this user only, and a line without it is denied.
+
+**Pid files are not trusted on their own.** A keeper or a bridge killed without
+warning (the OOM killer, a reboot) leaves its pid behind, and the kernel hands
+that number to another process. The launcher acts on a pid only while its
+command line still says it is that bot's keeper, HeadlessMC or bridge.
+Whether a bot is busy is a lock instead (`run/launcher.lock`, taken by every
+command that starts or stops it): the kernel frees a lock however its holder
+ends, so it cannot go stale, and it is taken before looking, so two `start`s
+side by side cannot both find the bot stopped.
 
 **The launcher is one Python file with no dependencies**, like the bridge and
 the MCP server, and it uses no shell: sockets instead of `ss`, pid files

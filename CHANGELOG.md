@@ -41,8 +41,17 @@ setting ignored it without a word.
   shell: `servers`, `create`, `login`, `start`, `connect`, `bridge`, `stop`,
   `restart`, `status`, `deploy-mod`, `doctor`. It replaced eight bash scripts.
 - A keeper per bot holds the game's console open and takes lines for it on a
-  localhost socket; its pid file is what says "already running". It stops the
-  game's whole process tree, because HeadlessMC starts the game as a child java.
+  localhost socket, only from whoever can read its token. It stops the game's
+  whole process tree, because HeadlessMC starts the game as a child java, and
+  it does so on a SIGTERM too.
+- One launcher command at a time per bot, under a lock the kernel frees however
+  its holder ends: two `start`s side by side no longer launch two games.
+- A pid file is trusted only while its pid is still the process it was written
+  for, so a pid left by a killed keeper or bridge and handed to another process
+  is neither reported as running nor stopped.
+- `start` checks whether the bot runs before it touches its mods or its server,
+  and says at once when the keeper could not start the game (no java, say)
+  instead of waiting five minutes.
 - `doctor` checks the machine, the folders, the jars and the server mod, in the
   order in which things break; `status` says per bot whether the client is there,
   its port is open, the server lists it and its bridge is alive.
