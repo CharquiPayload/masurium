@@ -45,6 +45,12 @@ setting ignored it without a word.
   the same functions the command line uses (`launcher/`, a package).
 - A start, restart or connect can be cancelled while it waits, and a
   cancelled start stops the client it had launched. Ctrl+C does exactly that.
+- `set` sees and changes a bot's settings (language, gender, owner, model,
+  escort, heap, account, server, port) through one table that says what each
+  accepts and when a change counts; a setting read at start is refused while
+  the client runs. `doctor` names hand-edited values `set` would refuse.
+  `MARIONETTE_HEAP` and `MARIONETTE_VERSION` replace the old `HEAP` and
+  `VERSION`, names generic enough to be set by something else.
 - A keeper per bot holds the game's console open and takes lines for it on a
   localhost socket, only from whoever can read its token. It stops the game's
   whole process tree, because HeadlessMC starts the game as a child java, and

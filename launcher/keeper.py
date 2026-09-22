@@ -26,6 +26,7 @@ import socket
 import subprocess
 import time
 
+from . import settings
 from .files import LogWatch, read_pid, unlink_quietly, write_private
 from .processes import WINDOWS, game_pids, is_ours, own_group, port_in_use, stop_game
 
@@ -49,7 +50,12 @@ def launch_line(bot, server):
     reach the JVM."""
     ws = bot.ws
     offline = " -offline" if bot.read("account", "online") == "offline" else ""
-    jvm = [f"-Xmx{ws.heap()}", f"-Dmarionette.name={bot.name}",
+    # A heap file edited by hand is not trusted onto the JVM's command line:
+    # anything but a size falls back to the default (doctor says why).
+    heap = settings.get(bot, "heap")
+    if settings.problem(bot, "heap", heap):
+        heap = ws.heap()
+    jvm = [f"-Xmx{heap}", f"-Dmarionette.name={bot.name}",
            "-Dmarionette.headless=true", f"-Dmarionette.bot.port={bot.port}"]
     language = re.sub(r"[^A-Za-z]", "", bot.read("language"))[:8]
     gender = re.sub(r"[^A-Za-z]", "", bot.read("gender"))[:1]

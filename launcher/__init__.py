@@ -12,12 +12,13 @@ tomorrow, both on the same functions.
 
     workspace.py   the three folders, server.env, the environment; the server registry
     bots.py        a bot's folder and files, and the lock that keeps two commands off it
+    settings.py    what each of a bot's files accepts, its default, when a change counts
     packs.py       what a pack is made of, read from the jars; the pack owns gamedir/mods
     api.py         the server mod's HTTP API
     keeper.py      the process that holds a game's console
     processes.py   pids, process groups, ports
     diagnosis.py   why a start failed, from the client's own logs
-    operations.py  create, start, connect, bridge, stop, restart, status, deploy-mod
+    operations.py  create, start, connect, bridge, stop, restart, status, set, deploy-mod
     doctor.py      the checks, in the order things break
     events.py      Event and Fail
     files.py       env files, locks, logs read as they grow

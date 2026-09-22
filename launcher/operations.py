@@ -13,6 +13,7 @@ import sys
 import time
 from dataclasses import dataclass
 
+from . import settings
 from .api import UNREACHABLE
 from .bots import check_name, operating
 from .diagnosis import complaints, crash_report, explain_crash
@@ -503,6 +504,36 @@ def restart(bot, switch_to=None, on_event=None, cancel=None):
             raise Fail(str(e), lines=e.lines + ("the client did not join: the bridge was NOT started.",),
                        code=e.code)
         return start_bridge(bot, on_event=report)
+
+
+# --- settings -----------------------------------------------------------------
+
+def client_running(bot):
+    return keeper_alive(bot) or launcher_pid(bot) is not None or bool(game_pids(bot.port))
+
+
+def configure(bot, key, value=None, clear=False, on_event=None):
+    """Set one of a bot's settings (see settings.py), or with `clear` put it
+    back to its default. Returns the value that applies now. A setting read
+    when the client starts is refused while it runs: the file would say one
+    thing and the running game another, and `status` would believe the
+    file."""
+    report = report_to(on_event)
+    bot.require()
+    s = settings.setting(key)
+    with operating(bot):
+        if s.at_start and client_running(bot):
+            raise Fail(f"{bot.name} is running, and its {key} is read when it starts. "
+                       f"Stop it first:  marionette.py stop {bot.name}", code="running")
+        if clear:
+            settings.clear(bot, key)
+        else:
+            settings.set_value(bot, key, value)
+    now = settings.get(bot, key)
+    report.step(f"{bot.name}: {key} = {now or '(nothing)'}"
+                + ("  (the default)" if not settings.is_set(bot, key) else ""), stage="configured")
+    report.detail(f"it counts {settings.APPLIES[s.applies]}")
+    return now
 
 
 # --- looking ------------------------------------------------------------------

@@ -7,6 +7,7 @@ import sys
 import urllib.error
 from collections import namedtuple
 
+from . import settings
 from .api import UNREACHABLE
 from .events import Fail
 from .packs import ADDON_FOR, CORE_JAR, compare_packs, jar_family, pack_carries, pack_mods
@@ -186,13 +187,19 @@ def checks(ws):
             problems.append(f"escorts '{escort}', which is not a bot here")
         elif escort == key:
             problems.append("escorts itself")
+        # Every other file with a value `set` would refuse (the port and the
+        # escort are said above, in their own words).
+        problems += [why for k, why in settings.problems(bot) if k not in ("port", "escort")]
         add(f"bots/{key}", not problems, "; ".join(problems) or f"port {port}, server {bot.read('server')}")
 
-    heap = heap_gb(ws.heap())
+    heaps = [heap_gb(settings.get(ws.bot(k), "heap")) or heap_gb(ws.heap()) or 0 for k in keys]
     avail = free_memory_gb()
-    if heap and avail is not None and keys:
-        need = heap * len(keys)
+    if heaps and avail is not None:
+        need = sum(heaps)
+        same = len(set(heaps)) == 1
         add("memory for every bot at once", need <= avail if need > avail * 0.9 else True,
-            f"{len(keys)} bots x {heap:g} GB heap = {need:g} GB; {avail:.1f} GB available"
+            (f"{len(keys)} bots x {heaps[0]:g} GB heap" if same else f"{len(keys)} bots, heaps "
+             + " + ".join(f"{h:g}" for h in heaps) + " GB")
+            + f" = {need:g} GB; {avail:.1f} GB available"
             + ("" if need <= avail else " (not all of them at once)"))
     return out

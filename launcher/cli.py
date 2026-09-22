@@ -6,7 +6,7 @@ import os
 import subprocess
 import threading
 
-from . import doctor, operations
+from . import doctor, operations, settings
 from .bots import operating
 from .events import Cancel, Cancelled, Fail
 from .keeper import keeper_main
@@ -140,6 +140,34 @@ def cmd_status(ws, args):
             f"{yes_no(s.inside):<10} {bridge:<7} {s.guard_of}")
 
 
+def cmd_set(ws, args):
+    """marionette.py set Alice                 every setting, its value and what it is
+    marionette.py set Alice heap             one
+    marionette.py set Alice heap 4g          change it
+    marionette.py set Alice heap --default   back to the default"""
+    bot = ws.bot(args.name).require()
+    if args.value or args.default:
+        if not args.key:
+            raise Fail("say which setting:  marionette.py set <bot> <setting> <value>", code="bad_setting")
+        operations.configure(bot, args.key, " ".join(args.value or []), clear=args.default,
+                             on_event=print_event)
+        return 0
+    keys = [settings.setting(args.key).key] if args.key else list(settings.SETTINGS)
+    for key in keys:
+        s = settings.SETTINGS[key]
+        value = settings.get(bot, key)
+        mark = "" if settings.is_set(bot, key) else "  (default)"
+        say(f"  {key:<9} {(value or '-') + mark:<24} {s.help}")
+        if args.key:
+            if s.choices:
+                say(f"  {'':<9} choices: {', '.join(s.choices)}")
+            say(f"  {'':<9} counts {settings.APPLIES[s.applies]}")
+    for key, why in settings.problems(bot):
+        if key in keys:
+            say(f"  !! {why}")
+    return 0
+
+
 def cmd_deploy_mod(ws, args):
     operations.deploy_mod(ws, args.jar, print_event)
 
@@ -214,6 +242,13 @@ def build_parser():
     c = sub.add_parser("status", help="what every bot is doing")
     c.add_argument("name", nargs="?")
     c.set_defaults(fn=cmd_status)
+
+    c = sub.add_parser("set", help="see or change a bot's settings (language, heap, owner...)")
+    c.add_argument("name")
+    c.add_argument("key", nargs="?", help="one setting; without it, all of them")
+    c.add_argument("value", nargs="*", help="its new value (a model may be two words: haiku low)")
+    c.add_argument("--default", action="store_true", help="put it back to its default")
+    c.set_defaults(fn=cmd_set)
 
     c = sub.add_parser("deploy-mod", help="put a built jar in shared/mods, safely (the core by default)")
     c.add_argument("jar", nargs="?", help="a jar to deploy instead of the core, such as an add-on's")

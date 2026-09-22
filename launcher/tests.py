@@ -339,10 +339,24 @@ def tests_launch_line():
     line = keeper.launch_line(bot, server)
     check("language and gender reach the JVM cleaned",
           "-Dmarionette.language=esrmrf " in line and "-Dmarionette.gender=f" in line)
+    WS.environ["MARIONETTE_HEAP"] = "1g"
+    WS.environ["MARIONETTE_VERSION"] = "neoforge-21.1.999"
+    line = keeper.launch_line(bot, server)
+    check("MARIONETTE_HEAP and MARIONETTE_VERSION from the environment win",
+          "-Xmx1g" in line and "launch neoforge-21.1.999 " in line)
+    bot.write("heap", "4g")
+    check("...and a bot's own heap file wins over MARIONETTE_HEAP", "-Xmx4g " in keeper.launch_line(bot, server))
+    bot.write("heap", "4g -XX:+Evil")
+    check("a heap file that is not a size never reaches the JVM",
+          "Evil" not in keeper.launch_line(bot, server) and "-Xmx1g " in keeper.launch_line(bot, server))
+    (bot.dir / "heap").unlink()
+    WS.environ.pop("MARIONETTE_HEAP")
+    WS.environ.pop("MARIONETTE_VERSION")
     WS.environ["HEAP"] = "1g"
     WS.environ["VERSION"] = "neoforge-21.1.999"
     line = keeper.launch_line(bot, server)
-    check("HEAP and VERSION from the environment win", "-Xmx1g" in line and "launch neoforge-21.1.999 " in line)
+    check("the old, too generic HEAP and VERSION are not read any more",
+          f"-Xmx{DEFAULT_HEAP}" in line and "21.1.999" not in line)
     WS.environ.pop("HEAP")
     WS.environ.pop("VERSION")
     bot.write("language", "en")
@@ -917,6 +931,93 @@ def tests_cancel():
     layout()
 
 
+# --- settings ---------------------------------------------------------------
+
+def tests_settings():
+    print("\nSettings: one table says what each bot file accepts, for every face")
+    from launcher import settings
+    bot, bob = WS.bot("Alice"), WS.bot("Bob")
+    check("a value that applies without a file is the default",
+          settings.get(bot, "model") == "opus medium" and not settings.is_set(bot, "model"))
+    check("the owner's default comes from server.env", settings.get(bob, "owner") == "Owner")
+    for key, value, why in (("language", "english", "language code"),
+                            ("gender", "x", "one of f, m"),
+                            ("account", "maybe", "one of online, offline"),
+                            ("owner", "not a name!", "player name"),
+                            ("model", "haiku lowest", "effort is one of"),
+                            ("model", "a b c", "optional effort"),
+                            ("escort", "alice", "cannot escort itself"),
+                            ("escort", "nobody", "another bot here: bob"),
+                            ("heap", "512m", "at least 1g"),
+                            ("heap", "lots", "heap size"),
+                            ("port", "80", "between 1024"),
+                            ("port", str(FIRST_PORT + 1), "belongs to another bot"),
+                            ("server", "nope", "registered servers: test")):
+        e = fails(settings.set_value, bot, key, value)
+        check(f"{key} '{value}' is refused, saying what it takes",
+              e is not None and why in told(e) and e.code == "bad_setting", told(e))
+    check("an unknown setting is refused, listing the ones there are",
+          "language" in told(fails(settings.setting, "colour")))
+    check("a good value is written, as a plain file", settings.set_value(bot, "language", "ES") == "es"
+          and bot.read("language") == "es")
+    check("a model keeps its two words", settings.set_value(bot, "model", "haiku   low") == "haiku low")
+    check("an escort keeps its capitals (the game shows names as they are)",
+          settings.set_value(bot, "escort", "Bob") == "Bob")
+    settings.clear(bot, "escort")
+    settings.clear(bot, "model")
+    check("clearing goes back to the default", not settings.is_set(bot, "model")
+          and settings.get(bot, "model") == "opus medium")
+    check("a required one cannot be cleared", "no default" in told(fails(settings.clear, bot, "port")))
+    settings.set_value(bot, "account", "online")
+    props = files.read_java_properties(bot.hmc / "HeadlessMC" / "config.properties")
+    check("changing the account changes HeadlessMC's own config too", props.get("hmc.offline") == "false")
+    settings.set_value(bot, "account", "offline")
+    props = files.read_java_properties(bot.hmc / "HeadlessMC" / "config.properties")
+    check("...both ways, and nothing else in it is lost",
+          props.get("hmc.offline") == "true" and props.get("hmc.offline.username") == "Alice")
+    settings.set_value(bot, "language", "en")
+
+    # The operation: the lock, and no start-time setting under a running client.
+    text, now = said(ops.configure, bot, "heap", "4g")
+    check("configure reports the value and when it counts",
+          now == "4g" and "Alice: heap = 4g" in text and "on its next start" in text, text)
+    kept = start_keeper()
+    try:
+        check("a keeper is up", wait(lambda: keeper.keeper_alive(kept), 10))
+        text, result = said(ops.configure, bot, "heap", "6g")
+        check("a setting read at start is refused while the client runs",
+              isinstance(result, Fail) and result.code == "running" and bot.read("heap") == "4g", text)
+        text, result = said(ops.configure, bot, "owner", "SomePlayer")
+        check("...one read as it is used is not", result == "SomePlayer" and "right away" in text, text)
+    finally:
+        said(ops.stop, bot)
+    said(ops.configure, bot, "heap", clear=True)
+    said(ops.configure, bot, "owner", clear=True)
+
+    # The command line.
+    text, code = run_cli("set", "Alice")
+    check("`set <bot>` lists every setting with its value",
+          code == 0 and all(k in text for k in settings.SETTINGS) and "(default)" in text, text)
+    text, code = run_cli("set", "Alice", "model", "sonnet", "low")
+    check("`set <bot> <key> <value...>` changes it (two words are one value)",
+          code == 0 and bot.read("model") == "sonnet low", text)
+    text, code = run_cli("set", "Alice", "model")
+    check("`set <bot> <key>` shows one, with its choices and when it counts",
+          "choices:" in text and "when its bridge restarts" in text, text)
+    text, code = run_cli("set", "Alice", "model", "--default")
+    check("`--default` puts it back", code == 0 and not settings.is_set(bot, "model"), text)
+    text, code = run_cli("set", "Alice", "gender", "x")
+    check("a bad value is a failure of the command, with the reason", code == 1 and "one of f, m" in text, text)
+
+    bob.write("language", "Klingon!")
+    checks = doctor.checks(WS)
+    check("doctor names a file edited by hand into something `set` would refuse",
+          any(l == "bots/bob" and ok is False and "language" in d for l, ok, d in checks))
+    text, code = run_cli("set", "Bob")
+    check("...and so does `set <bot>`", "!! 'Klingon!' is not a valid language" in text, text)
+    (bob.dir / "language").write_text("en\n")
+
+
 if __name__ == "__main__":
     tests_files()
     tests_workspace()
@@ -941,6 +1042,7 @@ if __name__ == "__main__":
     tests_logwatch()
     tests_status()
     tests_cancel()
+    tests_settings()
     tests_cli()
 
     print(f"\n{done - len(failures)}/{done} checks pass")

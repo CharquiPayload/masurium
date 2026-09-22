@@ -40,7 +40,8 @@ not need it.
 - [HeadlessMC](https://github.com/headlesshq/headlessmc) launcher jar and the
   [hmc-specifics](https://github.com/headlesshq/hmc-specifics) mod for 1.21.1
   NeoForge.
-- About **3 GB of RAM per bot** (each bot is a full Java client; `HEAP` sets it).
+- About **3 GB of RAM per bot** (each bot is a full Java client; a bot's `heap`
+  file, or `MARIONETTE_HEAP` for all of them, sets it).
 - Network access from the bot machine to the server's game port and to the
   server mod's HTTP port (8477 by default).
 
@@ -214,7 +215,18 @@ same bot is refused until the first one ends.
 ## Configuring a bot
 
 Each bot is a folder in `~/bots/<name>/`. Every file is optional except `port`
-and `server`, which the launcher writes:
+and `server`, which the launcher writes. They are plain files, one value each,
+and can be edited by hand; `marionette.py set` changes them with a check first
+and says when the change counts:
+
+```bash
+launcher/marionette.py set Alice                  # every setting, its value and what it is
+launcher/marionette.py set Alice language es
+launcher/marionette.py set Alice model haiku low
+launcher/marionette.py set Alice heap --default   # back to the default
+```
+
+`doctor` names any file whose value `set` would refuse.
 
 | file | meaning |
 |---|---|
@@ -224,7 +236,8 @@ and `server`, which the launcher writes:
 | `owner` | the player the bot belongs to: it accepts their delicate orders, and they control it with `/marionette bot` on any server. It cannot be changed from inside the game |
 | `model` | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`) |
 | `escort` | the name of another bot: this bot becomes that bot's **guard** |
-| `gender` | `m` or `f`, for languages with grammatical gender |
+| `heap` | the game's memory, e.g. `3g` (default `MARIONETTE_HEAP`, else `3g`) |
+| `gender` | `m` or `f`, for languages with grammatical gender (default `f`) |
 
 **Main bots and guards.** A main bot takes orders and does jobs. A guard is a
 bot whose `escort` file names a main bot: it follows and protects it, sleeps

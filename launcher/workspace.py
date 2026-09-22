@@ -89,10 +89,14 @@ class Workspace:
         return [custom] if custom else ["java"]
 
     def heap(self):
-        return self.environ.get("HEAP") or DEFAULT_HEAP
+        """The heap of a bot without a `heap` file of its own."""
+        return self.environ.get("MARIONETTE_HEAP") or DEFAULT_HEAP
 
     def version_for(self, server):
-        return self.environ.get("VERSION") or server.version
+        """The NeoForge version HeadlessMC launches: the server's, unless
+        MARIONETTE_VERSION says otherwise for every server (a test of a new
+        NeoForge, say)."""
+        return self.environ.get("MARIONETTE_VERSION") or server.version
 
     def child_env(self):
         """What the keeper, the bridge and the MCP server inherit: the same
