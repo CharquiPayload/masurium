@@ -3,17 +3,18 @@ one selected."""
 import collections
 import time
 
-from PySide6.QtCore import QSettings, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QMainWindow, QMenu,
-                               QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStatusBar, QToolBar,
-                               QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QIcon, QImage, QKeySequence
+from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLineEdit, QListWidget,
+                               QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStatusBar,
+                               QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from .. import groups, operations, settings
+from ..bots import Instance
 from ..events import Cancelled, Fail
 from . import dialogs, state, theme
 from .tasks import Background, Tasks
-from .widgets import GroupSection, InstanceTile
+from .widgets import DependencySection, GroupSection, InstanceTile, icon_of
 
 REFRESH_MS = 3000
 LOOSE = ""            # the section of the instances in no group
@@ -32,8 +33,10 @@ class MainWindow(QMainWindow):
         self.activity = collections.defaultdict(lambda: collections.deque(maxlen=60))
         self.reading = False
         self.side_signature = None
-        # What folds, remembered between runs (a test hands in a file of its own).
+        # What folds, the style, how often it looks: remembered between runs (a
+        # test hands in a file of its own).
         self.store = store or QSettings("Marionette", "launcher")
+        theme.apply(QApplication.instance(), self.store.value("appearance/style", theme.DEFAULT))
         self.setWindowTitle("Marionette")
         self.resize(1180, 720)
 
@@ -67,7 +70,7 @@ class MainWindow(QMainWindow):
         self.tasks.changed.connect(self._tasks_changed)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
-        self.timer.start(REFRESH_MS)
+        self.timer.start(self.refresh_seconds() * 1000)
         self._draw_side()
         self.refresh()
 
@@ -77,6 +80,8 @@ class MainWindow(QMainWindow):
         bar = QToolBar()
         bar.setMovable(False)
         self.addToolBar(bar)
+
+        self.toolbar = bar
 
         def act(text, fn, tip=""):
             a = QAction(text, self)
@@ -101,6 +106,7 @@ class MainWindow(QMainWindow):
         glob.setMenu(menu)
         bar.addWidget(glob)
         act("Doctor", lambda: dialogs.DoctorDialog(self).exec(), "Check the machine, the folders and the servers")
+        act("Launcher", lambda: dialogs.LauncherSettingsDialog(self).exec(), "The launcher's own settings: its style")
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
@@ -110,6 +116,8 @@ class MainWindow(QMainWindow):
         self.search.setFixedWidth(230)
         self.search.textChanged.connect(self._filter)
         bar.addWidget(self.search)
+        quit_ = act("Quit", self.close, "Close the launcher (Ctrl+Q). The bots keep running.")
+        quit_.setShortcut(QKeySequence("Ctrl+Q"))
 
     # --- reading --------------------------------------------------------------------
 
@@ -148,13 +156,13 @@ class MainWindow(QMainWindow):
         self._clear_grid()
         snap = self.snapshot
         for key in sorted(snap.top):
-            self.grid.addWidget(self._section(key, 0))
+            self.grid.addWidget(self._section(key))
         if snap.loose:
-            loose = GroupSection(LOOSE, "In no group" if snap.groups else "Instances",
-                                 self._folded(LOOSE), 0)
+            loose = GroupSection(LOOSE, "In no group" if snap.groups else "Instances", self._folded(LOOSE))
             for key in sorted(snap.loose):
                 loose.flow.addWidget(self._tile(key))
             loose.toggled.connect(self._fold)
+            loose.dropped.connect(self.move_node)
             self.sections[LOOSE] = loose
             self.grid.addWidget(loose)
         if not snap.instances and not snap.groups:
@@ -165,20 +173,29 @@ class MainWindow(QMainWindow):
         self._update_tiles()
         self._filter(self.search.text())
 
-    def _section(self, key, depth):
+    def _section(self, key):
         g = self.snapshot.groups[key]
         n = len(g.instances)
-        what = (f"dependency · leader {g.leader}, {n - 1} guard(s)" if g.kind == groups.DEPENDENCY
-                else f"{n} instance(s)" + (f", {len(g.groups)} group(s)" if g.groups else ""))
-        sec = GroupSection(key, f"{key}   ·   {what}" + ("   ·   locked" if g.locked else ""),
-                           self._folded(key), depth)
-        for k in g.instances:
-            if k in self.snapshot.instances:
-                sec.flow.addWidget(self._tile(k))
+        locked = "   ·   locked" if g.locked else ""
+        if g.kind == groups.DEPENDENCY:
+            # A small map: the leader on top, its guards hanging from it.
+            sec = DependencySection(key, f"{key}   ·   {n - 1} guard(s){locked}", self._folded(key))
+            if g.leader in self.snapshot.instances:
+                sec.set_leader(self._tile(g.leader))
+            for k in g.instances:
+                if k != g.leader and k in self.snapshot.instances:
+                    sec.flow.addWidget(self._tile(k))
+        else:
+            what = f"{n} instance(s)" + (f", {len(g.groups)} group(s)" if g.groups else "")
+            sec = GroupSection(key, f"{key}   ·   {what}{locked}", self._folded(key))
+            for k in g.instances:
+                if k in self.snapshot.instances:
+                    sec.flow.addWidget(self._tile(k))
         for k in g.groups:
             if k in self.snapshot.groups:
-                sec.inner.addWidget(self._section(k, 1))
+                sec.inner.addWidget(self._section(k))
         sec.toggled.connect(self._fold)
+        sec.dropped.connect(self.move_node)
         sec.clicked.connect(lambda k: self.select(("group", k)))
         sec.menu.connect(self._group_menu)
         self.sections[key] = sec
@@ -254,9 +271,16 @@ class MainWindow(QMainWindow):
             self._recent(None)
             return
         head = QHBoxLayout()
-        pic = QLabel()
-        pic.setPixmap(theme.avatar(view.bot or view.name if view else group.key, 56))
-        head.addWidget(pic)
+        face = QToolButton()
+        face.setObjectName("face")
+        face.setIconSize(QSize(56, 56))
+        face.setIcon(QIcon(theme.avatar(view.bot or view.name if view else group.key, 56,
+                                        image=icon_of(view) if view else None)))
+        if view and view.bot:
+            face.setCursor(Qt.PointingHandCursor)
+            face.setToolTip(f"{view.bot}'s picture: click to change it")
+            face.clicked.connect(lambda: self._face_menu(view.bot, face))
+        head.addWidget(face)
         names = QVBoxLayout()
         names.addWidget(dialogs.title(what[1]))
         if view:
@@ -288,6 +312,7 @@ class MainWindow(QMainWindow):
             return
         self.side_layout.addWidget(dialogs.muted("Recent"))
         lst = QListWidget()
+        lst.setObjectName("recent")
         lst.setMaximumHeight(170)
         lst.setWordWrap(True)
         lst.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -345,7 +370,7 @@ class MainWindow(QMainWindow):
         if settings.get(inst, "account") == "online":
             out.append(("⚿  Log its account in…", lambda: self._login(inst), not running))
         out += [
-            ("▤  Open its folder", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(inst.dir))), True),
+            ("▤  Its folder…", lambda: self._folder(inst), True),
             ("≡  Logs", lambda: dialogs.LogDialog(self, inst).show(), True),
         ]
         return out
@@ -376,6 +401,105 @@ class MainWindow(QMainWindow):
         ]
         return out
 
+    # --- moving by dragging, and a bot's picture ------------------------------------------------
+
+    def move_node(self, ref, to):
+        """What was dropped ("instance:alice", "group:team") into the group
+        `to` ("" for none). A leader or a guard stays with its dependency
+        group: that group moves. When it cannot go there it stays where it was,
+        and why is said."""
+        kind, _, key = ref.partition(":")
+        ws = self.ws
+        node = Instance(ws, key) if kind == "instance" else ws.group(key)
+        if not node.exists():
+            return
+        here = groups.parent_of(ws, node)
+        if isinstance(node, Instance) and here is not None and here.kind == groups.DEPENDENCY:
+            if to == here.key:
+                return
+            node, here = here, groups.parent_of(ws, here)
+            ref = f"group:{node.key}"
+        if to == (here.key if here else LOOSE) or (isinstance(node, groups.Group) and to == node.key):
+            return
+        try:
+            if here is not None:
+                operations.group_remove(ws, here.key, [ref], on_event=self.say)
+            if to:
+                try:
+                    operations.group_add(ws, to, [ref], on_event=self.say)
+                except Fail:
+                    if here is not None:            # back where it was
+                        operations.group_add(ws, here.key, [ref], on_event=self.say)
+                    raise
+        except Fail as e:
+            self.fail(e, "It cannot go there")
+        self.refresh()
+
+    def _face_menu(self, bot, button):
+        menu = QMenu(self)
+        menu.addAction("Choose a picture…", lambda: self._pick_face(bot))
+        menu.addAction("Paste a copied picture", lambda: self.set_face(bot, QApplication.clipboard().image()))
+        if self.ws.bot(bot).dir.joinpath("icon.png").is_file():
+            menu.addAction("Remove the picture", lambda: self.set_face(bot, None))
+        menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+
+    def _pick_face(self, bot):
+        path, _ = QFileDialog.getOpenFileName(self, f"A picture for {bot}", str(self.ws.home),
+                                              "Pictures (*.png *.jpg *.jpeg *.webp *.gif *.bmp)")
+        if path:
+            self.set_face(bot, QImage(path))
+
+    def set_face(self, bot, image):
+        """A bot's picture: bots/<bot>/icon.png, cut down to 256 pixels; None
+        takes it away (its letter again)."""
+        target = self.ws.bot(bot).dir / "icon.png"
+        if image is None:
+            target.unlink(missing_ok=True)
+        elif image.isNull():
+            self.alert("No picture", "There is no picture there (for pasting: copy an image first).")
+            return
+        else:
+            image.scaled(256, 256, Qt.KeepAspectRatio, Qt.SmoothTransformation).save(str(target), "PNG")
+        self.side_signature = None
+        self.refresh()
+
+    def _folder(self, inst):
+        """Opening a folder needs a file manager where the launcher runs,
+        which a machine without a screen (reached through waypipe) has not:
+        its path can be copied instead."""
+        menu = QMenu(self)
+        menu.addAction("Open it in the file manager",
+                       lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(inst.dir))))
+        menu.addAction(f"Copy its path ({inst.dir})", lambda: (QApplication.clipboard().setText(str(inst.dir)),
+                                                               self.say_text(f"copied: {inst.dir}")))
+        menu.exec(self.cursor().pos())
+
+    def toolbar_actions(self):
+        return self.toolbar.actions()
+
+    # --- the launcher's own settings ---------------------------------------------------------
+
+    def refresh_seconds(self):
+        return max(1, min(60, int(self.store.value("refresh/seconds", REFRESH_MS // 1000))))
+
+    def set_refresh_seconds(self, seconds):
+        self.store.setValue("refresh/seconds", int(seconds))
+        self.timer.setInterval(self.refresh_seconds() * 1000)
+
+    def set_style(self, name, keep=True):
+        """A colour preset, applied to the open window at once; with `keep`,
+        remembered for the next time."""
+        name = theme.apply(QApplication.instance(), name)
+        if keep:
+            self.store.setValue("appearance/style", name)
+        for tile in self.tiles.values():
+            tile.face = None
+        self._update_tiles()
+        for sec in self.sections.values():
+            sec.update()
+        self.side_signature = None
+        self._draw_side()
+
     def _instance_menu(self, key, pos):
         self._menu(self._instance_actions(key), pos)
 
@@ -399,8 +523,7 @@ class MainWindow(QMainWindow):
             self.alert("Busy", f"{target} is busy: {self.tasks.busy(target)}")
 
     def _delete_group(self, key):
-        if QMessageBox.question(self, "Delete", f"Delete the group {key}? What is in it stays, in no group.") \
-                != QMessageBox.Yes:
+        if not dialogs.ask(self, "Delete", f"Delete the group {key}? What is in it stays, in no group."):
             return
         try:
             operations.delete_group(self.ws, key, on_event=self.say)
@@ -478,12 +601,12 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def alert(self, heading, text):
-        QMessageBox.information(self, heading, text)
+        dialogs.MessageBox(QMessageBox.Information, heading, text, QMessageBox.Ok, self).exec()
 
     def fail(self, e, heading="It did not work"):
         lines = getattr(e, "lines", ()) or ()
         trace = getattr(e, "trace", "")
-        box = QMessageBox(QMessageBox.Warning, heading, str(e), parent=self)
+        box = dialogs.MessageBox(QMessageBox.Warning, heading, str(e), QMessageBox.Ok, self)
         if lines or trace:
             box.setDetailedText("\n".join(lines) + ("\n\n" + trace if trace else ""))
         box.exec()

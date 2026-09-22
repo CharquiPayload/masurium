@@ -1048,6 +1048,23 @@ def tests_phrases():
               bridge.write_phrases(ask=brain) is None and len(asked) == 1)
         check("asked again (the launcher's mark), it is rewritten",
               bridge.write_phrases(force=True, ask=brain) == 3 and len(asked) == 2)
+        real_personality = bridge.personality
+        bridge.personality = lambda: "You are someone else now."
+        try:
+            check("its personality changed: the next start writes them again, unasked",
+                  bridge.write_phrases(ask=brain) == 3 and len(asked) == 3)
+            check("...once", bridge.write_phrases(ask=brain) is None and len(asked) == 3)
+        finally:
+            bridge.personality = real_personality
+        bridge.write_phrases(ask=brain)
+        real_config = bridge._bot_config
+        bridge._bot_config = lambda name, key, base=None: "no" if key == "fast_responses" else None
+        try:
+            check("fast responses off: no brain call, the file goes, plain English",
+                  bridge.write_phrases(ask=brain) is None and not f.exists() and len(asked) == 4
+                  and bridge.phrase("busy") == bridge.PHRASES["busy"], (len(asked), f.exists()))
+        finally:
+            bridge._bot_config = real_config
         check("a brain that failed writes no versions and breaks nothing",
               bridge.write_phrases(force=True, ask=lambda c: {}) == 0 and bridge.phrase("busy")
               == bridge.PHRASES["busy"])

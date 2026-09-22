@@ -245,7 +245,25 @@ its logs; for a group, start or stop everything in it, add to it, its rules and
 settings, clone or delete it. Long operations run in the background and can be
 cancelled; what they report is listed under the instance. Bots, accounts
 (logged in from the window: HeadlessMC's questions and your answers), servers,
-the global settings and rules, and doctor are in the toolbar.
+the global settings and rules, doctor and the launcher's own settings (its
+colour style, how often it looks at the instances) are in the toolbar.
+
+Instances and groups are dragged onto a group to move them there, or onto
+"In no group" to take them out; a leader or a guard takes its dependency group
+along. A dependency group is drawn as a small map: its leader on top, always
+shown, and its guards below, each joined to it by an arrow. A bot's picture is
+set by clicking its face in the side panel: from a file, or pasted from a
+copied image (handy when the window is shown from another machine, whose files
+the launcher cannot see). It lives in `bots/<bot>/icon.png`.
+
+**Showing it from another machine.** The window runs where the bots run. On a
+machine without a screen, it can be shown on a Linux desktop with
+[waypipe](https://gitlab.freedesktop.org/mstoeckl/waypipe) (Wayland) or
+`ssh -X` (X11), with waypipe installed on both ends:
+
+```bash
+waypipe -n ssh user@bots-machine /path/to/marionette/launcher/marionette.py gui
+```
 
 The rest of the subcommands: `status` (every instance: client, hands, in the
 server, bridge), `bots`, `servers`, `start` (the client only), `connect`
@@ -314,9 +332,10 @@ players and how; it goes at the start of its prompt.
 |---|---|---|
 | `account` | bot, instance | one of the launcher's accounts (`account add`), `offline` (private servers only), or `online` (a login kept in the instance) |
 | `owner` | all | the player the bot belongs to: it accepts their delicate orders, and they control it with `/marionette bot` on any server. It cannot be changed from inside the game |
-| `model` | all | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`) |
+| `model` | all | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`). The aliases `opus`, `sonnet`, `haiku` and `fable` always mean the newest of their family; `opus[1m]` and the like, a million tokens of context |
 | `heap` | all | the game's memory, e.g. `3g` (default `MARIONETTE_HEAP`, else `3g`) |
 | `role` | bot, instance, group | `main` (takes orders, does jobs) or `guard` (see [Groups](#groups)) |
+| `fast_responses` | all | `yes` (default): its brain writes ahead of time, in its voice and language, the few things it says without thinking; `no`: plain English |
 | `port` | instance | the local port of the bot mod, chosen by the launcher |
 | `lock` | instance, group | `yes`: the groups around it do not impose on it (the global config still does) |
 | `ignore_global` | instance, group | `yes`: the global config (settings and rules) leaves it alone |
@@ -325,14 +344,14 @@ The launcher writes what the bridge reads into the instance's folder on every
 start and every change, one small file per setting (`model`, `owner`...):
 those are an output, not a place to edit.
 
-**What it says without its brain.** A few sentences are said without asking
-the brain: the urgent ones of the body (a creeper next to the player it
-escorts, being cornered) and a few of the bridge's (shutting down, busy). They
-are plain English in the code. The first time its bridge starts, the brain
-writes its own version of each, in its voice and its language, into
+**What it says without its brain: its fast responses.** A few sentences are
+said without asking the brain: the urgent ones of the body (a creeper next to
+the player it escorts, being cornered) and a few of the bridge's (shutting
+down, busy). They are plain English in the code. With `fast_responses` on
+(the default), the first time its bridge starts the brain writes its own
+version of each, in its voice and its language, into
 `gamedir/config/marionette-phrases.properties`, and those are said from then
-on. They are written again only on request, after changing the personality
-for instance:
+on; they are written again when its personality changes, and on request:
 
 ```bash
 launcher/marionette.py phrases alice

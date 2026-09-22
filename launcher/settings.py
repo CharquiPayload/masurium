@@ -18,6 +18,7 @@ file per setting in the instance's folder, as they always read a bot's
 folder; `render` writes those files from the layers, on every start and
 every change, so they are an output, never edited by hand.
 """
+import json
 import re
 import shutil
 from dataclasses import dataclass
@@ -120,10 +121,15 @@ SETTINGS = {s.key: s for s in [
     Setting("port", "the local port of the bot mod: its hands", "", applies="start", layers=(INSTANCE,)),
     Setting("role", "main (takes orders, does jobs) or guard (follows and protects the leader of its "
             "dependency group)", "main", ("main", "guard"), applies="start", layers=(BOT, INSTANCE, GROUP)),
-    Setting("model", "its brain's model and effort", "opus medium",
-            ("opus medium", "sonnet", "sonnet low", "haiku low"), applies="bridge"),
+    Setting("model", "its brain's model and effort: an alias of Claude Code (opus, sonnet, haiku, fable, "
+            "each always the newest of its family; opus[1m] and the like for a million tokens of context) or "
+            "a model's full id, and optionally an effort", "opus medium",
+            ("opus medium", "opus high", "sonnet", "sonnet low", "haiku low", "fable"), applies="bridge"),
     Setting("owner", "the player it belongs to: their delicate orders, /marionette bot anywhere",
             _owner_default, applies="now"),
+    Setting("fast_responses", "its brain writes ahead of time, in its voice and language, the few things it "
+            "says without thinking (warning of a creeper, being cornered, shutting down); again when its "
+            "personality changes. No: those are said in plain English", "yes", ("no", "yes"), applies="bridge"),
     Setting("ignore_global", "yes: the global config (launcher.json: settings and rules) leaves it alone",
             "no", ("no", "yes"), applies="now", layers=(INSTANCE, GROUP)),
     Setting("lock", "yes: the groups around it do not impose on it (the global config still does)",
@@ -134,7 +140,7 @@ CHECKS = {"account": _check_account, "port": _check_port, "owner": _check_owner,
           "model": _check_model, "heap": _check_heap}
 # Case matters in names (a player, a bot as the game shows it); in codes and
 # sizes it does not.
-LOWERCASE = ("account", "heap", "ignore_global", "lock", "role")
+LOWERCASE = ("account", "heap", "ignore_global", "lock", "role", "fast_responses")
 # Settings there were once, and where what they said goes now.
 RETIRED = {
     "language": "the personality says which language the bot speaks (personality.txt)",
@@ -143,6 +149,38 @@ RETIRED = {
               "--leader <instance>, then group add <group> <guard>; marionette.py migrate turns an "
               "escort into one)",
 }
+
+
+# Claude Code's model aliases. Each one always means the newest model of its
+# family (the day a new Opus came out, `opus` was it), so a list of them does
+# not go stale. Claude Code has no command that lists the models an account
+# may use; what its settings allow (availableModels) is added when there is.
+MODEL_ALIASES = ("opus", "opus[1m]", "sonnet", "sonnet[1m]", "haiku", "fable", "fable[1m]")
+
+
+def claude_models(ws):
+    """The models to offer: the aliases, and the availableModels of this
+    machine's Claude Code settings, if it names any."""
+    out = list(MODEL_ALIASES)
+    try:
+        data = json.loads((ws.home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    for m in (data.get("availableModels") if isinstance(data, dict) else None) or []:
+        if isinstance(m, str) and m.strip() and m.strip() not in out:
+            out.append(m.strip())
+    return out
+
+
+def suggestions(target, key):
+    """What a menu offers for a setting: its choices, plus the accounts there
+    are, or the models Claude Code knows."""
+    out = list(setting(key).choices)
+    if key == "account":
+        out += target.ws.account_keys()
+    if key == "model":
+        out += [m for m in claude_models(target.ws) if m not in out]
+    return out
 
 
 def setting(key):
@@ -237,13 +275,14 @@ def group_chain(target):
     return []
 
 
-def resolve(target, key):
+def resolve(target, key, own_layer=True):
     """(the value that applies, the layer it comes from: "global",
     "group <name>", "instance", "bot" or "default"). For an instance the
     strongest first: the global config, its groups from the outermost in,
-    itself, its bot."""
+    itself, its bot. With `own_layer` False, what would apply if the
+    target's own layer said nothing: what a window offers as "not set here"."""
     s = setting(key)
-    own = layer_of(target)
+    own = layer_of(target) if own_layer else None
     if not s.inherited:
         if own in s.layers and _raw(target, key):
             return _raw(target, key), own
@@ -332,7 +371,7 @@ def problems(target):
 # value each, written only when a layer sets them: without the file they apply
 # the same defaults as the table above (MARIONETTE_OWNER for the owner). Plus
 # `escort`, the player of a guard's leader, from its dependency group.
-RENDERED = ("account", "model", "owner")
+RENDERED = ("account", "model", "owner", "fast_responses")
 # Files an older launcher rendered, removed wherever they are left.
 STALE = ("language", "gender")
 

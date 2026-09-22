@@ -110,7 +110,13 @@ setting ignored it without a word.
   bot, group or globally, new instances and groups, moving and cloning,
   the personality, logs that follow, doctor, and accounts logged in through
   HeadlessMC's own questions. Operations run in the background and can be
-  cancelled; it is tested drawn offscreen.
+  cancelled; it is tested drawn offscreen. Instances and groups move by
+  dragging them onto a group; a dependency group is drawn as its leader with
+  its guards hanging from it; a bot can have a picture; colour styles (dark
+  and light, lavender and classic) in the launcher's own settings.
+- `fast_responses`: whether a bot's brain writes its fast responses (what it
+  says without thinking) ahead of time; they are written again when its
+  personality changes. Off, they are said in plain English.
 - Each server can have its own `servers/<slug>/server.env` (address and token
   of its server mod, readable by its owner only). The launcher, the bridge and
   the MCP server then talk to the server each bot is on, not to the one the

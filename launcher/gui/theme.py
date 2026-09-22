@@ -1,110 +1,184 @@
-"""How the window looks: Qt's Fusion style, dark, with a lavender accent.
+"""How the window looks: Qt's Fusion style, with a colour preset on top.
 
 Fusion draws the same on every platform, which is the point: the window a
-person sees on Windows is the one that was looked at on Linux. Everything
-else is one stylesheet here and a few colours the code paints with.
+person sees on Windows is the one that was looked at on Linux. A preset is a
+handful of colours; the stylesheet and the palette are made from it, and
+switching presets restyles the open window at once (the launcher's settings).
 """
+import os
 import zlib
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPalette, QPixmap
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPalette, QPen, QPixmap
 
-ACCENT = "#7c62d6"
-ACCENT_LIGHT = "#a58cf0"
-TEXT = "#e6e1f0"
-MUTED = "#a79fbd"
-BASE = "#1e1b26"
-PANEL = "#262233"
-CARD = "#2a2638"
-BORDER = "#3a3450"
+PRESETS = {
+    "Lavender dark": dict(
+        base="#1e1b26", panel="#262233", card="#2a2638", dialog="#26222f", field="#231f2e",
+        border="#3a3450", strong_border="#3f3858", hover="#5a4d80", text="#e6e1f0", muted="#a79fbd",
+        faint="#6b6480", accent="#7c62d6", accent_light="#a58cf0", accent_hover="#8b72e0",
+        header="#b9a6e8", selected="#4a3f73", tile_selected="#352e4d", button="#2f2a40",
+        pressed="#3b3356", section="#221e2c", drop="#2d2742", separator="#332d45", switch_off="#4a4460"),
+    "Lavender light": dict(
+        base="#f4f1fa", panel="#ebe6f5", card="#ffffff", dialog="#f8f6fc", field="#ffffff",
+        border="#d8d0ea", strong_border="#cbc1e0", hover="#9f8bd6", text="#221d2e", muted="#6d6480",
+        faint="#a39bb5", accent="#7c62d6", accent_light="#6a50c8", accent_hover="#8b72e0",
+        header="#5b44b0", selected="#ddd3f5", tile_selected="#efe9fb", button="#f0ecf8",
+        pressed="#e2daf5", section="#faf8fd", drop="#e8e0fa", separator="#e6e0f0", switch_off="#c9c1dc"),
+    "Classic dark": dict(
+        base="#1f1f1f", panel="#292929", card="#2e2e2e", dialog="#262626", field="#242424",
+        border="#3d3d3d", strong_border="#474747", hover="#5a7ab5", text="#e6e6e6", muted="#a0a0a0",
+        faint="#6e6e6e", accent="#3d7eff", accent_light="#6aa0ff", accent_hover="#5590ff",
+        header="#8fb4ff", selected="#2f4f80", tile_selected="#2b3a52", button="#333333",
+        pressed="#3d3d3d", section="#242424", drop="#2a3448", separator="#363636", switch_off="#555555"),
+    "Classic light": dict(
+        base="#f3f3f3", panel="#e9e9e9", card="#ffffff", dialog="#f7f7f7", field="#ffffff",
+        border="#d0d0d0", strong_border="#c4c4c4", hover="#7aa5ec", text="#202020", muted="#6b6b6b",
+        faint="#a8a8a8", accent="#2f6fdb", accent_light="#2f6fdb", accent_hover="#4a84e6",
+        header="#2a5bb5", selected="#cfe0ff", tile_selected="#e8f0ff", button="#f5f5f5",
+        pressed="#e1e1e1", section="#fafafa", drop="#dde8fb", separator="#e4e4e4", switch_off="#c8c8c8"),
+}
+DEFAULT = "Lavender dark"
 
-# What a tile's dot says.
+# What a tile's dot says: the same in every preset.
 IN_SERVER = "#46b86a"
 BUSY = "#d9a82b"
-STOPPED = "#6b6480"
+STOPPED = "#8a8499"
 WRONG = "#d9624f"
 
 # An instance's colour comes from its bot's name, so a bot is the same colour
 # in every list and every instance of it.
 AVATARS = ("#8d6ad8", "#4f7fbf", "#3f9a93", "#b0668c", "#8a7f55", "#5f8f4f", "#c07a4a", "#6a6fc9")
 
-STYLESHEET = f"""
-QWidget {{ color: {TEXT}; }}
-QMainWindow, QDialog, QWidget#page {{ background: {BASE}; }}
-QToolBar {{ background: {PANEL}; border: none; border-bottom: 1px solid {BORDER}; padding: 4px; spacing: 4px; }}
+# The colours of the preset in use, for what the code paints itself.
+current = dict(PRESETS[DEFAULT], name=DEFAULT)
+
+
+def __getattr__(name):
+    """theme.ACCENT, theme.MUTED...: the preset in use, whichever it is now."""
+    key = name.lower()
+    if key in current:
+        return current[key]
+    raise AttributeError(name)
+
+
+def stylesheet(c):
+    return f"""
+QWidget {{ color: {c['text']}; }}
+QMainWindow, QWidget#page {{ background: {c['base']}; }}
+QDialog, QMessageBox {{ background: {c['dialog']}; }}
+QToolBar {{ background: {c['panel']}; border: none; border-bottom: 1px solid {c['border']}; padding: 4px;
+    spacing: 4px; }}
 QToolBar QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: 6px;
     padding: 6px 10px; }}
-QToolBar QToolButton:hover {{ border-color: #5a4d80; background: #2f2a40; }}
-QScrollArea {{ border: none; background: {BASE}; }}
-QToolButton#groupHeader {{ color: #b9a6e8; font-weight: bold; border: none; background: transparent;
+QToolBar QToolButton:hover {{ border-color: {c['hover']}; background: {c['button']}; }}
+QScrollArea {{ border: none; background: {c['base']}; }}
+QToolButton#groupHeader {{ color: {c['header']}; font-weight: bold; border: none; background: transparent;
     padding: 6px 4px 2px 2px; text-align: left; }}
-QToolButton#groupHeader[selected="true"] {{ color: white; }}
-QFrame#tile {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}
-QFrame#tile:hover {{ border-color: #5a4d80; }}
-QFrame#tile[selected="true"] {{ background: #352e4d; border: 2px solid {ACCENT_LIGHT}; }}
+QToolButton#groupHeader[selected="true"] {{ color: {c['accent_light']}; text-decoration: underline; }}
+QFrame#tile {{ background: {c['card']}; border: 1px solid {c['border']}; border-radius: 10px; }}
+QFrame#tile:hover {{ border-color: {c['hover']}; }}
+QFrame#tile[selected="true"] {{ background: {c['tile_selected']}; border: 2px solid {c['accent_light']}; }}
+QWidget#section {{ background: {c['section']}; border: 1px solid {c['strong_border']}; border-radius: 10px; }}
+QWidget#dependency {{ background: transparent; border: none; }}
+QWidget#section[drop="true"], QWidget#loose[drop="true"], QWidget#dependency[drop="true"] {{
+    background: {c['drop']}; border: 1px dashed {c['accent_light']}; border-radius: 10px; }}
+QToolButton#face {{ border: none; background: transparent; padding: 0; }}
 QLabel#tileName {{ font-weight: bold; }}
-QLabel#muted {{ color: {MUTED}; }}
+QLabel#muted {{ color: {c['muted']}; }}
 QLabel#title {{ font-weight: bold; font-size: 13pt; }}
-QFrame#side {{ background: {PANEL}; border-left: 1px solid {BORDER}; }}
-QPushButton {{ background: #2f2a40; border: 1px solid #3f3858; border-radius: 6px; padding: 6px 12px; }}
-QPushButton:hover {{ border-color: #6a5b96; }}
-QPushButton:pressed {{ background: #3b3356; }}
-QPushButton:disabled {{ color: #6b6480; border-color: #332d45; }}
+QFrame#side {{ background: {c['panel']}; border-left: 1px solid {c['border']}; }}
+QPushButton {{ background: {c['button']}; border: 1px solid {c['strong_border']}; border-radius: 6px;
+    padding: 6px 12px; }}
+QPushButton:hover {{ border-color: {c['hover']}; }}
+QPushButton:pressed {{ background: {c['pressed']}; }}
+QPushButton:disabled {{ color: {c['faint']}; border-color: {c['separator']}; }}
 QFrame#side QPushButton {{ text-align: left; padding: 7px 10px; }}
-QPushButton#primary {{ background: {ACCENT}; border: none; color: white; font-weight: bold; padding: 8px; }}
-QPushButton#primary:hover {{ background: #8b72e0; }}
-QPushButton#primary:disabled {{ background: #4a4163; color: #a79fbd; }}
-QPushButton#danger {{ background: #6e3340; border: none; color: white; }}
-QStatusBar {{ background: {PANEL}; color: {MUTED}; border-top: 1px solid {BORDER}; }}
-QTabWidget::pane {{ border: 1px solid {BORDER}; border-radius: 6px; background: #231f2e; }}
-QTabBar::tab {{ background: {CARD}; padding: 7px 16px; border-top-left-radius: 6px;
+QPushButton#primary {{ background: {c['accent']}; border: none; color: white; font-weight: bold; padding: 8px; }}
+QPushButton#primary:hover {{ background: {c['accent_hover']}; }}
+QPushButton#primary:disabled {{ background: {c['switch_off']}; color: {c['muted']}; }}
+QStatusBar {{ background: {c['panel']}; color: {c['muted']}; border-top: 1px solid {c['border']}; }}
+QTabWidget::pane {{ border: 1px solid {c['border']}; border-radius: 6px; background: {c['field']}; }}
+QTabBar::tab {{ background: {c['card']}; padding: 7px 16px; border-top-left-radius: 6px;
     border-top-right-radius: 6px; margin-right: 2px; }}
-QTabBar::tab:selected {{ background: #3b3356; color: white; }}
-QTableWidget, QListWidget, QPlainTextEdit, QTreeWidget {{ background: #231f2e; border: 1px solid {BORDER};
-    border-radius: 6px; gridline-color: {BORDER}; selection-background-color: #4a3f73; }}
-QHeaderView::section {{ background: {CARD}; border: none; padding: 5px; color: #b9a6e8; font-weight: bold; }}
-QLineEdit, QComboBox, QSpinBox {{ background: {CARD}; border: 1px solid #3f3858; border-radius: 5px;
-    padding: 5px; }}
-QLineEdit:focus, QComboBox:focus {{ border-color: {ACCENT_LIGHT}; }}
-QComboBox QAbstractItemView {{ background: {CARD}; selection-background-color: #4a3f73; }}
-QMenu {{ background: {CARD}; border: 1px solid {BORDER}; padding: 4px; }}
+QTabBar::tab:selected {{ background: {c['selected']}; }}
+QTableWidget, QListWidget, QPlainTextEdit, QTreeWidget {{ background: {c['field']}; border: 1px solid {c['border']};
+    border-radius: 6px; gridline-color: {c['border']}; selection-background-color: {c['selected']}; }}
+QListWidget::item {{ padding: 6px 4px; border-bottom: 1px solid {c['separator']}; }}
+QListWidget::item:selected {{ background: {c['selected']}; color: {c['text']}; }}
+QListWidget#recent::item {{ padding: 1px 2px; border: none; }}
+QHeaderView::section {{ background: {c['card']}; border: none; padding: 5px; color: {c['header']};
+    font-weight: bold; }}
+QLineEdit, QComboBox, QSpinBox {{ background: {c['card']}; border: 1px solid {c['strong_border']};
+    border-radius: 5px; padding: 5px; }}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {c['accent_light']}; }}
+QComboBox QAbstractItemView {{ background: {c['card']}; selection-background-color: {c['selected']}; }}
+QMenu {{ background: {c['card']}; border: 1px solid {c['border']}; padding: 4px; }}
 QMenu::item {{ padding: 5px 18px; border-radius: 4px; }}
-QMenu::item:selected {{ background: #4a3f73; }}
-QToolTip {{ background: {CARD}; color: {TEXT}; border: 1px solid {BORDER}; padding: 4px; }}
-QCheckBox::indicator {{ width: 15px; height: 15px; }}
+QMenu::item:selected {{ background: {c['selected']}; }}
+QToolTip {{ background: {c['card']}; color: {c['text']}; border: 1px solid {c['border']}; padding: 4px; }}
 """
 
 
-def apply(app):
-    """Fusion, the dark palette under it (for what the stylesheet does not
-    reach: scroll bars, check marks) and the stylesheet on top."""
+def apply(app, name=None):
+    """Fusion, a palette under it (for what the stylesheet does not reach:
+    scroll bars, check marks) and the stylesheet on top, all from one preset.
+    An unknown name is the default one. Returns the name applied."""
+    name = name if name in PRESETS else DEFAULT
+    current.clear()
+    current.update(PRESETS[name], name=name)
+    c = current
     app.setStyle("Fusion")
     p = QPalette()
-    for role, colour in ((QPalette.Window, BASE), (QPalette.WindowText, TEXT), (QPalette.Base, "#231f2e"),
-                         (QPalette.AlternateBase, CARD), (QPalette.Text, TEXT), (QPalette.Button, "#2f2a40"),
-                         (QPalette.ButtonText, TEXT), (QPalette.Highlight, ACCENT),
-                         (QPalette.HighlightedText, "#ffffff"), (QPalette.ToolTipBase, CARD),
-                         (QPalette.ToolTipText, TEXT), (QPalette.PlaceholderText, "#7d7494"),
-                         (QPalette.Link, ACCENT_LIGHT)):
+    for role, colour in ((QPalette.Window, c["base"]), (QPalette.WindowText, c["text"]),
+                         (QPalette.Base, c["field"]), (QPalette.AlternateBase, c["card"]),
+                         (QPalette.Text, c["text"]), (QPalette.Button, c["button"]),
+                         (QPalette.ButtonText, c["text"]), (QPalette.Highlight, c["accent"]),
+                         (QPalette.HighlightedText, "#ffffff"), (QPalette.ToolTipBase, c["card"]),
+                         (QPalette.ToolTipText, c["text"]), (QPalette.PlaceholderText, c["faint"]),
+                         (QPalette.Link, c["accent_light"])):
         p.setColor(role, QColor(colour))
-    p.setColor(QPalette.Disabled, QPalette.Text, QColor("#6b6480"))
-    p.setColor(QPalette.Disabled, QPalette.WindowText, QColor("#6b6480"))
-    p.setColor(QPalette.Disabled, QPalette.ButtonText, QColor("#6b6480"))
+    for role in (QPalette.Text, QPalette.WindowText, QPalette.ButtonText):
+        p.setColor(QPalette.Disabled, role, QColor(c["faint"]))
     app.setPalette(p)
-    app.setStyleSheet(STYLESHEET)
+    app.setStyleSheet(stylesheet(c))
+    return name
+
+
+def frame(widget, colour=None, width=2):
+    """An edge drawn around a window, inside it: dialogs open over the main
+    window with the same colours behind them, and without one it is hard to
+    tell where one ends and the other begins (a tiling compositor draws none)."""
+    p = QPainter(widget)
+    pen = QPen(QColor(colour or current["accent_light"]))
+    pen.setWidth(width)
+    p.setPen(pen)
+    half = width // 2
+    p.drawRect(widget.rect().adjusted(half, half, -half - 1 + width % 2, -half - 1 + width % 2))
+    p.end()
 
 
 def colour_of(name):
     return AVATARS[zlib.crc32((name or "?").lower().encode()) % len(AVATARS)]
 
 
-def avatar(name, size=44, colour=None):
-    """A rounded square with the name's first letter: what stands for a bot
-    until it has a face of its own."""
+def avatar(name, size=44, colour=None, image=None):
+    """A bot's face: its picture when it has one (bots/<bot>/icon.png),
+    cut to a rounded square; until then, a rounded square with its name's
+    first letter."""
     pm = QPixmap(size, size)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    picture = QPixmap(str(image)) if image and os.path.isfile(image) else QPixmap()
+    if not picture.isNull():
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(0, 0, size, size), size * 0.22, size * 0.22)
+        p.setClipPath(path)
+        scaled = picture.scaled(size, size, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        p.drawPixmap((size - scaled.width()) // 2, (size - scaled.height()) // 2, scaled)
+        p.end()
+        return pm
     p.setBrush(QColor(colour or colour_of(name)))
     p.setPen(Qt.NoPen)
     p.drawRoundedRect(0, 0, size, size, size * 0.22, size * 0.22)

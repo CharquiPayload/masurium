@@ -7,9 +7,9 @@ main window, whose events land in the window's activity list.
 """
 from PySide6.QtCore import QProcess, QProcessEnvironment, Qt, QTimer
 from PySide6.QtGui import QColor, QFontDatabase, QIcon
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                                QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMessageBox, QPlainTextEdit, QPushButton, QRadioButton, QTableWidget,
+                               QMessageBox, QPlainTextEdit, QPushButton, QRadioButton, QSpinBox, QTableWidget,
                                QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from .. import accounts, doctor, groups, operations, rules, settings
@@ -17,6 +17,35 @@ from ..bots import Instance
 from ..events import Fail
 from ..files import tail_lines
 from . import theme
+from .widgets import Switch, switch_row
+
+
+class Dialog(QDialog):
+    """Every dialog: a shade lighter than the main window, with a lavender
+    edge, so it stands out from what it opened over."""
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        theme.frame(self)
+
+
+class MessageBox(QMessageBox):
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        theme.frame(self)
+
+
+def close_row(dialog):
+    """A Close button: some window managers draw no title bar to close from."""
+    buttons = QDialogButtonBox(QDialogButtonBox.Close)
+    buttons.rejected.connect(dialog.reject)
+    return buttons
+
+
+def ask(parent, heading, text):
+    """A yes or no, framed like the rest."""
+    box = MessageBox(QMessageBox.Question, heading, text, QMessageBox.Yes | QMessageBox.No, parent)
+    return box.exec() == QMessageBox.Yes
 
 
 def muted(text):
@@ -38,7 +67,7 @@ def monospace():
 
 # --- rules ------------------------------------------------------------------------
 
-class RulesDialog(QDialog):
+class RulesDialog(Dialog):
     """A bot's rules as they come out, each thing with who decides it, and
     changes to one layer: an instance's own (kept on its server), or a bot's,
     a server's, a group's or the global ones (kept by the launcher). The
@@ -57,16 +86,19 @@ class RulesDialog(QDialog):
         v = QVBoxLayout(self)
         self.head = title(self._title())
         v.addWidget(self.head)
+        v.addWidget(muted("“Set by” says where each value comes from: default (what every bot starts with), "
+                          "the bot's config, this instance, or a group or the global config, which lock it."))
         self.note = muted("")
         v.addWidget(self.note)
         self.tabs = QTabWidget()
         self.toggles = QTableWidget(len(rules.TOGGLES), 3)
-        self.toggles.setHorizontalHeaderLabels(["toggle", "who decides", ""])
+        self.toggles.setHorizontalHeaderLabels(["", "set by", ""])
         self.toggles.verticalHeader().hide()
         self.toggles.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.toggles.setColumnWidth(0, 240)
         self.toggles.setColumnWidth(2, 110)
         self.toggles.setSelectionMode(QAbstractItemView.NoSelection)
+        self.toggles.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tabs.addTab(self.toggles, "Toggles")
         self.lists = {}
         for family, label in (("food", "Food"), ("break", "Blocks")):
@@ -111,11 +143,11 @@ class RulesDialog(QDialog):
             row.addWidget(b)
             buttons[verb] = b
         v.addLayout(row)
-        replace = QCheckBox("This list replaces what is under it (" + (
+        row, replace = switch_row("This list replaces what is under it (" + (
             "the golden apples every bot starts with, and the layers under this one)" if family == "food"
             else "the blocks every bot starts with, and the layers under this one)"))
         replace.toggled.connect(lambda checked, f=family: self._replace(f, checked))
-        v.addWidget(replace)
+        v.addWidget(row)
         lst.currentItemChanged.connect(
             lambda item, _prev, fld=field: fld.setText(item.data(Qt.UserRole)) if item else None)
         self.lists[family] = (lst, field, replace, buttons)
@@ -166,24 +198,29 @@ class RulesDialog(QDialog):
         self.apply_button.setEnabled(False)
 
     def _who(self, family, key):
+        """(the layer that decides it, and that said shortly: "default",
+        "bot config", "this instance", "group team · locked")."""
         layer, label = rules.source(self.base, self.own, self.imposed, family, key)
-        if self.kind != "instance" and layer == "own":
-            return layer, "set here"
-        return layer, rules.say_source(layer, label) or "what every bot starts with"
+        if layer == "imposed":
+            return layer, f"{label or 'the launcher'} · locked"
+        if layer == "own":
+            return layer, "this instance" if self.kind == "instance" else "set here"
+        return layer, "bot config" if layer == "base" else "default"
 
     def _draw(self):
         held = rules.effective(self.base, self.own, self.imposed)
         for r, key in enumerate(rules.TOGGLES):
             layer, who = self._who("prefs", key)
-            box = QCheckBox(key)
-            box.setChecked(held["prefs"][key])
+            row, box = switch_row(key, held["prefs"][key])
             box.setEnabled(layer != "imposed")
             box.toggled.connect(lambda checked, k=key: self._change(["pref", k, "on" if checked else "off"]))
-            self.toggles.setCellWidget(r, 0, box)
-            item = QTableWidgetItem(("locked · " if layer == "imposed" else "") + who)
+            self.toggles.setCellWidget(r, 0, row)
+            self.toggles.setRowHeight(r, 34)
+            item = QTableWidgetItem(who)
             item.setForeground(QColor(theme.BUSY if layer == "imposed" else theme.MUTED))
             self.toggles.setItem(r, 1, item)
-            reset = QPushButton("Default")
+            reset = QPushButton("Reset")
+            reset.setToolTip("Back to what applies without this layer")
             reset.setEnabled(key in self.own["prefs"] and layer != "imposed")
             reset.clicked.connect(lambda _=False, k=key: self._change(["pref", k, "default"]))
             self.toggles.setCellWidget(r, 2, reset)
@@ -270,7 +307,12 @@ class RulesDialog(QDialog):
 
 # --- settings -----------------------------------------------------------------------
 
-class SettingsDialog(QDialog):
+# What a yes-or-no setting's switch says next to it; the whole story is its tooltip.
+SWITCH_LABELS = {"ignore_global": "ignore the global config", "lock": "keep the groups around it out",
+                 "fast_responses": "Pregenerate fast responses"}
+
+
+class SettingsDialog(Dialog):
     """The settings of one layer: an instance's, a bot's, a group's or the
     global ones. Each row shows what applies now and where it comes from;
     what is changed here goes into this layer only."""
@@ -289,11 +331,12 @@ class SettingsDialog(QDialog):
                            "global": "Imposed on every instance that does not ignore it."}[self.layer]))
         keys = [k for k, s in settings.SETTINGS.items() if self.layer in s.layers]
         self.table = QTableWidget(len(keys), 3)
-        self.table.setHorizontalHeaderLabels(["setting", "value here", "what applies now"])
+        self.table.setHorizontalHeaderLabels(["setting", "here", "what applies now"])
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.setColumnWidth(0, 130)
-        self.table.setColumnWidth(1, 230)
+        self.table.setColumnWidth(1, 260)
         self.editors = {}
         own = settings.own_values(target)
         for r, key in enumerate(keys):
@@ -301,23 +344,39 @@ class SettingsDialog(QDialog):
             item = QTableWidgetItem(key)
             item.setToolTip(s.help)
             self.table.setItem(r, 0, item)
-            box = QComboBox()
-            box.setEditable(key not in ("role", "lock", "ignore_global"))
-            box.addItem("")                      # nothing set in this layer
-            choices = list(s.choices)
-            if key == "account":
-                choices += target.ws.account_keys()
-            box.addItems(choices)
-            current = own.get(key)
-            box.setCurrentText("" if current is None else str(current))
-            box.setToolTip(s.help)
-            self.table.setCellWidget(r, 1, box)
-            self.editors[key] = (box, "" if current is None else str(current))
+            current = "" if own.get(key) is None else str(own.get(key))
+            under, from_ = settings.resolve(target, key, own_layer=False)
+            if tuple(s.choices) == ("no", "yes"):
+                # Yes or no is a switch. Off where nothing above says yes is
+                # simply not set here.
+                row, editor = switch_row(SWITCH_LABELS.get(key, key), (current or under) == "yes")
+                row.setToolTip(s.help)
+                self.table.setCellWidget(r, 1, row)
+                self.table.setRowHeight(r, 34)
+            else:
+                editor = QComboBox()
+                editor.setEditable(key not in ("role", "account"))
+                # The first entry is what applies when this layer says nothing,
+                # shown as the value it is and where it comes from: never a
+                # blank box to guess at.
+                editor.addItem(f"{under or '(none)'}   ·   {from_}", None)
+                for c in settings.suggestions(target, key):
+                    editor.addItem(c, c)
+                if current:
+                    i = editor.findData(current)
+                    if i < 0:
+                        editor.addItem(current, current)
+                        i = editor.count() - 1
+                    editor.setCurrentIndex(i)
+                editor.setToolTip(s.help)
+                self.table.setCellWidget(r, 1, editor)
+            self.editors[key] = (editor, current, under)
             value, source = settings.resolve(target, key)
             self.table.setItem(r, 2, QTableWidgetItem(f"{value or '-'}   ({source})   · counts "
                                                       f"{settings.APPLIES[s.applies]}"))
         v.addWidget(self.table, 1)
-        v.addWidget(muted("Leave a value empty to take it out of this layer."))
+        v.addWidget(muted("The first choice of each list is what applies when this layer says nothing: choosing "
+                          "it takes the setting out of this layer."))
         buttons = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Apply).setObjectName("primary")
         buttons.button(QDialogButtonBox.Apply).clicked.connect(self._apply)
@@ -329,9 +388,24 @@ class SettingsDialog(QDialog):
         return {"instance": f"the instance {getattr(t, 'key', '')}", "bot": f"the bot {getattr(t, 'key', '')}",
                 "group": f"the group {getattr(t, 'key', '')}", "global": "everything (global)"}[self.layer]
 
+    def value_of(self, key):
+        """What the row says for this layer: a value, or "" for nothing here."""
+        editor, current, under = self.editors[key]
+        if isinstance(editor, Switch):
+            # Untouched, it says what it said; moved to what applies anyway
+            # without this layer, it says nothing here.
+            value = "yes" if editor.isChecked() else "no"
+            if value == current:
+                return current
+            return "" if value == (under or "no") else value
+        if editor.currentIndex() == 0 and editor.currentText() == editor.itemText(0):
+            return ""
+        data = editor.currentData()
+        return (data if data is not None and editor.currentText() == editor.itemText(editor.currentIndex())
+                else editor.currentText()).strip()
+
     def _apply(self):
-        changes = [(k, box.currentText().strip()) for k, (box, was) in self.editors.items()
-                   if box.currentText().strip() != was]
+        changes = [(k, self.value_of(k)) for k, (_, was, _) in self.editors.items() if self.value_of(k) != was]
         if not changes:
             self.reject()
             return
@@ -349,7 +423,7 @@ class SettingsDialog(QDialog):
 
 # --- creating --------------------------------------------------------------------------
 
-class NewInstanceDialog(QDialog):
+class NewInstanceDialog(Dialog):
     """A bot on a server: a new bot with its player name and account, or one
     that exists; the instance's name is the bot's unless one is given."""
 
@@ -378,8 +452,11 @@ class NewInstanceDialog(QDialog):
             self.server.addItem(f"{s.slug}  ·  {s.description or s.address}", s.slug)
         form.addRow("Server", self.server)
         self.key = QLineEdit()
-        self.key.setPlaceholderText("optional: the bot's name here, or <bot>-1 if taken")
+        self.key.setToolTip("Its name in the launcher: the bot's, or <bot>-1, -2… when that is taken")
+        self.key.textEdited.connect(lambda _: setattr(self, "key_edited", True))
+        self.key_edited = False
         form.addRow("Instance name", self.key)
+        self.name.textChanged.connect(self._suggest)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Create")
         buttons.button(QDialogButtonBox.Ok).setObjectName("primary")
@@ -393,6 +470,15 @@ class NewInstanceDialog(QDialog):
         self.account.setEnabled(new)
         if not new:
             self.name.setText(self.ws.bot(self.bot.currentData()).own_name)
+        self._suggest()
+
+    def _suggest(self):
+        """The instance's name, filled in as it would be chosen, until it is
+        edited by hand."""
+        if self.key_edited:
+            return
+        base = (self.bot.currentData() or self.name.text().strip()).lower()
+        self.key.setText(self.ws.free_key(base, self.ws.instance_keys()) if base else "")
 
     def _create(self):
         ws, bot_key = self.ws, self.bot.currentData()
@@ -410,14 +496,14 @@ class NewInstanceDialog(QDialog):
             self.accept()
 
 
-class NewGroupDialog(QDialog):
+class NewGroupDialog(Dialog):
     def __init__(self, win):
         super().__init__(win)
         self.win, self.ws = win, win.ws
         self.setWindowTitle("New group")
         form = QFormLayout(self)
-        self.key = QLineEdit()
-        self.key.setPlaceholderText("lowercase letters, digits, - and _")
+        self.key = QLineEdit(self.ws.free_key("group", self.ws.group_keys()))
+        self.key.setToolTip("lowercase letters, digits, - and _")
         form.addRow("Name", self.key)
         self.normal = QRadioButton("Normal: instances and groups, started and stopped together")
         self.normal.setChecked(True)
@@ -428,9 +514,10 @@ class NewGroupDialog(QDialog):
         for inst in self.ws.instances():
             if groups.parent_of(self.ws, inst) is None:
                 self.leader.addItem(f"{inst.key}  ·  {inst.name} on {inst.slug}", inst.key)
-        self.leader.setEnabled(False)
-        self.dependency.toggled.connect(self.leader.setEnabled)
         form.addRow("Leader", self.leader)
+        # The leader is only asked for a dependency group.
+        form.setRowVisible(self.leader, False)
+        self.dependency.toggled.connect(lambda on: (form.setRowVisible(self.leader, on), self.adjustSize()))
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Create")
         buttons.button(QDialogButtonBox.Ok).setObjectName("primary")
@@ -452,7 +539,7 @@ class NewGroupDialog(QDialog):
         self.accept()
 
 
-class MoveDialog(QDialog):
+class MoveDialog(Dialog):
     """Into another group, or into none. For a guard, its dependency group is
     what says whom it guards: this moves an instance between normal groups,
     or a group into another."""
@@ -495,7 +582,7 @@ class MoveDialog(QDialog):
         self.accept()
 
 
-class AddToGroupDialog(QDialog):
+class AddToGroupDialog(Dialog):
     """What to put into a group: instances and groups in none (and, for a
     dependency group, instances on its leader's server)."""
 
@@ -544,7 +631,7 @@ class AddToGroupDialog(QDialog):
         self.accept()
 
 
-class CloneDialog(QDialog):
+class CloneDialog(Dialog):
     def __init__(self, win, inst):
         super().__init__(win)
         self.win, self.ws, self.inst = win, win.ws, inst
@@ -557,8 +644,7 @@ class CloneDialog(QDialog):
             self.server.addItem(s.slug, s.slug)
         self.server.setCurrentText(inst.slug)
         form.addRow("On the server", self.server)
-        self.key = QLineEdit()
-        self.key.setPlaceholderText(f"optional: {inst.key}-1, -2… if not given")
+        self.key = QLineEdit(self.ws.free_key(inst.key, self.ws.instance_keys()))
         form.addRow("Its name", self.key)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Clone")
@@ -577,7 +663,7 @@ class CloneDialog(QDialog):
 
 # --- the bot itself ---------------------------------------------------------------------
 
-class PersonalityDialog(QDialog):
+class PersonalityDialog(Dialog):
     """Who the bot is, in second person, the language it speaks included: the
     start of its prompt. Saving can also have it write again, in its new
     voice, what it says without its brain."""
@@ -597,8 +683,8 @@ class PersonalityDialog(QDialog):
         except OSError:
             pass
         v.addWidget(self.text, 1)
-        self.rewrite = QCheckBox("and have it write again what it says without its brain, in this voice")
-        v.addWidget(self.rewrite)
+        v.addWidget(muted("If its fast responses are pregenerated (a setting), they are written again in this "
+                          "voice the next time its bridge starts."))
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Save).setObjectName("primary")
         buttons.accepted.connect(self._save)
@@ -609,13 +695,11 @@ class PersonalityDialog(QDialog):
         self.bot.personality.write_text(self.text.toPlainText().rstrip() + "\n", encoding="utf-8")
         for inst in self.bot.instances():
             settings.render(inst)
-            if self.rewrite.isChecked():
-                operations.rewrite_phrases(inst, on_event=self.win.say)
         self.win.say_text(f"personality of {self.bot.key} saved")
         self.accept()
 
 
-class LogDialog(QDialog):
+class LogDialog(Dialog):
     """An instance's logs, followed as they grow."""
 
     def __init__(self, win, inst):
@@ -634,6 +718,7 @@ class LogDialog(QDialog):
             self.tabs.addTab(view, name)
             self.views.append((view, path))
         v.addWidget(self.tabs, 1)
+        v.addWidget(close_row(self))
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._read)
         self.timer.start(2000)
@@ -652,7 +737,7 @@ class LogDialog(QDialog):
 
 # --- the rest of the launcher -------------------------------------------------------------
 
-class DoctorDialog(QDialog):
+class DoctorDialog(Dialog):
     """doctor's checks, in the order things break."""
 
     def __init__(self, win):
@@ -666,9 +751,13 @@ class DoctorDialog(QDialog):
         v.addWidget(self.summary)
         self.list = QListWidget()
         v.addWidget(self.list, 1)
+        row = QHBoxLayout()
         again = QPushButton("Check again")
         again.clicked.connect(self._run)
-        v.addWidget(again, 0, Qt.AlignRight)
+        row.addWidget(again)
+        row.addStretch()
+        row.addWidget(close_row(self))
+        v.addLayout(row)
         self._run()
 
     def _run(self):
@@ -689,7 +778,7 @@ class DoctorDialog(QDialog):
         self.summary.setText("Everything checks out." if not bad else f"{bad} problem(s).")
 
 
-class ConsoleDialog(QDialog):
+class ConsoleDialog(Dialog):
     """A program that asks things, HeadlessMC logging an account in: what it
     says, and a line to answer it. `finished(code)` is called when it ends."""
 
@@ -747,7 +836,7 @@ class ConsoleDialog(QDialog):
         super().reject()
 
 
-class AccountsDialog(QDialog):
+class AccountsDialog(Dialog):
     """Minecraft accounts, each logged in once and used by the bots set to
     it."""
 
@@ -771,6 +860,7 @@ class AccountsDialog(QDialog):
         remove.clicked.connect(self._remove)
         row.addWidget(remove)
         row.addStretch()
+        row.addWidget(close_row(self))
         v.addLayout(row)
         self._fill()
 
@@ -812,7 +902,7 @@ class AccountsDialog(QDialog):
         key = item.data(Qt.UserRole) if item else None
         if not key:
             return
-        if QMessageBox.question(self, "Remove", f"Remove the account {key}, and its login?") != QMessageBox.Yes:
+        if not ask(self, "Remove", f"Remove the account {key}, and its login?"):
             return
         try:
             operations.remove_account(self.ws, key, on_event=self.win.say)
@@ -821,7 +911,7 @@ class AccountsDialog(QDialog):
         self._fill()
 
 
-class ServersDialog(QDialog):
+class ServersDialog(Dialog):
     def __init__(self, win):
         super().__init__(win)
         self.win, self.ws = win, win.ws
@@ -837,6 +927,8 @@ class ServersDialog(QDialog):
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        # What a server is comes from its folder: shown here, changed there.
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         for r, s in enumerate(servers):
             for c, text in enumerate((s.slug, s.address, str(s.mod_count()), s.description)):
                 self.table.setItem(r, c, QTableWidgetItem(text))
@@ -846,6 +938,7 @@ class ServersDialog(QDialog):
         b.clicked.connect(self._rules)
         row.addWidget(b)
         row.addStretch()
+        row.addWidget(close_row(self))
         v.addLayout(row)
 
     def _rules(self):
@@ -854,7 +947,7 @@ class ServersDialog(QDialog):
             RulesDialog(self.win, "server", self.table.item(r, 0).text()).exec()
 
 
-class BotsDialog(QDialog):
+class BotsDialog(Dialog):
     def __init__(self, win):
         super().__init__(win)
         self.win, self.ws = win, win.ws
@@ -873,14 +966,19 @@ class BotsDialog(QDialog):
             b.clicked.connect(fn)
             row.addWidget(b)
         row.addStretch()
+        row.addWidget(close_row(self))
         v.addLayout(row)
         self._fill()
 
     def _fill(self):
         self.list.clear()
         for b in self.ws.bots():
-            it = QListWidgetItem(theme_icon(b.key), f"{b.key}  ·  plays as {b.name}  ·  "
-                                 f"{', '.join(i.key for i in b.instances()) or 'no instances'}")
+            insts = [i.key for i in b.instances()]
+            # Its player name first; the bot's folder name only when it says something else.
+            text = b.name + (f"   (bot {b.key})" if b.key != b.name.lower() else "")
+            text += "   ·   " + (f"{len(insts)} instance(s): {', '.join(insts)}" if insts else "no instances")
+            icon = b.dir / "icon.png"
+            it = QListWidgetItem(QIcon(theme.avatar(b.key, 24, image=icon if icon.is_file() else None)), text)
             it.setData(Qt.UserRole, b.key)
             self.list.addItem(it)
 
@@ -910,6 +1008,46 @@ class BotsDialog(QDialog):
             self._fill()
 
 
-def theme_icon(name):
-    return QIcon(theme.avatar(name, 24))
 
+
+class LauncherSettingsDialog(Dialog):
+    """The launcher's own settings, apart from any bot's: how it looks and
+    how often it looks at the instances. Kept for this person on this machine
+    (Qt's settings), and applied as they are changed."""
+
+    def __init__(self, win):
+        super().__init__(win)
+        self.win = win
+        self.setWindowTitle("Launcher settings")
+        form = QFormLayout(self)
+        form.addRow(title("Launcher settings"))
+        self.preset = QComboBox()
+        self.preset.addItems(list(theme.PRESETS))
+        self.preset.setCurrentText(theme.current["name"])
+        self.preset.currentTextChanged.connect(self._preview)
+        form.addRow("Style", self.preset)
+        self.every = QSpinBox()
+        self.every.setRange(1, 60)
+        self.every.setSuffix(" s")
+        self.every.setValue(win.refresh_seconds())
+        self.every.setToolTip("How often the window asks how every instance is doing")
+        form.addRow("Look at the instances every", self.every)
+        self.was = theme.current["name"]
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Save).setObjectName("primary")
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def _preview(self, name):
+        self.win.set_style(name, keep=False)
+
+    def _save(self):
+        self.win.set_style(self.preset.currentText(), keep=True)
+        self.win.set_refresh_seconds(self.every.value())
+        self.accept()
+
+    def reject(self):
+        if theme.current["name"] != self.was:
+            self.win.set_style(self.was, keep=False)
+        super().reject()

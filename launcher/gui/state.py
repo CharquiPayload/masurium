@@ -27,6 +27,7 @@ class InstanceView:
     leader: str        # the player it guards, when a guard
     model: str
     group: object      # the key of the group it is in, or None
+    icon: str = ""     # its bot's picture, when it has one
 
     @property
     def state(self):
@@ -76,10 +77,12 @@ def read(ws):
             role = settings.get(inst, "role")
         except Fail:
             model, role = "?", "?"
+        icon = inst.bot.dir / "icon.png"
         views[s.key] = InstanceView(key=s.key, name=s.name, bot=inst.data.get("bot", ""), server=s.server,
                                     port=s.port, client=s.client, hands=s.hands, inside=s.inside,
                                     bridge=s.bridge, role=role, leader=s.guard_of, model=model,
-                                    group=parent.key if parent else None)
+                                    group=parent.key if parent else None,
+                                    icon=f"{icon}:{icon.stat().st_mtime_ns}" if icon.is_file() else "")
     gviews = {}
     for g in ws.groups():
         parent = groups.parent_of(ws, g)

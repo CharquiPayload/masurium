@@ -21,7 +21,9 @@ an instance is one chain, from its group outwards, and never two groups that
 could disagree. A guard has one leader for the same reason: two would give it
 orders at once.
 """
-from .bots import check_key, read_json, write_json
+import re
+
+from .bots import read_json, write_json
 from .events import Fail
 
 NORMAL, DEPENDENCY = "normal", "dependency"
@@ -271,5 +273,13 @@ def problems(ws):
     return out
 
 
+GROUP_KEY = re.compile(r"^[a-z0-9_][a-z0-9_ -]{0,39}$")
+
+
 def check_group_key(key):
-    check_key(key, "group")
+    """A group's name, which is its folder: lowercase letters, digits, spaces,
+    underscore and dash. Spaces are fine here: a group is no player, and the
+    game never sees its name."""
+    if not GROUP_KEY.match(key or "") or key != key.strip() or "  " in key:
+        raise Fail(f"'{key}' is not a valid group name: lowercase letters, digits, spaces, underscore and dash, "
+                   "up to 40, not starting or ending with a space.", code="bad_name")

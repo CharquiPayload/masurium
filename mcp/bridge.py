@@ -22,6 +22,7 @@ try:
 except ImportError:                   # Windows
     fcntl = None
     import msvcrt
+import hashlib
 import json
 import os
 import pathlib
@@ -373,11 +374,36 @@ def ask_phrases(catalog):
     return json_in(r.stdout) or {}
 
 
+def fast_responses():
+    """Whether its brain writes its fast responses ahead of time (the
+    launcher's `fast_responses`, yes unless it says no). Without them, those
+    sentences are said in plain English."""
+    return (_bot_config(NAME, "fast_responses") or "yes").strip().lower() != "no"
+
+
+def phrases_fingerprint(catalog):
+    """What the versions were written for: its personality and the sentences
+    asked. Either changes, and they are written again at the next start."""
+    return hashlib.sha1((personality() + json.dumps(catalog, sort_keys=True)).encode()).hexdigest()[:12]
+
+
+def written_for(path):
+    try:
+        for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines()[:5]:
+            if line.startswith("# fingerprint: "):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+
 def write_phrases(force=False, ask=None):
-    """The brain's versions of every sentence said without it, written once:
-    when there is no file yet, or when `force` (the launcher's `phrases`).
-    What it wrote wrong is left out, and said in English. Returns how many
-    were written, or None when nothing was done."""
+    """The brain's versions of every sentence said without it, its fast
+    responses: written when there are none yet, when its personality (or
+    the sentences) changed since they were, or when `force` (the launcher's
+    `phrases`). With fast responses off, there are none: plain English. What
+    it wrote wrong is left out, and said in English. Returns how many were
+    written, or None when nothing was done."""
     try:
         info = request_bot("/phrases")
     except Exception as e:
@@ -389,14 +415,24 @@ def write_phrases(force=False, ask=None):
     if not path:
         return None
     OWN_PHRASES["file"] = path
-    if pathlib.Path(path).exists() and not force:
+    if not fast_responses():
+        if pathlib.Path(path).exists():
+            pathlib.Path(path).unlink()
+            OWN_PHRASES["stamp"] = None
+            log("phrases: fast responses are off; its sentences are said in plain English")
         return None
+    fingerprint = phrases_fingerprint(catalog)
+    if pathlib.Path(path).exists() and not force:
+        if written_for(path) == fingerprint:
+            return None
+        log("phrases: its personality changed since they were written; writing them again")
     answer = (ask or ask_phrases)(catalog)
     good = {k: " ".join(str(v).split()) for k, v in answer.items()
             if k in catalog and acceptable(catalog[k], " ".join(str(v).split()))}
     left = sorted(set(catalog) - set(good))
     lines = ["# What " + NAME + " says without asking its brain, written by its brain.",
-             "# Rewritten only on request: marionette.py phrases <instance>."]
+             f"# fingerprint: {fingerprint}",
+             "# Written again when its personality changes, or on request: marionette.py phrases <instance>."]
     lines += [f"{k}={v.replace(chr(92), chr(92) * 2)}" for k, v in sorted(good.items())]
     target = pathlib.Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

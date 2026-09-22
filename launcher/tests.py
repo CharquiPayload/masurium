@@ -1167,6 +1167,10 @@ def tests_groups():
           and fails(ops.group_add, WS, "team", ["group:outer"]).code in ("in_a_group", "cycle"))
     check("a guard plays where its leader does",
           fails(ops.group_add, WS, "alice-guards", ["eve"]).code == "leader_elsewhere")
+    check("a group's name may have spaces, tidied, and goes in lowercase",
+          fails(ops.create_group, WS, " Night   Shift ") is None and WS.group("night shift").exists()
+          and fails(ops.create_group, WS, "a/b") is not None)
+    said(ops.delete_group, WS, "night shift")
     check("a name that is an instance and a group has to say which",
           fails(ops.create_group, WS, "dave") is None and fails(ops.group_add, WS, "team", ["dave"]).code == "ambiguous")
     said(ops.delete_group, WS, "dave")
@@ -1375,6 +1379,15 @@ def tests_settings():
     settings.set_value(bot, "account", "offline")
     check("a model keeps its two words", settings.set_value(bot, "model", "haiku   low") == "haiku low")
     check("a role goes in lowercase", settings.set_value(alice, "role", "GUARD") == "guard")
+    claude_dir = WS.home / ".claude"
+    claude_dir.mkdir(exist_ok=True)
+    (claude_dir / "settings.json").write_text(json.dumps({"availableModels": ["claude-opus-5-5", "opus"]}))
+    offered = settings.suggestions(alice, "model")
+    check("the models offered: Claude Code's aliases, always the newest, and what its settings allow",
+          "opus[1m]" in offered and "fable" in offered and "claude-opus-5-5" in offered
+          and offered.count("opus") == 1, offered)
+    (claude_dir / "settings.json").unlink()
+    check("an alias with its million tokens is a valid model", settings.problem(bot, "model", "opus[1m] high") is None)
     settings.clear(alice, "role")
     settings.clear(bot, "model")
     check("the port cannot be cleared: every instance needs one",

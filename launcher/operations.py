@@ -915,7 +915,7 @@ def create_group(ws, key, leader=None, on_event=None):
     """A group: a normal one, or, with a leader, a dependency one (a leader
     and its guards)."""
     report = report_to(on_event)
-    key = key.lower()
+    key = " ".join(key.split()).lower()
     groups.check_group_key(key)
     group = ws.group(key)
     if group.dir.exists():
