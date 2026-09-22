@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from .api import UNREACHABLE
 from .bots import check_name, operating
 from .diagnosis import complaints, crash_report, explain_crash
-from .events import Fail, report_to, wait_for
+from .events import Cancelled, Fail, pause, report_to, wait_for
 from .files import LogWatch, link_or_copy, log_has, read_pid, tail_lines, unlink_quietly
 from .keeper import (HMC_READY, KEEPER_ENDED, KEEPER_FAILED, GAME_OVER, clear_run_files,
                      keeper_alive, keeper_ask, keeper_pid, launcher_pid)
@@ -148,7 +148,7 @@ def prepare_gamedir(bot, server):
     return n
 
 
-def join(bot, server, api, report, attempts, patience=18):
+def join(bot, server, api, report, attempts, patience=18, cancel=None):
     """Send `connect` and wait for the server to list the bot. Each attempt
     waits `patience` x 10 s."""
     report.step(f"connecting to {server.slug} ({server.address})", stage="joining")
@@ -158,7 +158,7 @@ def join(bot, server, api, report, attempts, patience=18):
             report.detail(f"the keeper did not take the command ({answer}); is the client alive?")
             return False
         for i in range(1, patience + 1):
-            time.sleep(10)
+            pause(10, cancel)
             if api.is_inside(bot.name):
                 report.step(f"{bot.name} is IN (attempt {attempt}, {i * 10}s)", stage="in")
                 return True
@@ -166,15 +166,30 @@ def join(bot, server, api, report, attempts, patience=18):
     return False
 
 
-def start(bot, switch_to=None, on_event=None):
+def start(bot, switch_to=None, on_event=None, cancel=None):
     """Start a bot's client and put it on its server (or on `switch_to`,
-    which rebuilds its mods). Returns JOINED, or ALREADY_IN when it was."""
+    which rebuilds its mods). Returns JOINED, or ALREADY_IN when it was.
+
+    With `cancel` set halfway, it stops what it started (the client it
+    launched is stopped, not left loading with nobody waiting for it) and
+    raises Cancelled."""
     bot.require()
     with operating(bot):
-        return _start(bot, switch_to, report_to(on_event))
+        return _start(bot, switch_to, report_to(on_event), cancel)
 
 
-def _start(bot, switch_to, report):
+def _start(bot, switch_to, report, cancel=None):
+    launched = []
+    try:
+        return _start_steps(bot, switch_to, report, cancel, launched)
+    except Cancelled:
+        if launched:
+            report.step("cancelled: stopping the client it had started", stage="cancelling")
+            _stop_client(bot, report)
+        raise
+
+
+def _start_steps(bot, switch_to, report, cancel, launched):
     ws = bot.ws
     slug = switch_to or bot.read("server")
     if not slug:
@@ -208,7 +223,7 @@ def _start(bot, switch_to, report):
             # A keeper around a game that already died: not a running bot.
             report.step("a keeper was left holding a game that had exited; stopping it first")
             keeper_ask(bot, "@stop")
-            wait_for(lambda: keeper_pid(bot) is None, 30, every=0.5)
+            wait_for(lambda: keeper_pid(bot) is None, 30, every=0.5, cancel=cancel)
         else:
             raise Fail(f"{bot.name} is already running (keeper pid {read_pid(bot.keeper_pid_f)}, "
                        f"game pid {answer[3:]}) but not in the server.",
@@ -221,6 +236,8 @@ def _start(bot, switch_to, report):
                    lines=[f"marionette.py stop {bot.name} takes it down, or give this bot another port."],
                    code="port_taken")
     clear_run_files(bot)
+    if cancel:
+        cancel.check()
 
     report.step(f"preparing the mods of {slug}", stage="preparing")
     report.detail(f"{prepare_gamedir(bot, server)} mods")
@@ -239,8 +256,11 @@ def _start(bot, switch_to, report):
     # Fresh logs: the signs waited for below ("initialized", "game exited")
     # must be this start's and not the last one's.
     unlink_quietly(bot.client_log, bot.keeper_log)
+    if cancel:
+        cancel.check()
     spawn_free([sys.executable, str(ENTRY), "keeper", bot.name, slug],
                bot.keeper_log, cwd=ws.home, env=ws.child_env())
+    launched.append(True)
 
     report.step("loading the game", stage="loading")
     # The right signal is NOT that the process exists: it is that the mod has
@@ -260,7 +280,7 @@ def _start(bot, switch_to, report):
             return time.monotonic() - spawned > 20
         return keeper_pid(bot) is None
 
-    wait_for(ready_or_dead, 300, every=2)
+    wait_for(ready_or_dead, 300, every=2, cancel=cancel)
     if ended.saw(KEEPER_FAILED) or (not ready.saw(HMC_READY) and not ended.saw(KEEPER_ENDED)
                                     and keeper_pid(bot) is None):
         raise Fail(f"the keeper of {bot.name} did not get the game going:",
@@ -280,11 +300,11 @@ def _start(bot, switch_to, report):
     # its port, `connect` works anyway and the failure only shows much later,
     # when an order does nothing. Better to know here.
     report.step("waiting for the bot mod's port", stage="hands")
-    if not wait_for(lambda: port_in_use(bot.port), 20, every=2):
+    if not wait_for(lambda: port_in_use(bot.port), 20, every=2, cancel=cancel):
         # A mod that refused to construct (a missing add-on, say) shows up
         # here first: the game goes on loading without it, and crashes a
         # little later with the reason in its report.
-        wait_for(lambda: crash_report(bot) is not None, 15, every=3)
+        wait_for(lambda: crash_report(bot) is not None, 15, every=3, cancel=cancel)
         crash = explain_crash(bot)
         raise Fail(f"the bot mod did not open port {bot.port}. It would join without hands.",
                    lines=crash[1] if crash else tail_lines(
@@ -312,12 +332,12 @@ def _start(bot, switch_to, report):
             # the first connect used to hit.
             return bool(v.get("screen")) and not v.get("loading") and not v.get("in_world")
 
-        if wait_for(loaded, 180, every=3):
+        if wait_for(loaded, 180, every=3, cancel=cancel):
             report.detail(f"at {readiness().get('screen')}")
         else:
             report.detail(f"(still loading after 3 minutes, on {readiness().get('screen')!r}; trying anyway)")
 
-    if join(bot, server, api, report, attempts=3):
+    if join(bot, server, api, report, attempts=3, cancel=cancel):
         report.detail(api.players_text())
         return JOINED
     n = len(list((bot.gamedir / "mods").glob("*.jar")))
@@ -327,7 +347,7 @@ def _start(bot, switch_to, report):
                code="not_joined")
 
 
-def connect(bot, on_event=None):
+def connect(bot, on_event=None, cancel=None):
     """Puts back on the server a bot whose client is ALIVE at the title screen
     (after /marionette bot <bot> logoff, or a failed connect). It starts
     nothing, and on purpose it does NOT switch servers: switching servers
@@ -346,7 +366,9 @@ def connect(bot, on_event=None):
         if api.is_inside(bot.name):
             report.step(f"{bot.name} is already in. Nothing to do.", stage="in")
             return ALREADY_IN
-        if join(bot, server, api, report, attempts=3, patience=12):
+        # Cancelled, it only stops trying: the client was running before and
+        # it still is.
+        if join(bot, server, api, report, attempts=3, patience=12, cancel=cancel):
             return JOINED
     raise Fail("it did NOT join.",
                lines=[f"If the client is hung:  marionette.py restart {bot.name}"], code="not_joined")
@@ -398,6 +420,34 @@ def start_bridge(bot, on_event=None):
 
 # --- stop and restart ---------------------------------------------------------
 
+def _stop_client(bot, report):
+    """The client alone: the keeper, the HeadlessMC under it and the game."""
+    keeper = keeper_pid(bot)
+    launcher = launcher_pid(bot)
+    answer = keeper_ask(bot, "@stop")
+    if answer == "stopping":
+        # The keeper gives the game 25 s to shut down on its own before it
+        # kills it, then leaves; a little more than that here.
+        if wait_for(lambda: not is_ours(keeper, "keeper") and not port_in_use(bot.port),
+                    45, every=0.5):
+            report.detail("client: stopped")
+        else:
+            report.detail("client: the keeper did not leave nicely; insisting")
+            stop_game(bot.port, launcher)
+            if keeper_pid(bot):
+                terminate(keeper)
+    elif launcher or keeper or game_pids(bot.port):
+        # No keeper answering, but something of the client is there: a keeper
+        # that died, or a game started some other way on this bot's port.
+        stop_game(bot.port, launcher)
+        if keeper:
+            terminate(keeper)
+        report.detail("client: stopped (the keeper was not answering)")
+    else:
+        report.detail("client: nothing was running")
+    clear_run_files(bot)
+
+
 def stop(bot, keep_guards=False, on_event=None, _stopped=None):
     """Stops a bot: the client (through its keeper) and its bridge. Processes
     are found by what identifies THAT bot and no other: its own pid files,
@@ -410,30 +460,7 @@ def stop(bot, keep_guards=False, on_event=None, _stopped=None):
     stopped.add(bot.key)
     with operating(bot):
         report.step(f"stopping {bot.name} (port {bot.port})", stage="stopping")
-        keeper = keeper_pid(bot)
-        launcher = launcher_pid(bot)
-        answer = keeper_ask(bot, "@stop")
-        if answer == "stopping":
-            # The keeper gives the game 25 s to shut down on its own before it
-            # kills it, then leaves; a little more than that here.
-            if wait_for(lambda: not is_ours(keeper, "keeper") and not port_in_use(bot.port),
-                        45, every=0.5):
-                report.detail("client: stopped")
-            else:
-                report.detail("client: the keeper did not leave nicely; insisting")
-                stop_game(bot.port, launcher)
-                if keeper_pid(bot):
-                    terminate(keeper)
-        elif launcher or keeper or game_pids(bot.port):
-            # No keeper answering, but something of the client is there: a keeper
-            # that died, or a game started some other way on this bot's port.
-            stop_game(bot.port, launcher)
-            if keeper:
-                terminate(keeper)
-            report.detail("client: stopped (the keeper was not answering)")
-        else:
-            report.detail("client: nothing was running")
-        clear_run_files(bot)
+        _stop_client(bot, report)
 
         pid = bridge_pid(bot)
         if pid:
@@ -459,7 +486,7 @@ def stop(bot, keep_guards=False, on_event=None, _stopped=None):
                 report.warning(str(e), e.lines)
 
 
-def restart(bot, switch_to=None, on_event=None):
+def restart(bot, switch_to=None, on_event=None, cancel=None):
     """Restarts a WHOLE bot: client and bridge. It exists because of an easy
     mistake: after deploying a new mod both processes get killed, but only
     the client gets started again. The bot stays in the game, visible in
@@ -469,7 +496,9 @@ def restart(bot, switch_to=None, on_event=None):
     with operating(bot):
         stop(bot, keep_guards=True, on_event=report)
         try:
-            _start(bot, switch_to, report)
+            _start(bot, switch_to, report, cancel)
+        except Cancelled:
+            raise
         except Fail as e:
             raise Fail(str(e), lines=e.lines + ("the client did not join: the bridge was NOT started.",),
                        code=e.code)

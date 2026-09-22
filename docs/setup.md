@@ -199,6 +199,10 @@ bridge), `start` (the client only), `connect` (rejoin after a log off), `bridge`
 the guards), `servers` and `deploy-mod`. `start` and `restart` take a server
 slug to move the bot to another server, rebuilding its mods.
 
+Ctrl+C during `start`, `restart` or `connect` cancels: the launcher stops the
+client it had started instead of leaving a game loading in the background, and
+exits with 130. A second Ctrl+C leaves at once.
+
 A running bot leaves its tracks in `bots/<name>/run/`: `client.log` (the game),
 `bridge.log` (the brain's side), `keeper.log`, and the pid files. The
 **keeper** is a small process per bot, started by `start`, that holds the

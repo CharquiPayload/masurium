@@ -4,10 +4,11 @@ differently."""
 import argparse
 import os
 import subprocess
+import threading
 
 from . import doctor, operations
 from .bots import operating
-from .events import Fail
+from .events import Cancel, Cancelled, Fail
 from .keeper import keeper_main
 from .processes import detached
 from .workspace import Workspace
@@ -28,6 +29,40 @@ def print_fail(e):
     say(str(e))
     for line in e.lines:
         say("    " + line)
+
+
+def cancellable(run):
+    """run(cancel) with Ctrl+C turned into a cancel: the first one asks the
+    operation to stop, and it stops what it had started (a game left loading
+    with nobody waiting for it is what a bare Ctrl+C used to leave, since the
+    keeper lives in a session of its own). The second one leaves at once.
+
+    The operation runs on a thread and this one waits, which is also how a
+    window will run it: the Ctrl+C lands here, in plain code, and not inside
+    whatever the operation was doing."""
+    cancel = Cancel()
+    outcome = {}
+
+    def work():
+        try:
+            outcome["value"] = run(cancel)
+        except BaseException as e:          # handed to the waiting thread as it came
+            outcome["error"] = e
+
+    worker = threading.Thread(target=work, name="operation", daemon=True)
+    worker.start()
+    while worker.is_alive():
+        try:
+            worker.join(0.2)
+        except KeyboardInterrupt:
+            if cancel.is_set():
+                raise
+            say()
+            say("==> cancelling: stopping what it started (Ctrl+C again to leave at once)")
+            cancel.set()
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome.get("value")
 
 
 # --- commands -----------------------------------------------------------------
@@ -67,11 +102,13 @@ def cmd_login(ws, args):
 
 
 def cmd_start(ws, args):
-    operations.start(ws.bot(args.name), args.server, print_event)
+    bot = ws.bot(args.name)
+    cancellable(lambda cancel: operations.start(bot, args.server, print_event, cancel))
 
 
 def cmd_connect(ws, args):
-    operations.connect(ws.bot(args.name), print_event)
+    bot = ws.bot(args.name)
+    cancellable(lambda cancel: operations.connect(bot, print_event, cancel))
 
 
 def cmd_bridge(ws, args):
@@ -83,7 +120,8 @@ def cmd_stop(ws, args):
 
 
 def cmd_restart(ws, args):
-    operations.restart(ws.bot(args.name), args.server, print_event)
+    bot = ws.bot(args.name)
+    cancellable(lambda cancel: operations.restart(bot, args.server, print_event, cancel))
 
 
 def cmd_status(ws, args):
@@ -199,6 +237,9 @@ def main(argv=None, ws=None):
     args = build_parser().parse_args(argv)
     try:
         return args.fn(ws or Workspace.from_environment(), args) or 0
+    except Cancelled as e:
+        print_fail(e)
+        return 130
     except Fail as e:
         print_fail(e)
         return 1

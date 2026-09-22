@@ -832,6 +832,91 @@ def tests_cli():
           code == 1 and "unknown server" in text and "\n    test " in text, text)
 
 
+# --- cancelling -------------------------------------------------------------
+
+def slow_java():
+    """A java that never loads: the keeper holds it, and nothing ever says
+    'initialized'."""
+    slow = TMP / "slow_java.py"
+    slow.write_text("#!" + sys.executable + "\nimport time\ntime.sleep(120)\n")
+    slow.chmod(slow.stat().st_mode | stat.S_IEXEC)
+    return slow
+
+
+def tests_cancel():
+    print("\nCancel: a start cut short stops what it started, at once")
+    import threading
+    from launcher.events import Cancel, Cancelled
+    quick_server_env()
+    bot = WS.bot("Alice")
+
+    cancel = Cancel()
+    threading.Timer(0.3, cancel.set).start()
+    started = time.monotonic()
+    try:
+        processes.wait_for(lambda: False, 30, every=5, cancel=cancel)
+        raised = False
+    except Cancelled:
+        raised = True
+    check("a wait notices a cancel at once, not when its sleep ends",
+          raised and time.monotonic() - started < 2, f"{time.monotonic() - started:.1f}s")
+
+    cancel = Cancel()
+    cancel.set()
+    text, result = said(ops.start, bot, cancel=cancel)
+    check("cancelled before it began: nothing is touched", isinstance(result, Cancelled)
+          and "preparing" not in text and not bot.keeper_pid_f.exists(), text)
+
+    WS.environ["MARIONETTE_JAVA"] = str(slow_java())
+    cancel = Cancel()
+    game = {}
+
+    def cancel_while_loading():
+        if wait(lambda: keeper.keeper_pid(bot) and bot.client_pid_f.exists(), 20):
+            game["pid"] = files.read_pid(bot.client_pid_f)
+            cancel.set()
+
+    helper = threading.Thread(target=cancel_while_loading)
+    helper.start()
+    try:
+        started = time.monotonic()
+        text, result = said(ops.start, bot, cancel=cancel)
+        took = time.monotonic() - started
+    finally:
+        helper.join()
+        WS.environ["MARIONETTE_JAVA"] = str(FAKE_JAVA)
+    check("cancelled while the game loads: start raises Cancelled, in seconds",
+          isinstance(result, Cancelled) and result.code == "cancelled" and took < 30,
+          f"{result!r} after {took:.0f}s")
+    check("...having said it is stopping what it started", "stopping the client it had started" in text, text)
+    check("...and the game it had launched is gone", game.get("pid") and wait(
+        lambda: not processes.pid_alive(game["pid"]), 10))
+    check("...and so is its keeper, with its files", keeper.keeper_pid(bot) is None
+          and not bot.keeper_port_f.exists() and not bot.client_pid_f.exists())
+
+    # The command line: the first Ctrl+C is a cancel, not an abandoned game.
+    import signal
+    env = dict(WS.child_env())
+    env["MARIONETTE_JAVA"] = str(slow_java())
+    run = subprocess.Popen([sys.executable, str(HERE / "marionette.py"), "start", "Alice"],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+    try:
+        loading = wait(lambda: keeper.keeper_pid(bot) and bot.client_pid_f.exists(), 20)
+        game_pid = files.read_pid(bot.client_pid_f)
+        run.send_signal(signal.SIGINT)
+        out, _ = run.communicate(timeout=60)
+    finally:
+        if run.poll() is None:
+            run.kill()
+    check("Ctrl+C on `start` while loading: exit code 130", loading and run.returncode == 130,
+          f"{run.returncode} {out}")
+    check("...saying it cancels, and stopping the game it launched",
+          "cancelling" in out and "cancelled" in out
+          and wait(lambda: not processes.pid_alive(game_pid), 10), out)
+    keeper.clear_run_files(bot)
+    layout()
+
+
 if __name__ == "__main__":
     tests_files()
     tests_workspace()
@@ -855,6 +940,7 @@ if __name__ == "__main__":
     tests_guard_rings()
     tests_logwatch()
     tests_status()
+    tests_cancel()
     tests_cli()
 
     print(f"\n{done - len(failures)}/{done} checks pass")

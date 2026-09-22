@@ -350,6 +350,13 @@ from the same functions. That is why the folders are an object and not
 module globals resolved at import: a window can change them without a
 restart, and each test gets a workspace of its own.
 
+Every wait in an operation takes a `Cancel`, set from any thread (a window's
+Cancel button, the command line's Ctrl+C), and notices it at once. A start
+cancelled after launching the game stops the client it launched: the keeper
+lives in a session of its own, so a start that simply died would leave a
+3 GB game loading with nobody waiting for it. The command line runs each
+long operation on a thread and waits for it, the way a window will.
+
     workspace.py   the folders, server.env, the environment; the server registry
     bots.py        a bot's folder and files; the lock that keeps two commands off it
     packs.py       what a pack is made of, read from the jars

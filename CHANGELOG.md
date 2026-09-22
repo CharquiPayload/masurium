@@ -43,6 +43,8 @@ setting ignored it without a word.
 - Behind the command, a core that never prints: it reports what it does as
   events and fails with the reason and its evidence, so a window can sit on
   the same functions the command line uses (`launcher/`, a package).
+- A start, restart or connect can be cancelled while it waits, and a
+  cancelled start stops the client it had launched. Ctrl+C does exactly that.
 - A keeper per bot holds the game's console open and takes lines for it on a
   localhost socket, only from whoever can read its token. It stops the game's
   whole process tree, because HeadlessMC starts the game as a child java, and

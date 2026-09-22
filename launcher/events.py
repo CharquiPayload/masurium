@@ -1,11 +1,13 @@
-"""What the core says while it works, and how it fails.
+"""What the core says while it works, how it fails, and how it is told to stop.
 
 The core never prints. It hands Events to whoever called it: the command line
-prints them, a window will draw them, a test collects them. And it fails by
+prints them, a window will draw them, a test collects them. It fails by
 raising Fail, whose message is the whole story and whose lines are the
 evidence (the cause in a crash report, the last lines of a log), so that the
-one who shows it decides how.
+one who shows it decides how. And every long wait can be cut short with a
+Cancel.
 """
+import threading
 import time
 from dataclasses import dataclass
 
@@ -63,11 +65,52 @@ def report_to(on_event):
     return on_event if isinstance(on_event, Report) else Report(on_event)
 
 
-def wait_for(predicate, seconds, every=1.0):
+class Cancelled(Fail):
+    """The operation was asked to stop, and did, undoing what it had started."""
+
+    def __init__(self, message="cancelled", lines=()):
+        super().__init__(message, lines, code="cancelled")
+
+
+class Cancel:
+    """How to stop an operation that is waiting: a window's Cancel button, a
+    Ctrl+C. The operation looks at it in every wait, so it notices at once and
+    not when the wait ends; set from any thread."""
+
+    def __init__(self):
+        self._flag = threading.Event()
+
+    def set(self):
+        self._flag.set()
+
+    def is_set(self):
+        return self._flag.is_set()
+
+    def check(self):
+        if self._flag.is_set():
+            raise Cancelled()
+
+    def sleep(self, seconds):
+        if self._flag.wait(seconds):
+            raise Cancelled()
+
+
+def pause(seconds, cancel=None):
+    if cancel:
+        cancel.sleep(seconds)
+    else:
+        time.sleep(seconds)
+
+
+def wait_for(predicate, seconds, every=1.0, cancel=None):
+    """True as soon as predicate() is, False when `seconds` pass first;
+    Cancelled the moment `cancel` is set."""
     deadline = time.monotonic() + seconds
     while True:
+        if cancel:
+            cancel.check()
         if predicate():
             return True
         if time.monotonic() >= deadline:
             return False
-        time.sleep(every)
+        pause(every, cancel)
