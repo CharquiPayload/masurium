@@ -333,6 +333,12 @@ lines**: the runtime (which does not know `connect`) and hmc-specifics (which
 does). `help` lists `connect`, and `connect` answers "Couldn't find command"...
 sometimes. With a single reader it joins on the first attempt, every time.
 
+**`launch` starts the game as a child java.** The launcher jar is not the game:
+it starts another JVM and stays as its console. Terminating the launcher
+alone leaves that JVM alive, with the port open and nobody at its stdin, and
+the next `start` refuses because the port is taken. Stop the process group,
+and wait for the port to close before calling it stopped.
+
 **`hmc.gamedir` in the config is respected.** `~/.minecraft` holds versions,
 libraries and assets; each bot's game lives in its own gamedir, with its mods in
 `<gamedir>/mods/`.
@@ -343,7 +349,7 @@ loads classes on demand: everything already loaded keeps working, and the first
 class needed after the copy is read from a zip whose index no longer matches,
 failing with an `Error` (not an `Exception`, so not even the HTTP server's
 `try` caught it; the connection just closed). Deploy with
-`launcher/deploy_mod.sh`: copy to a temporary name and `mv`. A new inode: running
+`marionette.py deploy-mod`: copy to a temporary name and rename. A new inode: running
 bots keep the old jar until their next start, when the sync links the new one.
 
 ---

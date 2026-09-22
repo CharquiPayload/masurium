@@ -17,12 +17,17 @@ Decisions that come from history, not from taste:
   `new_session`): resuming re-reads the whole chat on every message, and what
   the bot knows no longer lives there but in files.
 """
-import fcntl
+try:
+    import fcntl                      # POSIX
+except ImportError:                   # Windows
+    fcntl = None
+    import msvcrt
 import json
 import os
 import pathlib
 import queue
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -38,7 +43,6 @@ import uuid
 # can be stopped without dragging the others down.
 NAME = (sys.argv[1] if len(sys.argv) > 1
         else os.environ.get("BOT_NAME", "Bot"))
-PIPE = f"/tmp/{NAME.lower()}_in"
 HOME = os.path.expanduser("~")
 # Where the bots live: the same variable the launchers use.
 BOTS_HOME = (os.environ.get("MARIONETTE_BOTS_DIR") or os.environ.get("MARIONETTE_BOTS")
@@ -1191,8 +1195,25 @@ def say(text):
             + " (the game paints them as squares)")
     if len(blueprint) > CHAT_LIMIT:
         blueprint = blueprint[:CHAT_LIMIT - 1] + "…"
-    with MOUTH, open(PIPE, "w") as f:
-        f.write(f"msg {blueprint}\n")
+    with MOUTH:
+        console(f"msg {blueprint}")
+
+
+def console(line):
+    """A line to the client console, through the launcher's keeper: the
+    process that holds the game's stdin and listens on a localhost port,
+    written in bots/<name>/run/keeper.port (see launcher/marionette.py).
+    It used to be a FIFO in /tmp; a FIFO does not exist on Windows."""
+    port_f = pathlib.Path(BOTS_HOME) / NAME.lower() / "run" / "keeper.port"
+    try:
+        port = int(port_f.read_text().strip())
+    except (OSError, ValueError):
+        raise RuntimeError(f"no keeper for {NAME}: {port_f} is missing; the client "
+                           "is not running under the launcher")
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+        s.sendall((line + "\n").encode("utf-8"))
+        s.settimeout(5)
+        s.recv(64)
 
 
 # The brain's session persists between messages (--resume), and that has a
@@ -1229,7 +1250,10 @@ def only_one_bridge(file=None):
     f.parent.mkdir(parents=True, exist_ok=True)
     handle = open(f, "w")
     try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if fcntl:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:
         handle.close()
         log(f"another bridge for {NAME} is already running: this one stops "
@@ -1903,17 +1927,22 @@ def carry_out(order):
     if action in ("shutdown", "restart"):
         say(phrase(action))
         time.sleep(1.5)          # let the sentence arrive before the cut
-        dash = "stop_bot.sh" if action == "shutdown" else "restart_bot.sh"
+        verb = "stop" if action == "shutdown" else "restart"
         try:
-            with open(f"/tmp/{NAME.lower()}_restart", "w") as log_f:
-                # In its own session: the script starts by killing this
+            run_dir = pathlib.Path(BOTS_HOME) / NAME.lower() / "run"
+            run_dir.mkdir(parents=True, exist_ok=True)
+            with open(run_dir / "restart.log", "w") as log_f:
+                # In its own session: the launcher starts by killing this
                 # bridge, and a child of the bridge would go with it.
+                apart = ({"creationflags": subprocess.DETACHED_PROCESS
+                          | subprocess.CREATE_NEW_PROCESS_GROUP}
+                         if os.name == "nt" else {"start_new_session": True})
                 subprocess.Popen(
-                    [f"{REPO}/launcher/{dash}", NAME],
+                    [sys.executable, f"{REPO}/launcher/marionette.py", verb, NAME],
                     stdout=log_f, stderr=subprocess.STDOUT,
-                    stdin=subprocess.DEVNULL, start_new_session=True)
+                    stdin=subprocess.DEVNULL, **apart)
         except Exception as e:
-            log(f"could not launch {dash}: {e}")
+            log(f"could not launch the launcher's {verb}: {e}")
             say(phrase("no_restart"))
         return action
     log(f"[control] unknown order ignored: {order}")

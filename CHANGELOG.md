@@ -73,7 +73,7 @@ setting ignored it without a word.
 - Internal channel between a bot and its guards.
 
 ### Launchers and tests
-- Online (a logged-in Minecraft account, `login_bot.sh`) or offline bot accounts.
+- Online (a logged-in Minecraft account, `marionette.py login`) or offline bot accounts.
 - Launchers to create, start, connect, restart and stop bots, with shared game
   files, per-server mod packs through hard links and safe mod deployment.
 - Tests that need no Minecraft: path finder, logbook, request parsing, bridge and

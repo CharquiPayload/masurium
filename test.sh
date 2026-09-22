@@ -23,6 +23,10 @@ echo "═══ MCP layer (python) ═══"
 python3 mcp/tests.py || failures=$((failures + 1))
 
 echo
+echo "═══ the launcher (python): folders, names, ports, mods, the keeper ═══"
+python3 launcher/tests.py || failures=$((failures + 1))
+
+echo
 echo "═══ the mod (java): one jar, server and bot ═══"
 # `build` and not just `test`: the jar has to come out, and BotSideTest reads the
 # COMPILED classes to check that nothing the server loads names a client class.

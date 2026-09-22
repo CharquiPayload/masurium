@@ -24,8 +24,9 @@ that order. The rest can wait until you have a bot in the game.
   pipelines, not for playing without having bought Minecraft.
 
 **Bot machine** (can be the same machine)
-- Linux with Java **21**, Python **3.9+** (standard library only), `curl` and
-  `ss` (iproute2).
+- Java **21** and Python **3.9+** (standard library only). The launcher is
+  written for every platform Python runs on, but so far it has only been run
+  on Linux.
 - [Claude Code](https://claude.com/claude-code), installed for the user that runs
   the bots, with a way to pay for it — see **The brain** below. A Claude
   subscription is **not** required.
@@ -161,28 +162,41 @@ VERSION=neoforge-21.1.248
 DESCRIPTION="My survival server"
 ```
 
-The folders can be moved with `MARIONETTE_BOTS_DIR`, `MARIONETTE_SERVERS_DIR`,
-`MARIONETTE_COMMON_DIR` and `MARIONETTE_ENV`. After building, `launcher/deploy_mod.sh`
-copies the mod into `shared/mods` safely, even with bots running, and
-clears out any older jar that would declare the same mod twice.
+The folders can be moved with `MARIONETTE_BOTS_DIR`, `MARIONETTE_SERVERS_DIR`
+and `MARIONETTE_COMMON_DIR`, either in the environment or as three more lines
+of `server.env` (`MARIONETTE_ENV` says where that file is). After building,
+`launcher/marionette.py deploy-mod` copies the mod into `shared/mods` safely,
+even with bots running, and clears out any older jar that would declare the
+same mod twice. `MARIONETTE_JAVA` points the bots at a particular `java` when
+the one on the PATH is not 21.
 
 ### 4. Create and start a bot
 
+Everything goes through one command, `launcher/marionette.py`:
+
 ```bash
-launcher/create_bot.sh Alice <slug>
-launcher/login_bot.sh Alice            # once: type `login`, follow the steps, then `quit`
-launcher/restart_bot.sh Alice          # starts the client and its bridge
+launcher/marionette.py doctor            # the machine, the folders, the server: what is missing
+launcher/marionette.py create Alice <slug>
+launcher/marionette.py login Alice       # once: type `login`, follow the steps, then `quit`
+launcher/marionette.py restart Alice     # starts the client and, once it is in, its bridge
 ```
 
 For an offline bot on a private server with `online-mode=false`, create it with
-`MARIONETTE_ACCOUNT=offline launcher/create_bot.sh Alice <slug>` and skip the
-login.
+`--account offline` and skip the login.
 
 Then say its name in the chat: `Alice, come here`.
 
-Other launchers: `start_bot.sh` (client only), `connect_bot.sh` (rejoin after a
-log off), `stop_bot.sh` (client, bridge and its guards). Bridge logs go to
-`/tmp/bridge_<bot>_out`.
+The rest of the subcommands: `status` (every bot: client, hands, in the server,
+bridge), `start` (the client only), `connect` (rejoin after a log off), `bridge`
+(the bridge only), `stop` (client, bridge and its guards; `--keep-guards` leaves
+the guards), `servers` and `deploy-mod`. `start` and `restart` take a server
+slug to move the bot to another server, rebuilding its mods.
+
+A running bot leaves its tracks in `bots/<name>/run/`: `client.log` (the game),
+`bridge.log` (the brain's side), `keeper.log`, and the pid files. The
+**keeper** is a small process per bot, started by `start`, that holds the
+game's console open and takes lines for it on a localhost socket; it is how the
+launcher knows a bot is already running instead of starting it twice.
 
 ## Configuring a bot
 

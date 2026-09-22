@@ -28,6 +28,7 @@ build it, and how to get the first bot into the game.
 | **MCP server** | the catalog of tools the brain can call | `mcp/server.py` |
 | **Bridge** | reads the chat, wakes the brain when the bot is named, relays body notices | `mcp/bridge.py` |
 | **Claude Code** | thinking, only when needed | — |
+| **Launcher** | creates, starts, stops and watches bots; a keeper per bot holds the game's console | `launcher/marionette.py` |
 
 The split is strict: **a question goes to the server, an action goes to the
 bot.** A dedicated server loads only the server and shared halves; the bot half
@@ -70,12 +71,14 @@ because fighting is measured in ticks and a model round trip takes seconds.
 ## Tests
 
 ```bash
-./test.sh              # the MCP layer in Python, then the mod: JUnit tests and the jar
+./test.sh              # the MCP layer and the launcher in Python, then the mod: JUnit tests and the jar
 mcp/test_brain.sh      # the thinking layer against a fake bot (spends model calls)
 ```
 
 None of the tests need Minecraft running. The path finder, the logbook, the
-request parsing and most of the bridge and MCP logic are tested in milliseconds.
+request parsing and most of the bridge and MCP logic are tested in milliseconds;
+the launcher's keeper is run for real against a fake game that echoes what it
+is told.
 
 One of them is worth knowing about before changing anything: `BotSideTest` fails
 the build if anything in `marionette.server` or `marionette.common` so much as
@@ -97,14 +100,16 @@ inline, a lambda, or a return type that no `import` would reveal.
 
 ## Roadmap
 
-- `create_bot.sh --role main|guard` instead of editing `escort` by hand.
+- `create --role main|guard` instead of editing `escort` by hand.
 - A per-bot configuration file generated on first start, with the behaviour
   toggles as `true`/`false`.
 - Release builds of the jar.
-- **Launcher** (to do): one place to start, stop and watch bots, choosing the
-  bot, its mod pack, the server address and port, with groups of bots that share
-  one configuration. It must read the same lock the bridge takes, so a bot that
-  is already running is shown as running instead of started a second time.
+- **Launcher**: the command line is done (`launcher/marionette.py`: one place to
+  create, start, stop and watch bots, choosing the server and its pack; a bot
+  that is already running is shown as running instead of started a second
+  time). To do: groups of bots that share one configuration, a `/mods` route
+  on the server so the launcher can say which jar differs before joining, a
+  graphical front end on the same code, and a run on Windows.
 - **Add-ons** (to do): separate jars that teach the bots one mod each
   (`marionette-create`, `marionette-watut`...). The core offers them a place to
   register their own `/marionette bot <bot> <add-on> ...` subcommands and their own

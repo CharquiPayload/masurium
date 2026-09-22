@@ -277,7 +277,7 @@ hard links to the server's pack, so **creating a bot costs a few megabytes**.
 ### Three folders, outside the repo
 
 ```text
-bots/<name>/      port, server, language, personality, gamedir/, hmc/
+bots/<name>/      port, server, language, personality, gamedir/, hmc/, run/
 servers/<slug>/   server.conf + mods/  (one server and ITS client pack)
 shared/           the HeadlessMC launcher and the mods every bot uses
 ```
@@ -308,6 +308,24 @@ it.
 `NAME in text`: with "Ada" and "Adam" in the same chat, calling one wakes both.
 The launcher checks and refuses.
 
+**The keeper.** HeadlessMC takes its commands (`launch`, `connect`, `msg`) on
+its stdin, so something has to hold that stdin open for as long as the game
+runs. It used to be `tail -f` on a FIFO in `/tmp`, which does not exist on
+Windows. Now it is a process per bot, the keeper (`marionette.py keeper`,
+started by `start`), that owns the java process and listens on a localhost
+socket whose port is written in `bots/<name>/run/keeper.port`. The launcher
+sends it `connect`; the bridge sends it `msg`; `@ping` and `@stop` are for the
+keeper itself. Its pid file is what says "already running". HeadlessMC starts
+the game as a child java, so the keeper starts the launcher in a process group
+of its own and stops the group, not the process: stopping the launcher alone
+left the game alive, holding the port, with nobody at its stdin.
+
+**The launcher is one Python file with no dependencies**, like the bridge and
+the MCP server, and it uses no shell: sockets instead of `ss`, pid files
+instead of `pgrep`, `os.link` instead of `ln`, `urllib` instead of `curl`. It
+replaced eight bash scripts. The point was not taste but the port: every
+primitive has an equivalent on Windows, so the port is a test, not a rewrite.
+
 **Bots should not run as root.** They talk to a server with other people in it
 and load third-party mods.
 
@@ -321,5 +339,5 @@ it changes fast and is tested without opening Minecraft.
 
 `gradle.properties` caps the Gradle heap at 1.5 GB, so a machine that runs bots
 at 3 GB each may not be able to build while they run. Deploy a new bot mod with
-`launcher/deploy_mod.sh` (a new inode, so running bots are not affected) and
+`launcher/marionette.py deploy-mod` (a new inode, so running bots are not affected) and
 restart the bots when convenient.
