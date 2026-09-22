@@ -11,6 +11,7 @@ the command line (cli.py, reached through marionette.py) today, a window
 tomorrow, both on the same functions.
 
     workspace.py   the three folders, server.env, the environment; the server registry
+    accounts.py    Minecraft accounts: logged in once, linked into each instance
     bots.py        bots (characters) and instances (a bot on a server), and the lock
                    that keeps two commands off an instance
     settings.py    settings in layers (bot < instance), what each accepts, when it counts,

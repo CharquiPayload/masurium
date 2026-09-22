@@ -64,6 +64,13 @@ def _check_port(target, value):
     return None
 
 
+def _check_account(target, value):
+    if value in ("offline", "online") or target.ws.account(value).exists():
+        return None
+    return ("offline, online, or one of the accounts: "
+            + (", ".join(target.ws.account_keys()) or "(none yet: marionette.py account add)"))
+
+
 def _check_owner(target, value):
     return None if PLAYER_NAME.match(value) else "a Minecraft player name: letters, digits, underscore"
 
@@ -106,8 +113,9 @@ def _heap_default(target):
 
 
 SETTINGS = {s.key: s for s in [
-    Setting("account", "online (a purchased account, logged in once) or offline "
-            "(private servers with online-mode=false)", "online", ("online", "offline"), applies="start"),
+    Setting("account", "one of the launcher's accounts (marionette.py account add), offline "
+            "(private servers with online-mode=false), or online (a login kept in the instance)",
+            "online", ("offline", "online"), applies="start"),
     Setting("heap", "the game's memory (Java heap)", _heap_default, ("2g", "3g", "4g", "6g"),
             applies="start"),
     Setting("port", "the local port of the bot mod: its hands", "", applies="start", layers=(INSTANCE,)),
@@ -119,7 +127,7 @@ SETTINGS = {s.key: s for s in [
             _owner_default, applies="now"),
 ]}
 
-CHECKS = {"port": _check_port, "owner": _check_owner,
+CHECKS = {"account": _check_account, "port": _check_port, "owner": _check_owner,
           "model": _check_model, "escort": _check_escort, "heap": _check_heap}
 # Case matters in names (a player, a bot as the game shows it); in codes and
 # sizes it does not.
@@ -292,3 +300,10 @@ def render(inst):
         props.setdefault("hmc.invert.command.modifiers", "false")
         props["hmc.gamedir"] = str(inst.gamedir)
         cfg.write_text("".join(f"{k}={v}\n" for k, v in props.items()), encoding="utf-8")
+    # Its login: the account's, through a link, or one of its own.
+    from .accounts import kind, link_login, unlink_login
+    value = get(inst, "account")
+    if kind(value) == "account" and inst.ws.account(value).exists():
+        link_login(inst, inst.ws.account(value))
+    elif (inst.hmc / "HeadlessMC").is_dir():
+        unlink_login(inst)

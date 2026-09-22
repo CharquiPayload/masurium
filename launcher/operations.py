@@ -7,6 +7,7 @@ Every operation reports what it does through `on_event` (see events.py) and
 fails by raising Fail; none of them prints. The command line and, later, a
 window are two faces on these same functions.
 """
+import contextlib
 import os
 import pathlib
 import re
@@ -17,13 +18,13 @@ import time
 import urllib.error
 from dataclasses import dataclass
 
-from . import settings
+from . import accounts, settings
 from .api import UNREACHABLE
 from .bots import Instance, check_key, check_name, operating, write_json
 from .diagnosis import complaints, crash_report, explain_crash
 from .events import Cancelled, Fail, pause, report_to, wait_for
 from .files import (LogWatch, link_dir, link_or_copy, link_target, log_has, read_java_properties,
-                    read_pid, tail_lines, unlink_quietly)
+                    read_pid, tail_lines, try_lock, unlink_quietly)
 from .keeper import (GAME_OVER, HMC_READY, KEEPER_ENDED, KEEPER_FAILED, clear_run_files,
                      keeper_alive, keeper_ask, keeper_pid, launcher_pid)
 from .packs import CORE_JAR, compare_packs, jar_family, pack_mods, sync_mods
@@ -184,13 +185,49 @@ def clone_instance(ws, key, new_key=None, slug=None, on_event=None):
 
 def login_command(inst):
     """Online bots use a real, purchased Minecraft Java account (a Microsoft
-    account), like any player. HeadlessMC keeps the login in the instance's
-    hmc folder. What to run, interactively, to log it in: (argv, cwd, env).
-    None for an offline bot."""
-    if settings.get(inst, "account") == "offline":
+    account), like any player. With `account online` HeadlessMC keeps the
+    login in the instance's own hmc folder: what to run, interactively, to
+    log it in there, (argv, cwd, env). None for an offline bot. An instance
+    of one of the launcher's accounts is logged in through the account
+    (`account add`), and is refused here."""
+    value = settings.get(inst, "account")
+    if value == "offline":
         return None
+    if accounts.kind(value) == "account":
+        raise Fail(f"{inst.key} plays with the account {value}: its login is the account's, "
+                   "made once with  marionette.py account add", code="has_account")
     return (inst.ws.java_command() + ["-jar", "headlessmc-launcher.jar"],
             inst.hmc, inst.ws.child_env())
+
+
+def account_of(target):
+    """("offline" | "online" | an Account) for what a bot or instance plays with."""
+    value = settings.get(target, "account")
+    return target.ws.account(value) if accounts.kind(value) == "account" else value
+
+
+@contextlib.contextmanager
+def account_turn(inst):
+    """Instances of one account start one at a time: HeadlessMC renews the
+    account's login as it launches the game, and two renewals at once would
+    leave one of them with a key Microsoft already replaced. The lock is held
+    through the start; the check that refuses a second game of a running
+    account (check_can_run) does the rest."""
+    account = account_of(inst)
+    if not isinstance(account, accounts.Account):
+        yield
+        return
+    if not account.exists():
+        raise Fail(f"{inst.key} plays with the account {account.key}, which is not there. "
+                   f"Log it in:  marionette.py account add --as {account.key}", code="no_account")
+    handle = try_lock(account.lock)
+    if handle is None:
+        raise Fail(f"another instance of the account {account.key} is starting right now "
+                   f"(pid {read_pid(account.lock) or '?'}): one at a time.", code="account_busy")
+    try:
+        yield
+    finally:
+        handle.close()
 
 
 # --- who is running, and where ------------------------------------------------
@@ -212,14 +249,18 @@ def check_can_run(inst):
       contained in it: the bridge reacts when its name appears in the chat,
       and calling one would wake both."""
     ws = inst.ws
-    online = settings.get(inst, "account") == "online"
+    mine = account_of(inst)
     for other in ws.instances():
         if other == inst or not client_running(other):
             continue
         if other.player == inst.player and other.slug == inst.slug:
             raise Fail(f"{inst.name} is already playing on {inst.slug}, as the instance {other.key}.",
                        lines=[f"stop that one first:  marionette.py stop {other.key}"], code="player_taken")
-        if online and other.player == inst.player and settings.get(other, "account") == "online":
+        theirs = account_of(other)
+        if mine != "offline" and theirs != "offline" and (
+                other.player == inst.player
+                or (isinstance(mine, accounts.Account) and isinstance(theirs, accounts.Account)
+                    and mine.key == theirs.key)):
             raise Fail(f"{inst.name}'s account is already playing, on {other.slug} (instance {other.key}): "
                        "one Microsoft account plays in one game at a time.",
                        lines=[f"stop that one first:  marionette.py stop {other.key}"], code="account_in_use")
@@ -310,7 +351,7 @@ def start(inst, on_event=None, cancel=None):
     launched is stopped, not left loading with nobody waiting for it) and
     raises Cancelled."""
     inst.require()
-    with operating(inst):
+    with operating(inst), account_turn(inst):
         return _start(inst, report_to(on_event), cancel)
 
 
@@ -664,7 +705,7 @@ def restart(inst, on_event=None, cancel=None):
     in /players, and mute, which from the chat looks exactly like a hang."""
     report = report_to(on_event)
     inst.require()
-    with operating(inst):
+    with operating(inst), account_turn(inst):
         stop(inst, keep_guards=True, on_event=report)
         try:
             _start(inst, report, cancel)
@@ -705,6 +746,45 @@ def configure(target, key, value=None, clear=False, on_event=None):
                                                           else f"  (from the {layer})"), stage="configured")
     report.detail(f"it counts {settings.APPLIES[s.applies]}")
     return now
+
+
+# --- accounts -------------------------------------------------------------------
+
+def add_account(ws, run_login, key=None, on_event=None):
+    """A Minecraft account, logged in once: HeadlessMC is opened in a folder of
+    its own (`run_login(argv, cwd, env)` runs it, interactively: type
+    `login`, follow its steps in a browser, `quit`), and what it saved becomes
+    accounts/<player>/. Returns the Account."""
+    report = report_to(on_event)
+    argv, cwd, env, folder = accounts.prepare_login(ws)
+    report.step("HeadlessMC to log an account in. Type:  login   (then follow its steps in a "
+                "browser)", lines=["and once it says the account is saved:  quit"], stage="login")
+    try:
+        run_login(argv, cwd, env)
+    except BaseException:
+        import shutil as _sh
+        _sh.rmtree(folder, ignore_errors=True)
+        raise
+    account = accounts.finish_login(ws, folder, key)
+    report.step(f"account {account.key}: plays as {account.name}", stage="added")
+    report.detail(f"a bot plays with it with:  marionette.py set --bot <bot> account {account.key}")
+    return account
+
+
+def account_list(ws):
+    """[(account, logged in, bots, instances)] for every account."""
+    out = []
+    for key in ws.account_keys():
+        account = ws.account(key)
+        bots, insts = account.users()
+        out.append((account, account.logged_in(), bots, insts))
+    return out
+
+
+def remove_account(ws, key, on_event=None):
+    report = report_to(on_event)
+    accounts.remove(ws, key)
+    report.step(f"account {key} removed, with its login", stage="removed")
 
 
 # --- what it says without its brain ---------------------------------------------

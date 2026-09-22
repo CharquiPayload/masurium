@@ -206,13 +206,27 @@ Everything goes through one command, `launcher/marionette.py`:
 
 ```bash
 launcher/marionette.py doctor            # the machine, the folders, the server: what is missing
+launcher/marionette.py account add      # once per Minecraft account: type `login`, follow the steps, then `quit`
 launcher/marionette.py create Alice <slug>   # the bot Alice and the instance alice on that server
-launcher/marionette.py login alice       # once: type `login`, follow the steps, then `quit`
+launcher/marionette.py set --bot alice account <account>   # it plays with that account
 launcher/marionette.py restart alice     # starts the client and, once it is in, its bridge
 ```
 
 For an offline bot on a private server with `online-mode=false`, create it with
-`--account offline` and skip the login.
+`--account offline` and skip the account.
+
+**Accounts.** An online bot plays with a real, purchased Minecraft Java
+account. `account add` opens HeadlessMC in a folder of its own: type `login`,
+follow its steps in a browser, and `quit` once it says the account is saved;
+it becomes `accounts/<player>/`. A bot set to that account plays as its player,
+and every instance of it uses that one login, through a link: HeadlessMC
+renews a login each time it launches the game and Microsoft replaces the key
+each time, so copies would go stale. For the same reason one account plays in
+one game at a time (`start` refuses a second one, wherever it would play) and
+its instances start one after another. `account` lists the accounts, whether
+each is still logged in and who uses it; `account remove` takes one out, once
+nobody uses it. (`account online` still means a login kept in the instance's
+own HeadlessMC, made with `marionette.py login <instance>`.)
 
 Then say its name in the chat: `Alice, come here`.
 
@@ -277,7 +291,7 @@ players and how; it goes at the start of its prompt.
 
 | setting | layers | meaning |
 |---|---|---|
-| `account` | bot, instance | `online` (a logged-in Minecraft account) or `offline` (private servers only) |
+| `account` | bot, instance | one of the launcher's accounts (`account add`), `offline` (private servers only), or `online` (a login kept in the instance) |
 | `owner` | bot, instance | the player the bot belongs to: it accepts their delicate orders, and they control it with `/marionette bot` on any server. It cannot be changed from inside the game |
 | `model` | bot, instance | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`) |
 | `heap` | bot, instance | the game's memory, e.g. `3g` (default `MARIONETTE_HEAP`, else `3g`) |

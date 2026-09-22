@@ -52,7 +52,8 @@ for k in ("HEAP", "VERSION", "MARIONETTE_HEAP", "MARIONETTE_VERSION", "MARIONETT
     ENVIRON.pop(k, None)
 ENVIRON["MARIONETTE_JAVA"] = str(FAKE_JAVA)
 WS = Workspace(TMP / "bots", TMP / "servers", TMP / "shared", TMP / "server.env",
-               home=TMP, environ=ENVIRON, instances_dir=TMP / "instances", state_dir=TMP / "state")
+               home=TMP, environ=ENVIRON, instances_dir=TMP / "instances", state_dir=TMP / "state",
+               accounts_dir=TMP / "accounts")
 
 
 # --- minimal harness --------------------------------------------------------
@@ -1172,7 +1173,7 @@ def tests_settings():
     settings.clear(bot, "model")
     for target, key, value, why in ((bot, "language", "es", "no longer a setting: the personality"),
                                     (bot, "gender", "f", "no longer a setting: the personality"),
-                                    (bot, "account", "maybe", "one of online, offline"),
+                                    (bot, "account", "maybe", "offline, online, or one of the accounts"),
                                     (bot, "owner", "not a name!", "player name"),
                                     (bot, "model", "haiku lowest", "effort is one of"),
                                     (bot, "model", "a b c", "optional effort"),
@@ -1245,7 +1246,7 @@ def tests_settings():
     check("`--default` takes it out of the layer", code == 0 and "model" not in bot.data, text)
     text, code = run_cli("set", "alice", "account", "maybe")
     check("a bad value is a failure of the command, with the reason",
-          code == 1 and "one of online, offline" in text, text)
+          code == 1 and "offline, online, or one of the accounts" in text, text)
 
     data = bob.bot.data
     data["model"] = "haiku lowest"
@@ -1396,6 +1397,136 @@ def tests_phrases():
     check("`marionette.py phrases <instance>` is the command", code == 0 and "sentences" in text, text)
 
 
+# --- accounts ---------------------------------------------------------------
+
+def hmc_logins(*names):
+    """A HeadlessMC accounts file with these players logged in, the way
+    MinecraftAuth writes a Java session (the parts that matter)."""
+    return json.dumps({"accounts": [
+        {"mcProfile": {"id": f"{i:032x}", "name": n, "skinUrl": "x"}, "xuid": str(i),
+         "mcToken": {"accessToken": "secret"}} for i, n in enumerate(names, 1)]})
+
+
+def fake_login(*names):
+    """What `account add` runs, played by a function that writes what
+    HeadlessMC would after a `login`."""
+    def run(argv, cwd, env):
+        auth = pathlib.Path(cwd) / "HeadlessMC" / "auth"
+        auth.mkdir(parents=True, exist_ok=True)
+        (auth / ".accounts.json").write_text(hmc_logins(*names) if names else "")
+    return run
+
+
+def tests_accounts():
+    print("\nAccounts: logged in once, shared by the instances that use them")
+    from launcher import accounts
+    layout()
+    f = TMP / "logins.json"
+    f.write_text(hmc_logins("Steve"))
+    check("the player of a login is read from HeadlessMC's file", accounts.players_in(f) == ["Steve"])
+    f.write_text("")
+    check("an empty file (HeadlessMC makes one on its first run) has no login", accounts.players_in(f) == [])
+    f.write_text("{not json")
+    check("...nor has a broken one", accounts.players_in(f) == [])
+
+    text, acc = said(ops.add_account, WS, fake_login("Steve"))
+    check("an account is added from what HeadlessMC saved: accounts/steve, playing as Steve",
+          not isinstance(acc, Fail) and acc.key == "steve" and acc.name == "Steve" and acc.logged_in(), text)
+    check("...and HeadlessMC was told how to log in", "Type:  login" in text and "quit" in text, text)
+    check("adding it again is refused", fails(ops.add_account, WS, fake_login("Steve")).code == "exists")
+    e = fails(ops.add_account, WS, fake_login())
+    check("no login saved: refused, and nothing is left behind",
+          e.code == "no_login" and not any(p.name.startswith(".adding") for p in (TMP / "accounts").iterdir()))
+    check("two logins at once are refused", fails(ops.add_account, WS, fake_login("A", "B")).code
+          == "several_logins")
+
+    alice, bob = WS.instance("alice"), WS.instance("bob")
+    e = fails(settings.set_value, alice.bot, "account", "nobody")
+    check("an account that does not exist is refused, naming the ones there are",
+          e is not None and "steve" in told(e), told(e))
+    own = alice.hmc / "HeadlessMC" / "auth"
+    own.mkdir(parents=True, exist_ok=True)
+    (own / ".accounts.json").write_text(hmc_logins("OldLogin"))
+    settings.set_value(alice.bot, "account", "steve")
+    check("a bot with an account plays as its player", alice.bot.name == "Steve" and alice.name == "Steve"
+          and alice.bot.own_name == "Alice")
+    settings.render(alice)
+    props = files.read_java_properties(alice.hmc / "HeadlessMC" / "config.properties")
+    check("its instance's login IS the account's: a link, not a copy",
+          files.link_target(own) == acc.auth and props.get("hmc.offline") == "false")
+    check("...and a login the instance had of its own is kept aside, not destroyed",
+          accounts.players_in(alice.hmc / "HeadlessMC" / "auth.before-account" / ".accounts.json") == ["OldLogin"])
+    check("logging it in through the instance is refused: that is the account's",
+          fails(ops.login_command, alice).code == "has_account")
+    settings.set_value(alice.bot, "account", "offline")
+    settings.render(alice)
+    check("back to offline, the link goes and its own login comes back",
+          not own.is_symlink() and accounts.players_in(own / ".accounts.json") == ["OldLogin"]
+          and alice.name == "Alice")
+    import shutil
+    shutil.rmtree(own)
+
+    # One account, one game at a time; and one start at a time.
+    quick_server_env()
+    other = second_server("other")
+    settings.set_value(alice.bot, "account", "steve")
+    settings.set_value(bob.bot, "account", "steve")
+    data = bob.data
+    data["server"] = "other"
+    bob.save(data)
+    start_keeper("alice")
+    try:
+        check("alice runs, as Steve", wait(lambda: keeper.keeper_alive(alice), 10))
+        e = fails(ops.check_can_run, bob)
+        check("another bot of the same account, on another server, does not run at once",
+              e is not None and e.code == "account_in_use" and "on test" in str(e), told(e))
+    finally:
+        said(ops.stop, alice)
+    check("stopped, it may", fails(ops.check_can_run, bob) is None)
+    holder = files.try_lock(acc.lock)
+    try:
+        text, result = said(ops.start, bob)
+        check("while another instance of the account is starting, a start waits its turn (refused)",
+              isinstance(result, Fail) and result.code == "account_busy", text)
+    finally:
+        holder.close()
+
+    text, code = run_cli("account")
+    check("`account` lists them: who they play as, logged in, who uses them",
+          code == 0 and "steve" in text and "plays as Steve" in text and "logged in" in text
+          and "bot alice" in text and "bot bob" in text, text)
+    text, code = run_cli("account", "remove", "steve")
+    check("an account in use is not removed", code == 1 and "in use" in text and acc.exists(), text)
+    for b in (alice.bot, bob.bot):
+        settings.set_value(b, "account", "offline")
+    data["server"] = "test"
+    bob.save(data)
+    checks = doctor.checks(WS)
+    check("doctor checks each account", any(l == "accounts/steve" and ok for l, ok, _ in checks))
+    acc.logins.write_text("")
+    checks = doctor.checks(WS)
+    check("...and says when its login is gone",
+          any(l == "accounts/steve" and ok is False and "login is gone" in d for l, ok, d in checks))
+    text, code = run_cli("account", "remove", "steve")
+    check("unused, it is removed, login and all", code == 0 and not acc.dir.exists(), text)
+
+    login = TMP / "fake_login.py"
+    login.write_text("#!" + sys.executable + "\nimport pathlib\n"
+                     "a = pathlib.Path('HeadlessMC/auth')\na.mkdir(parents=True, exist_ok=True)\n"
+                     f"(a / '.accounts.json').write_text({hmc_logins('Herobrine')!r})\n")
+    login.chmod(login.stat().st_mode | stat.S_IEXEC)
+    WS.environ["MARIONETTE_JAVA"] = str(login)
+    try:
+        text, code = run_cli("account", "add")
+    finally:
+        WS.environ["MARIONETTE_JAVA"] = str(FAKE_JAVA)
+    check("`account add` runs HeadlessMC and keeps what it logged in",
+          code == 0 and WS.account("herobrine").name == "Herobrine", text)
+    shutil.rmtree(WS.account("herobrine").dir)
+    remove_tree(other)
+    layout()
+
+
 # --- the layout from before instances -----------------------------------------
 
 def tests_migrate():
@@ -1510,6 +1641,7 @@ if __name__ == "__main__":
     tests_settings()
     tests_server_apis()
     tests_phrases()
+    tests_accounts()
     tests_migrate()
     tests_cli()
 

@@ -9,6 +9,7 @@ from collections import namedtuple
 
 from . import settings
 from .api import UNREACHABLE
+from .accounts import players_in
 from .bots import check_name
 from .events import Fail
 from .files import read_env_file
@@ -194,6 +195,14 @@ def checks(ws):
         add("layout", False, f"bots in the layout from before instances: {', '.join(legacy)} "
             "(marionette.py migrate)")
 
+    for key in ws.account_keys():
+        account = ws.account(key)
+        bots_, insts_ = account.users()
+        add(f"accounts/{key}", account.logged_in(),
+            (f"plays as {account.name}" if account.logged_in() else "its login is gone (HeadlessMC deletes "
+             "one it could not renew): remove it and add it again")
+            + (f"; used by {', '.join(bots_ + insts_)}" if bots_ or insts_ else ""))
+
     keys = ws.bot_keys()
     add("bots", True if keys else None, ", ".join(keys) if keys else f"none yet under {ws.bots_dir}")
     for key in keys:
@@ -227,11 +236,12 @@ def checks(ws):
             problems.append(f"its server '{inst.slug}' is not registered")
         if not (inst.hmc / "HeadlessMC" / "config.properties").is_file():
             problems.append("no hmc config")
-        accounts = inst.hmc / "HeadlessMC" / "auth" / ".accounts.json"
-        if settings.get(inst, "account") == "online" and (not accounts.is_file() or accounts.stat().st_size < 3):
+        logins = inst.hmc / "HeadlessMC" / "auth" / ".accounts.json"
+        if settings.get(inst, "account") == "online" and not players_in(logins):
             # HeadlessMC makes an EMPTY accounts file on its first run: the
             # folder being there never meant a login.
-            problems.append(f"online account never logged in (marionette.py login {inst.key})")
+            problems.append(f"online account never logged in (marionette.py login {inst.key}, or "
+                            "an account of the launcher: marionette.py account add)")
         escort = settings.get(inst, "escort").lower()
         if escort and escort == inst.player:
             problems.append("escorts itself")

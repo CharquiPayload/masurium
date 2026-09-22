@@ -110,10 +110,10 @@ inline, a lambda, or a return type that no `import` would reveal.
   are characters, and instances, a bot on a server, created, cloned, started,
   stopped and watched; settings in layers, bot < instance; each server with its
   own server mod; it compares the pack with the server's `/mods` before
-  joining, and refuses to run one player twice). To do: groups (plain ones that
+  joining, and refuses to run one player twice; accounts logged in once and
+  shared by a bot's instances). To do: groups (plain ones that
   start together, and a leader with its guards) with settings that impose on
-  their instances, a global layer on top; accounts logged in once in the
-  launcher and shared by a bot's instances; the food, break and toggle lists
+  their instances, a global layer on top; the food, break and toggle lists
   editable from the launcher and live, as one JSON on the server; a graphical
   front end on the same code; and a run on Windows.
 - **Add-ons**: separate jars that teach the bots one mod each. The first one is

@@ -66,6 +66,13 @@ setting ignored it without a word.
   whose command tree has no `/marionette`, leaves and closes its game, for a
   bot started without the launcher. A start that sees its client close while
   joining stops waiting at once.
+- Accounts, logged in once. `account add` opens HeadlessMC to log a Minecraft
+  account in and keeps it in `accounts/<player>/`; a bot set to that account
+  plays as its player, and each of its instances links to that one login
+  instead of holding a copy that would go stale when HeadlessMC renews it.
+  One account plays in one game at a time and its instances start one after
+  another. `account` lists them (logged in or not, who uses them), `account
+  remove` takes an unused one out, and doctor says when a login is gone.
 - Each server can have its own `servers/<slug>/server.env` (address and token
   of its server mod, readable by its owner only). The launcher, the bridge and
   the MCP server then talk to the server each bot is on, not to the one the

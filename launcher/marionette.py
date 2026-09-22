@@ -12,6 +12,7 @@
     marionette.py status [name]
     marionette.py set <name> [setting [value | --default]]
     marionette.py phrases <instance>
+    marionette.py account [add | remove <account>]
     marionette.py deploy-mod [jar]
     marionette.py doctor
 

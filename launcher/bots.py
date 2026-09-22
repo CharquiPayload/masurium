@@ -100,9 +100,16 @@ class Character:
         write_json(self.json, data)
 
     @property
-    def name(self):
-        """Its name in the game, with its capitals."""
+    def own_name(self):
+        """The name it was given, which is its name in the game when it plays
+        offline."""
         return self.data.get("name") or self.key
+
+    @property
+    def name(self):
+        """Its name in the game, with its capitals: its account's player when
+        it plays with one of the launcher's accounts."""
+        return _account_name(self) or self.own_name
 
     def instances(self):
         return [i for i in self.ws.instances() if i.data.get("bot") == self.key]
@@ -159,8 +166,9 @@ class Instance:
 
     @property
     def name(self):
-        """The player name in the game, with its capitals: the bot's."""
-        return self.bot.name if self.bot.exists() else self.key
+        """The player name in the game, with its capitals: its account's player
+        when it plays with one of the launcher's accounts, else the bot's."""
+        return _account_name(self) or (self.bot.own_name if self.bot.exists() else self.key)
 
     @property
     def player(self):
@@ -227,6 +235,18 @@ class Instance:
         """One question to the bot mod itself, on its own port."""
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}{route}", timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8", "replace"))
+
+
+def _account_name(target):
+    """The player of the account that applies to a bot or an instance, when it
+    is one of the launcher's accounts and it has been logged in."""
+    from . import settings
+    from .accounts import kind
+    value = settings.get(target, "account")
+    if kind(value) != "account":
+        return None
+    account = target.ws.account(value)
+    return account.data.get("name") if account.exists() else None
 
 
 _OPERATING = {}            # lock path -> (thread that holds it, open handle)

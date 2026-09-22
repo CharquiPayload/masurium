@@ -199,6 +199,30 @@ def cmd_set(ws, args):
     return 0
 
 
+def cmd_account(ws, args):
+    """marionette.py account                  every account, whether it is logged in, who uses it
+    marionette.py account add [--as KEY]     log one in, once (HeadlessMC opens: login, then quit)
+    marionette.py account remove KEY         out of the launcher, login and all"""
+    if args.action == "add":
+        operations.add_account(ws, lambda argv, cwd, env: subprocess.call(argv, cwd=str(cwd), env=env),
+                               args.as_, print_event)
+        return 0
+    if args.action == "remove":
+        if not args.key:
+            raise Fail("say which:  marionette.py account remove <account>", code="no_account")
+        operations.remove_account(ws, args.key, print_event)
+        return 0
+    rows = operations.account_list(ws)
+    if not rows:
+        say(f"no accounts under {ws.accounts_dir}: marionette.py account add")
+        return 0
+    for account, logged, bots, insts in rows:
+        users = ", ".join([f"bot {b}" for b in bots] + [f"instance {i}" for i in insts]) or "nobody"
+        say(f"  {account.key:<16} plays as {account.name:<16} "
+            f"{'logged in' if logged else 'NOT logged in':<14} used by {users}")
+    return 0
+
+
 def cmd_phrases(ws, args):
     operations.rewrite_phrases(ws.instance(args.name), print_event)
 
@@ -302,6 +326,12 @@ def build_parser():
     c.add_argument("--default", action="store_true", help="take it out of this layer")
     c.add_argument("--bot", action="store_true", help="NAME is a bot: its settings, for all its instances")
     c.set_defaults(fn=cmd_set)
+
+    c = sub.add_parser("account", help="Minecraft accounts: list, add (log in once), remove")
+    c.add_argument("action", nargs="?", choices=("list", "add", "remove"), default="list")
+    c.add_argument("key", nargs="?", metavar="account", help="for remove: which")
+    c.add_argument("--as", dest="as_", metavar="ACCOUNT", help="for add: its name here (default: the player's)")
+    c.set_defaults(fn=cmd_account)
 
     c = sub.add_parser("phrases", help="have the brain write again what the bot says without it")
     c.add_argument("name", metavar="instance")

@@ -278,6 +278,7 @@ hard links to the server's pack, so **creating a bot costs a few megabytes**.
 
 ```text
 servers/<slug>/        server.conf + mods/ (one server and ITS client pack), server.env (its token)
+accounts/<account>/    account.json + the HeadlessMC folder its login lives in
 bots/<bot>/            bot.json + personality.txt: a character, and nothing heavy
 instances/<instance>/  instance.json (which bot, which server, its port, its own settings),
                        mods/ (its extras), gamedir/, hmc/, run/: a bot on a server, what runs
@@ -302,6 +303,15 @@ and when a change counts. The bridge knows nothing about layers: on every
 start and every change the launcher writes the resolved values into the
 instance's folder as one small file each (`model`, `owner`, `escort`...),
 which is what the bridge always read in a bot's folder.
+
+**An account's login lives once.** HeadlessMC keeps a login in its own folder
+(`HeadlessMC/auth/.accounts.json`, a path it does not let be moved) and renews
+it every time it launches the game; Microsoft hands back a new key and the
+old one stops working. A copy per instance would go stale one after another,
+so the login lives in `accounts/<account>/` and each instance's auth folder
+is a link to it. One account also plays in one game at a time, and its
+instances start one at a time (a lock per account through the start), so two
+renewals never race.
 
 **The bridge sees its server, not the machine.** A running instance is linked
 in its server's state folder under its player name
@@ -388,6 +398,7 @@ lives in a session of its own, so a start that simply died would leave a
 long operation on a thread and waits for it, the way a window will.
 
     workspace.py   the folders, server.env, the environment; the server registry
+    accounts.py    Minecraft accounts: logged in once, linked into each instance
     bots.py        a bot's folder and files; the lock that keeps two commands off it
     settings.py    what each of a bot's files accepts, its default, when a change counts
     packs.py       what a pack is made of, read from the jars

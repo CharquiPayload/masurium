@@ -3,6 +3,7 @@
 Four folders, outside the repo because they are heavy and are not code:
 
     servers/<slug>/        one server: how to get in, and ITS pack of client mods
+    accounts/<account>/    a Minecraft account, logged in once
     bots/<bot>/            a character: its name, personality and settings
     instances/<name>/      a bot on a server, which is what runs: its game, its
                            HeadlessMC, its logs and its own settings
@@ -64,7 +65,7 @@ class Server:
 
 class Workspace:
     def __init__(self, bots_dir, servers_dir, shared_dir, env_file, home=None, environ=None,
-                 instances_dir=None, state_dir=None):
+                 instances_dir=None, state_dir=None, accounts_dir=None):
         self.bots_dir = pathlib.Path(bots_dir)
         self.servers_dir = pathlib.Path(servers_dir)
         self.shared_dir = pathlib.Path(shared_dir)
@@ -75,6 +76,7 @@ class Workspace:
         # Next to server.env by default, which is where the bridge and the MCP
         # server always kept their state (~/.marionette).
         self.state_dir = pathlib.Path(state_dir) if state_dir else self.env_file.parent
+        self.accounts_dir = pathlib.Path(accounts_dir) if accounts_dir else self.bots_dir.parent / "accounts"
 
     @classmethod
     def from_environment(cls, environ=None, home=None):
@@ -96,7 +98,8 @@ class Workspace:
                    pick("MARIONETTE_COMMON_DIR", home / "shared"),
                    env_file, home, environ,
                    instances_dir=pick("MARIONETTE_INSTANCES_DIR", home / "instances"),
-                   state_dir=pick("MARIONETTE_STATE_DIR", env_file.parent))
+                   state_dir=pick("MARIONETTE_STATE_DIR", env_file.parent),
+                   accounts_dir=pick("MARIONETTE_ACCOUNTS_DIR", home / "accounts"))
 
     def __repr__(self):
         return (f"Workspace(bots={self.bots_dir}, instances={self.instances_dir}, "
@@ -130,6 +133,7 @@ class Workspace:
         env["MARIONETTE_COMMON_DIR"] = str(self.shared_dir)
         env["MARIONETTE_INSTANCES_DIR"] = str(self.instances_dir)
         env["MARIONETTE_STATE_DIR"] = str(self.state_dir)
+        env["MARIONETTE_ACCOUNTS_DIR"] = str(self.accounts_dir)
         env["MARIONETTE_ENV"] = str(self.env_file)
         local_bin = str(self.home / ".local" / "bin")
         env["PATH"] = local_bin + os.pathsep + env.get("PATH", "")
@@ -209,6 +213,17 @@ class Workspace:
         two different lives, and per bot name inside, which a server keeps
         unique."""
         return self.state_dir / "servers" / slug
+
+    # --- accounts ---------------------------------------------------------------
+
+    def account(self, key):
+        from .accounts import Account
+        return Account(self, key)
+
+    def account_keys(self):
+        if not self.accounts_dir.is_dir():
+            return []
+        return sorted(d.name for d in self.accounts_dir.iterdir() if (d / "account.json").is_file())
 
     # --- bots (characters) ------------------------------------------------------
 
