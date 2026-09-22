@@ -272,17 +272,21 @@ is stopped.
 
 ## Configuring a bot
 
-Settings live in two layers: the **bot's** (`bots/<bot>/bot.json`), for every
-instance of it, and the **instance's** (`instances/<instance>/instance.json`),
-which wins over the bot's. `marionette.py set` changes them with a check first
-and says when the change counts; `doctor` names any value, edited by hand, that
-`set` would refuse.
+Settings come in layers, weakest first: the **bot's** (`bots/<bot>/bot.json`),
+for every instance of it; the **instance's** (`instances/<instance>/instance.json`);
+its **groups'**, from its own outwards (see [Groups](#groups)); and the
+**global** config (`launcher.json`, next to `server.env`). A stronger layer
+wins where it says something. `marionette.py set` changes them with a check
+first and says when the change counts; `doctor` names any value, edited by
+hand, that `set` would refuse.
 
 ```bash
 launcher/marionette.py set alice                      # every setting, its value, and where it comes from
 launcher/marionette.py set --bot alice model sonnet   # for every instance of the bot
 launcher/marionette.py set alice model haiku low      # for this instance only
-launcher/marionette.py set alice heap --default       # out of the instance: the bot's, or the default
+launcher/marionette.py set alice heap --default       # out of the instance: what is under, or the default
+launcher/marionette.py set --group team model sonnet  # imposed on everything in the group
+launcher/marionette.py set --global heap 4g           # imposed on every instance
 ```
 
 The personality is a text file of its own, `bots/<bot>/personality.txt`: who
@@ -292,12 +296,13 @@ players and how; it goes at the start of its prompt.
 | setting | layers | meaning |
 |---|---|---|
 | `account` | bot, instance | one of the launcher's accounts (`account add`), `offline` (private servers only), or `online` (a login kept in the instance) |
-| `owner` | bot, instance | the player the bot belongs to: it accepts their delicate orders, and they control it with `/marionette bot` on any server. It cannot be changed from inside the game |
-| `model` | bot, instance | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`) |
-| `heap` | bot, instance | the game's memory, e.g. `3g` (default `MARIONETTE_HEAP`, else `3g`) |
-| `escort` | instance | the player name of another bot on its server: this one becomes that bot's **guard** |
+| `owner` | all | the player the bot belongs to: it accepts their delicate orders, and they control it with `/marionette bot` on any server. It cannot be changed from inside the game |
+| `model` | all | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`) |
+| `heap` | all | the game's memory, e.g. `3g` (default `MARIONETTE_HEAP`, else `3g`) |
+| `role` | bot, instance, group | `main` (takes orders, does jobs) or `guard` (see [Groups](#groups)) |
 | `port` | instance | the local port of the bot mod, chosen by the launcher |
-| `ignore_global` | instance | `yes`: the global rules (below) leave this instance alone |
+| `lock` | instance, group | `yes`: the groups around it do not impose on it (the global config still does) |
+| `ignore_global` | instance, group | `yes`: the global config (settings and rules) leaves it alone |
 
 The launcher writes what the bridge reads into the instance's folder on every
 start and every change, one small file per setting (`model`, `owner`...):
@@ -319,11 +324,47 @@ launcher/marionette.py phrases alice
 A version that lost a placeholder (the distance of the creeper, say) is not
 used: that sentence is said in English.
 
-**Main bots and guards.** A main bot takes orders and does jobs. A guard is an
-instance whose `escort` names a main bot on its server: it follows and protects it, sleeps
-when it sleeps, shares its break whitelist, steps aside when it is in the way,
-and is stopped together with it. Guards mostly react, so a smaller model
+**Main bots and guards.** A main bot takes orders and does jobs. A guard
+follows and protects its leader, sleeps when it sleeps, shares its break
+whitelist and steps aside when it is in the way. Which bot it guards is said
+by a dependency group (below). Guards mostly react, so a smaller model
 (`haiku low`) works well for them.
+
+### Groups
+
+A group is `groups/<group>/group.json`, and comes in two kinds:
+
+- **normal**: instances and other groups, started and stopped together;
+- **dependency**: a **leader** and its **guards**, on the leader's server. A guard
+  is useless without its leader, so starting a guard starts its leader first
+  (client and bridge), stopping the leader stops its guards, and restarting the
+  leader leaves them running. A guard has one leader. An instance with the
+  role `guard` that no dependency group names does not start, and says so.
+
+```bash
+launcher/marionette.py group create alice-guards --leader alice   # a dependency group
+launcher/marionette.py group add alice-guards bob                 # bob guards alice (and takes the role)
+launcher/marionette.py group create team
+launcher/marionette.py group add team carol group:alice-guards    # instances and groups
+launcher/marionette.py groups                                     # the tree, and what is in no group
+launcher/marionette.py group start team                           # everything in it, leaders first
+launcher/marionette.py group stop team
+launcher/marionette.py group clone team                           # team-1, with copies of every instance
+```
+
+Groups nest, and each instance and each group is in **one** group at most, so
+what imposes on an instance is a single chain, from its own group outwards. A
+group's settings (`set --group`) and rules (`rules --group`) **impose** on
+everything inside it, the outer groups over the inner ones, and the global
+config over them all. `lock yes` on an instance or a group keeps the groups
+around it from imposing on it; `ignore_global yes` keeps the global config out.
+
+Starting a group starts what is not running, one after another, and warns
+first if their heaps do not fit in the memory there is. One that does not
+start does not stop the rest, except its own guards. A clone of a group is a
+copy of the whole tree with copies of its instances: the same players as the
+originals, so `start` is what refuses to run both. An `escort` from before
+groups is turned into a dependency group by `marionette.py migrate`.
 
 Standing orders ("if you run out of fuel, take it from the wooden chest") are
 still given by talking to the bot, and kept per server in the client's

@@ -13,10 +13,11 @@ first:
               that would undo what was changed in the game. A change that
               cannot reach the server waits in the instance's folder
               (rules-pending.json) and goes on its next start.
-    imposed   the global config (launcher.json, "rules") unless the instance
-              ignores it (`set <instance> ignore_global yes`); groups will
-              impose here too. Nothing in the game changes it: the command
-              is refused and says who imposes it.
+    imposed   what its groups say (group.json, "rules"), from its own group
+              outwards, the outer ones winning, up to a `lock`; and on top the
+              global config (launcher.json, "rules") unless it is ignored
+              (`ignore_global yes`). Nothing in the game changes it: the
+              command is refused and says who imposes it.
 
 Each layer names only what it decides: a toggle, or an id put on a list or
 taken off it. Where two layers name the same thing the stronger one wins;
@@ -320,15 +321,24 @@ def of_global(ws):
     return parse(ws.config().get("rules"), f"{ws.config_file} (rules)")
 
 
+def of_group(group):
+    return parse(group.data.get("rules"), f"{group.json} (rules)")
+
+
 def base_of(inst):
     return merge(of_bot(inst.bot), of_server(inst.ws, inst.slug))
 
 
 def imposed_of(inst):
-    from . import settings
-    if settings.get(inst, "ignore_global") == "yes":
-        return empty()
-    return labeled(of_global(inst.ws), "global")
+    """Its groups' rules, the innermost first so the outer ones win, and the
+    global ones on top, each thing labeled with who imposes it."""
+    from . import groups, settings
+    out = empty()
+    for g in groups.chain(inst):
+        out = merge(out, labeled(of_group(g), f"group {g.key}"))
+    if settings.get(inst, "ignore_global") != "yes":
+        out = merge(out, labeled(of_global(inst.ws), "global"))
+    return out
 
 
 def save_bot(bot, layer):
@@ -346,6 +356,15 @@ def save_server(ws, slug, layer):
         f.unlink(missing_ok=True)
     else:
         write_json(f, dump(layer))
+
+
+def save_group(group, layer):
+    data = group.data
+    if is_empty(layer):
+        data.pop("rules", None)
+    else:
+        data["rules"] = dump(layer)
+    group.save(data)
 
 
 def save_global(ws, layer):

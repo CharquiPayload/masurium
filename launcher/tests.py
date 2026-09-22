@@ -40,7 +40,7 @@ FAKE_JAVA.chmod(FAKE_JAVA.stat().st_mode | stat.S_IEXEC)
 
 sys.path.insert(0, str(REPO))
 from launcher import cli, doctor, operations as ops, settings  # noqa: E402
-from launcher import bots, files, keeper, packs, processes, rules  # noqa: E402
+from launcher import bots, files, groups, keeper, packs, processes, rules  # noqa: E402
 from launcher.events import Fail  # noqa: E402
 from launcher.workspace import DEFAULT_HEAP, DEFAULT_VERSION, FIRST_PORT, Workspace  # noqa: E402
 
@@ -1089,31 +1089,209 @@ def tests_cancel():
 
 
 
-def tests_guard_rings():
-    print("\nGuards: a ring of escorts is stopped once each, not forever")
+def tests_guards():
+    print("\nGuards: a leader stops its guards, and a guard starts its leader")
     quick_server_env()
     alice, bob = WS.instance("alice"), WS.instance("bob")
-    settings.set_value(alice, "escort", "bob")
-    settings.set_value(bob, "escort", "alice")
+    said(ops.create_group, WS, "alice-guards", leader="alice")
+    text, _ = said(ops.group_add, WS, "alice-guards", ["bob"])
+    check("a guard added to a dependency group takes the role of a guard",
+          settings.get(bob, "role") == "guard" and "role guard" in text, text)
+    check("...and its bridge is told whom it escorts", bob.read("escort") == "Alice")
     start_keeper("alice")
     start_keeper("bob")
-    check("both run", wait(lambda: keeper.keeper_alive(alice) and keeper.keeper_alive(bob), 10))
-    text, code = run_cli("stop", "alice")
-    check("two instances guarding each other: stop ends", code == 0, text)
-    check("...having stopped each one once",
-          text.count("==> alice stopped") == 1 and text.count("==> bob stopped") == 1, text)
-    text, code = run_cli("stop", "bob")
-    check("a guard that is not running is not 'stopped' again", code == 0 and "guard" not in text, text)
+    try:
+        check("both run", wait(lambda: keeper.keeper_alive(alice) and keeper.keeper_alive(bob), 10))
+        text, code = run_cli("stop", "alice")
+        check("stopping the leader stops its guard, each once",
+              code == 0 and text.count("==> alice stopped") == 1 and text.count("==> bob stopped") == 1, text)
+        text, code = run_cli("stop", "bob")
+        check("a guard that is not running is not 'stopped' again", code == 0 and "guard" not in text, text)
+    finally:
+        said(ops.stop, bob)
+        said(ops.stop, alice)
+    text, result = said(ops.start, bob)
+    check("starting a guard starts its leader first; if the leader does not start, the guard does not",
+          isinstance(result, Fail) and result.code == "leader_failed"
+          and "guards alice, which is not running: starting it first" in text
+          and "starting bob" not in text, text)
+    said(ops.delete_group, WS, "alice-guards")
+    check("out of its group, its bridge escorts nobody", not (bob.dir / "escort").exists())
+    text, result = said(ops.start, bob)
+    check("a guard that no dependency group names does not start, and says how to fix it",
+          isinstance(result, Fail) and result.code == "guard_alone" and "group create" in text, text)
+    settings.clear(bob, "role")
     data = bob.data
-    data["escort"] = "bob"                 # edited by hand: `set` refuses it
+    data["escort"] = "Alice"                # from before groups
     bob.save(data)
-    text, code = run_cli("stop", "bob")
-    check("an instance guarding itself: stop ends", code == 0, text)
-    checks = doctor.checks(WS)
-    check("doctor names an instance that guards itself",
-          any(l == "instances/bob" and ok is False and "escorts itself" in d for l, ok, d in checks))
-    settings.clear(alice, "escort")
-    settings.clear(bob, "escort")
+    text, result = said(ops.start, bob)
+    check("an instance still naming an escort is sent to migrate",
+          isinstance(result, Fail) and result.code == "escort_retired" and "migrate" in text, text)
+    text, made = said(ops.migrate, WS)
+    group = next((g for g in WS.groups() if g.leader == "alice"), None)
+    check("migrate turns the escort into a dependency group",
+          group is not None and group.guards == ["bob"] and "escort" not in bob.data
+          and settings.get(bob, "role") == "guard" and "guard of alice" in text, text)
+    check("...with a backup first", "escorts-before-groups" in text, text)
+    said(ops.delete_group, WS, group.key)
+    settings.clear(bob, "role")
+    layout()
+
+
+def tests_groups():
+    print("\nGroups: a tree of instances, each in one group at most; the outer ones impose")
+    quick_server_env()
+    for name in ("Carol", "Dave"):
+        said(ops.create, WS, name, "test", "offline")
+    second_server("other")
+    said(ops.create, WS, "Eve", "other", "offline")
+    alice, bob, carol, dave, eve = (WS.instance(k) for k in ("alice", "bob", "carol", "dave", "eve"))
+
+    said(ops.create_group, WS, "alice-guards", leader="alice")
+    said(ops.group_add, WS, "alice-guards", ["bob"])
+    said(ops.create_group, WS, "team")
+    text, _ = said(ops.group_add, WS, "team", ["carol", "group:alice-guards"])
+    team, guards = WS.group("team"), WS.group("alice-guards")
+    check("a normal group holds instances and groups",
+          team.instance_keys() == ["carol"] and team.group_keys() == ["alice-guards"], text)
+    check("everything inside it, leaders before their guards",
+          [i.key for i in groups.flatten(team)] == ["carol", "alice", "bob"])
+    check("an instance in a group is refused in another: one group at most",
+          fails(ops.group_add, WS, "team", ["bob"]).code == "in_a_group")
+    check("so is a leader, whose group goes in instead",
+          fails(ops.group_add, WS, "team", ["alice"]).code == "in_a_group")
+    said(ops.create_group, WS, "outer")
+    said(ops.group_add, WS, "outer", ["group:team"])
+    check("a group cannot end up inside itself",
+          fails(ops.group_add, WS, "alice-guards", ["group:outer"]).code in ("not_an_instance", "cycle")
+          and fails(ops.group_add, WS, "team", ["group:outer"]).code in ("in_a_group", "cycle"))
+    check("a guard plays where its leader does",
+          fails(ops.group_add, WS, "alice-guards", ["eve"]).code == "leader_elsewhere")
+    check("a name that is an instance and a group has to say which",
+          fails(ops.create_group, WS, "dave") is None and fails(ops.group_add, WS, "team", ["dave"]).code == "ambiguous")
+    said(ops.delete_group, WS, "dave")
+
+    # Settings: the outer layers impose.
+    settings.set_value(alice, "model", "sonnet")
+    check("an instance's own setting, with no group saying anything",
+          settings.resolve(alice, "model") == ("sonnet", "instance"))
+    settings.set_value(guards, "model", "haiku low")
+    check("its group's wins over it", settings.resolve(alice, "model") == ("haiku low", "group alice-guards"))
+    settings.set_value(team, "model", "opus medium")
+    check("the group around that one wins over it", settings.resolve(bob, "model") == ("opus medium", "group team"))
+    settings.set_value(guards, "lock", "yes")
+    check("a locked group keeps the ones around it out",
+          settings.resolve(bob, "model") == ("haiku low", "group alice-guards")
+          and settings.resolve(carol, "model") == ("opus medium", "group team"))
+    said(ops.configure, WS.global_config(), "model", "sonnet low")
+    check("the global config wins over every group, lock or not",
+          settings.resolve(bob, "model") == ("sonnet low", "global") and WS.config()["settings"] == {"model": "sonnet low"})
+    settings.set_value(alice, "ignore_global", "yes")
+    check("...unless the instance ignores it", settings.resolve(alice, "model") == ("haiku low", "group alice-guards"))
+    settings.clear(alice, "ignore_global")
+    settings.set_value(team, "ignore_global", "yes")
+    check("...or a group around it does", settings.resolve(carol, "model") == ("opus medium", "group team"))
+    check("...but not through a lock", settings.resolve(bob, "model") == ("sonnet low", "global"))
+    settings.set_value(carol, "lock", "yes")
+    check("a locked instance: no group imposes on it, and the global config still does",
+          settings.resolve(carol, "model") == ("sonnet low", "global"))
+    settings.clear(carol, "lock")
+    check("the rendered model is the one that applies",
+          settings.render(bob) or bob.read("model") == "sonnet low")
+
+    # Rules: a group's are imposed, and say which group.
+    said(ops.edit_layer, WS, ["food", "ban", "beef"], group=team)
+    said(ops.edit_layer, WS, ["food", "ban", "cod"], group=guards)
+    imposed = rules.imposed_of(carol)
+    check("a group's rules are imposed on what is inside it, saying which group",
+          imposed["food"] == {"beef": True} and imposed["from"].get("food.beef") == "group team", imposed)
+    imposed = rules.imposed_of(bob)
+    check("...not through a lock", imposed["food"] == {"cod": True}
+          and imposed["from"].get("food.cod") == "group alice-guards", imposed)
+    text, result = said(ops.edit_rules, carol, ["food", "allow", "beef"])
+    check("a change to its own rules on what its group imposes is refused, naming the group",
+          isinstance(result, Fail) and "imposed by group team" in text and "rules --group team" in text, text)
+    text, code = run_cli("rules", "--group", "team")
+    check("`rules --group <group>` shows the group's", code == 0 and "food ban beef" in text, text)
+
+    # The command line.
+    text, code = run_cli("groups")
+    check("`groups` shows the tree, and the instances in no group",
+          code == 0 and "outer" in text and "\n      alice-guards" in text and "leader: Alice on test" in text
+          and "guard: Bob on test" in text and "in no group:" in text and "eve" in text, text)
+    text, code = run_cli("group", "team")
+    check("`group <group>` shows one: what is in it, its settings and rules",
+          code == 0 and "instances: carol" in text and "model opus medium" in text and "food ban beef" in text, text)
+    text, code = run_cli("set", "--group", "team", "heap", "4g")
+    check("`set --group` changes a group's setting", code == 0 and settings.own_values(team).get("heap") == "4g", text)
+    text, code = run_cli("set", "--global", "model", "--default")
+    check("`set --global <key> --default` takes it out of launcher.json", code == 0 and not WS.config_file.exists(),
+          text)
+    check("doctor has nothing to say about a sound tree",
+          all(c.ok for c in doctor.checks(WS) if c.label.startswith("groups/")),
+          [c for c in doctor.checks(WS) if c.label.startswith("groups")])
+
+    # Starting and stopping a group.
+    text, (up, failed) = said(ops.start_group, WS, "team")
+    check("starting a group tries each one, and one failing does not stop the rest",
+          {k for k, _ in failed} == {"carol", "alice", "bob"} and "carol did not start" in text, text)
+    check("...and a guard whose leader did not start is not tried",
+          "bob: not started, its leader alice did not start" in text, text)
+    start_keeper("alice")
+    start_keeper("carol")
+    try:
+        check("two are up", wait(lambda: keeper.keeper_alive(alice) and keeper.keeper_alive(carol), 10))
+        text, stopped = said(ops.stop_group, WS, "outer")
+        check("stopping a group stops everything in it that runs",
+              stopped == {"alice", "carol"} and "stopped (2 instance(s))" in text, text)
+    finally:
+        said(ops.stop, alice)
+        said(ops.stop, carol)
+
+    # Cloning a group clones everything in it.
+    text, clone = said(ops.clone_group, WS, "outer")
+    inner = WS.group(clone.group_keys()[0])
+    inner_guards = WS.group(inner.group_keys()[0])
+    check("a clone of a group is a copy of the tree, with copies of its instances",
+          clone.key == "outer-1" and inner.key == "team-1" and inner.instance_keys() == ["carol-1"]
+          and inner_guards.leader == "alice-1" and inner_guards.guards == ["bob-1"], text)
+    check("...its settings and rules included",
+          settings.own_values(inner).get("model") == "opus medium" and rules.of_group(inner)["food"] == {"beef": True})
+    check("...the clones play as the same players: start is what says no",
+          WS.instance("carol-1").name == "Carol" and WS.instance("bob-1").read("escort") == "Alice")
+    check("doctor is fine with the clone", all(c.ok for c in doctor.checks(WS) if c.label.startswith("groups/")))
+
+    # A hand edit into something the commands refuse, named by doctor.
+    data = team.data
+    data["instances"] = ["carol", "eve"]
+    team.save(data)
+    gdata = guards.data
+    gdata["guards"] = ["bob", "eve"]
+    guards.save(gdata)
+    wrong = [f"{c.label}: {c.detail}" for c in doctor.checks(WS) if c.ok is False]
+    check("doctor names an instance in two groups, and a guard on another server than its leader",
+          any("instance eve" in w and "more than one group" in w for w in wrong)
+          and any("groups/alice-guards" in w and "a guard plays where its leader does" in w for w in wrong), wrong)
+    data["instances"] = ["carol"]
+    team.save(data)
+    gdata["guards"] = ["bob"]
+    guards.save(gdata)
+
+    text, _ = said(ops.delete_group, WS, "outer")
+    check("deleting a group leaves what was in it, in no group",
+          not WS.group("outer").exists() and team.exists() and groups.parent_of(WS, team) is None, text)
+    for key in WS.group_keys():
+        remove_tree(WS.group(key).dir)
+    for key in ("carol", "dave", "eve", "carol-1", "alice-1", "bob-1"):
+        remove_tree(WS.instance(key).dir)
+    for key in ("carol", "dave", "eve"):
+        remove_tree(WS.bot(key).dir)
+    remove_tree(TMP / "servers" / "other")
+    for inst in (alice, bob):
+        data = inst.data
+        for k in ("model", "role"):
+            data.pop(k, None)
+        inst.save(data)
     layout()
 
 
@@ -1179,9 +1357,10 @@ def tests_settings():
                                     (bot, "model", "haiku lowest", "effort is one of"),
                                     (bot, "model", "a b c", "optional effort"),
                                     (bot, "port", "9000", "set per instance"),
-                                    (bot, "escort", "bob", "set per instance"),
-                                    (alice, "escort", "alice", "cannot escort itself"),
-                                    (alice, "escort", "nobody", "instance on test: bob"),
+                                    (bot, "escort", "bob", "no longer a setting: a guard's leader"),
+                                    (bot, "role", "boss", "one of main, guard"),
+                                    (bot, "ignore_global", "yes", "set per instance or group"),
+                                    (alice, "lock", "maybe", "one of no, yes"),
                                     (alice, "heap", "512m", "at least 1g"),
                                     (alice, "heap", "lots", "heap size"),
                                     (alice, "port", "80", "between 1024"),
@@ -1195,9 +1374,8 @@ def tests_settings():
           settings.set_value(bot, "account", "ONLINE") == "online" and bot.data.get("account") == "online")
     settings.set_value(bot, "account", "offline")
     check("a model keeps its two words", settings.set_value(bot, "model", "haiku   low") == "haiku low")
-    check("an escort keeps its capitals (the game shows names as they are)",
-          settings.set_value(alice, "escort", "Bob") == "Bob")
-    settings.clear(alice, "escort")
+    check("a role goes in lowercase", settings.set_value(alice, "role", "GUARD") == "guard")
+    settings.clear(alice, "role")
     settings.clear(bot, "model")
     check("the port cannot be cleared: every instance needs one",
           "no default" in told(fails(settings.clear, alice, "port")))
@@ -1859,7 +2037,8 @@ if __name__ == "__main__":
     tests_conflicts()
     tests_keeper_failures()
     tests_keeper_guarded()
-    tests_guard_rings()
+    tests_guards()
+    tests_groups()
     tests_logwatch()
     tests_status()
     tests_cancel()

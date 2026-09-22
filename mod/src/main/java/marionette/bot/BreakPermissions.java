@@ -88,14 +88,31 @@ final class BreakPermissions {
      * My BOSS's list, if I am a guard: guards get the same block whitelist as the lead
      * bot. It is read from the boss's gamedir and reloaded when it changes; empty if I am
      * not a guard or it cannot be read.
+     *
+     * <p>Where that gamedir is, the launcher says ({@code config/marionette-escort-gamedir.txt}):
+     * the boss is another instance, and its folder is named freely, not after its
+     * player. Without that file, the folder next to mine named after the boss.
      */
     private static long bossMtime = -1;
     private static java.util.Set<String> ofTheBoss = java.util.Set.of();
 
+    static Path bossGamedir(String boss) {
+        Path told = Path.of("config", "marionette-escort-gamedir.txt");
+        try {
+            if (Files.exists(told)) {
+                String s = Files.readString(told).strip();
+                if (!s.isEmpty()) return Path.of(s);
+            }
+        } catch (IOException ignored) {
+            // As before the launcher said where: next to mine.
+        }
+        return Path.of("..", "..", boss.toLowerCase(), "gamedir");
+    }
+
     private static synchronized java.util.Set<String> ofTheBoss() {
         String boss = MarionetteBot.boss();
         if (boss == null) return java.util.Set.of();
-        Path f = Path.of("..", "..", boss.toLowerCase(), "gamedir").resolve(file());
+        Path f = bossGamedir(boss).resolve(file());
         try {
             if (!Files.exists(f)) return ofTheBoss;
             long m = Files.getLastModifiedTime(f).toMillis();

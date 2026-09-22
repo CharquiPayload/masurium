@@ -14,8 +14,10 @@ tomorrow, both on the same functions.
     accounts.py    Minecraft accounts: logged in once, linked into each instance
     bots.py        bots (characters) and instances (a bot on a server), and the lock
                    that keeps two commands off an instance
-    settings.py    settings in layers (bot < instance), what each accepts, when it counts,
-                   and what is rendered for the bridge
+    groups.py      groups: instances started together, a leader and its guards, and the
+                   global config; the tree that decides what imposes on an instance
+    settings.py    settings in layers (bot < instance < groups < global), what each
+                   accepts, when it counts, and what is rendered for the bridge
     rules.py       a bot's rules (toggles, food, blocks) in three layers, kept on its server
     packs.py       what a pack is made of, read from the jars; the pack owns gamedir/mods
     api.py         the server mod's HTTP API
@@ -23,7 +25,7 @@ tomorrow, both on the same functions.
     processes.py   pids, process groups, ports
     diagnosis.py   why a start failed, from the client's own logs
     operations.py  create, clone, start, connect, bridge, stop, restart, status, set,
-                   rules, deploy-mod, migrate
+                   rules, groups, deploy-mod, migrate
     doctor.py      the checks, in the order things break
     events.py      Event and Fail
     files.py       env files, locks, logs read as they grow

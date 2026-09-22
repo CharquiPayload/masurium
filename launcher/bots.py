@@ -226,10 +226,9 @@ class Instance:
         return self.state / f"bridge_{self.player}.lock"
 
     def guards(self):
-        """The instances whose escort is this one's player, on its server."""
-        from . import settings
-        return [g for g in self.ws.instances(self.slug)
-                if g != self and settings.get(g, "escort").lower() == self.player]
+        """The guards of its dependency group, when it leads one."""
+        from .groups import guards_of
+        return [g for g in guards_of(self) if g != self]
 
     def ask(self, route, timeout=5):
         """One question to the bot mod itself, on its own port."""

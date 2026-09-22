@@ -18,9 +18,9 @@ import time
 import urllib.error
 from dataclasses import dataclass
 
-from . import accounts, rules, settings
+from . import accounts, groups, rules, settings
 from .api import UNREACHABLE
-from .bots import Instance, check_key, check_name, operating, write_json
+from .bots import Character, Instance, check_key, check_name, operating, write_json
 from .diagnosis import complaints, crash_report, explain_crash
 from .events import Cancelled, Fail, pause, report_to, wait_for
 from .files import (LogWatch, link_dir, link_or_copy, link_target, log_has, read_java_properties,
@@ -300,12 +300,17 @@ def prepare_gamedir(inst, server):
     # an address and port): the launcher tells it. Per-server memories
     # (places, chests, orders...) are keyed on this.
     (config / "marionette-server.txt").write_text(server.slug + "\n", encoding="utf-8")
-    escort = re.sub(r"\s", "", settings.get(inst, "escort"))
+    # A guard's leader, from its dependency group: its player, which the body
+    # escorts, and its game folder, where the body reads the blocks the leader
+    # may break (a guard shares them).
+    leader = groups.leader_of(inst)
     escort_f = config / "marionette-escort.txt"
-    if escort:
-        escort_f.write_text(escort + "\n", encoding="utf-8")
+    leader_f = config / "marionette-escort-gamedir.txt"
+    if leader is not None:
+        escort_f.write_text(leader.name + "\n", encoding="utf-8")
+        leader_f.write_text(str(leader.gamedir.resolve()) + "\n", encoding="utf-8")
     else:
-        unlink_quietly(escort_f)
+        unlink_quietly(escort_f, leader_f)
     # The game's first-run accessibility prompt sits in front of the title
     # screen until somebody clicks, and nobody ever will: it is turned off in
     # options.txt, which the game reads on start. Every other option is left
@@ -357,6 +362,7 @@ def start(inst, on_event=None, cancel=None):
 
 
 def _start(inst, report, cancel=None):
+    _leader_first(inst, report, cancel)
     launched = []
     try:
         return _start_steps(inst, report, cancel, launched)
@@ -366,6 +372,55 @@ def _start(inst, report, cancel=None):
             _stop_client(inst, report)
             leave_place(inst)
         raise
+
+
+def _leader_first(inst, report, cancel):
+    """A guard needs its leader: one with the role and no dependency group
+    naming it is refused, and a leader that is not running is started first,
+    client and bridge. The dependency is declared by hand on purpose: guessed,
+    a guard could start next to a leader on another server."""
+    group, place = groups.dependency_of(inst)
+    role = settings.get(inst, "role")
+    if "escort" in inst.data and place is None:
+        raise Fail(f"{inst.key} names an escort, which is now a dependency group.",
+                   lines=["marionette.py migrate  turns it into one"], code="escort_retired")
+    if role != "guard" and place != "guard":
+        return
+    if place != "guard":
+        raise Fail(f"{inst.key} is a guard, and no dependency group names it as one: a guard "
+                   "without a leader has nothing to do.",
+                   lines=[f"marionette.py group create <group> --leader <instance>, then  "
+                          f"marionette.py group add <group> {inst.key}",
+                          f"or it is not a guard:  marionette.py set {inst.key} role main"],
+                   code="guard_alone")
+    if role != "guard":
+        raise Fail(f"{inst.key} is a guard of {group.leader} in {group.id}, and its role is {role}.",
+                   lines=[f"marionette.py set {inst.key} role guard   or   "
+                          f"marionette.py group remove {group.key} {inst.key}"], code="guard_role")
+    leader = groups.leader_of(inst)
+    if leader is None:
+        raise Fail(f"{group.id} has no leader to guard ({group.leader} is not an instance).",
+                   code="no_leader")
+    if leader.slug != inst.slug:
+        raise Fail(f"{inst.key} plays on {inst.slug} and its leader {leader.key} on {leader.slug}: "
+                   "a guard plays where its leader does.", code="leader_elsewhere")
+    if not client_running(leader) or not bridge_pid(leader):
+        report.step(f"{inst.key} guards {leader.key}, which is not running: starting it first",
+                    stage="leader")
+        try:
+            bring_up(leader, on_event=report.sink, cancel=cancel)
+        except Fail as e:
+            raise Fail(f"its leader {leader.key} did not start, so {inst.key} does not either: {e}",
+                       lines=e.lines, code="leader_failed")
+
+
+def bring_up(inst, on_event=None, cancel=None):
+    """Whatever of an instance is not running: its client, in the server,
+    then its bridge. Returns JOINED or ALREADY_IN."""
+    result = start(inst, on_event, cancel)
+    if not bridge_pid(inst):
+        start_bridge(inst, on_event)
+    return result
 
 
 def _start_steps(inst, report, cancel, launched):
@@ -744,7 +799,14 @@ def configure(target, key, value=None, clear=False, on_event=None):
     report = report_to(on_event)
     target.require()
     s = settings.setting(key)
-    affected = [target] if isinstance(target, Instance) else target.instances()
+    if isinstance(target, Instance):
+        affected = [target]
+    elif isinstance(target, groups.Group):
+        affected = groups.flatten(target)
+    elif isinstance(target, groups.Global):
+        affected = target.ws.instances()
+    else:
+        affected = target.instances()
     if s.at_start:
         running = [i.key for i in affected if client_running(i)]
         if running:
@@ -756,10 +818,11 @@ def configure(target, key, value=None, clear=False, on_event=None):
         settings.set_value(target, key, value)
     for inst in affected:
         settings.render(inst)
-    if key == "ignore_global":
+    if key in ("ignore_global", "lock"):
         _push_running(affected, report)
     now, layer = settings.resolve(target, key)
-    who = target.key if isinstance(target, Instance) else f"bot {target.key}"
+    who = target.key if isinstance(target, Instance) else (
+        f"bot {target.key}" if isinstance(target, Character) else target.id)
     report.step(f"{who}: {key} = {now or '(nothing)'}" + ("" if layer == settings.layer_of(target)
                                                           else f"  (from the {layer})"), stage="configured")
     report.detail(f"it counts {settings.APPLIES[s.applies]}")
@@ -829,6 +892,270 @@ def rewrite_phrases(inst, on_event=None):
     unlink_quietly(phrases_file(inst))
     report.step(f"{inst.key}: its sentences will be written when its bridge next starts", stage="phrases")
     return "on the next start"
+
+
+# --- groups ---------------------------------------------------------------------
+
+def _member(ws, ref):
+    """An instance or a group, by name: `group:<name>` or `instance:<name>`
+    when a name is both."""
+    kind, _, name = ref.partition(":") if ":" in ref else ("", "", ref)
+    inst, group = Instance(ws, name), ws.group(name)
+    if kind == "instance" or (not kind and inst.exists() and not group.exists()):
+        return inst.require()
+    if kind == "group" or (not kind and group.exists() and not inst.exists()):
+        return group.require()
+    if not kind and inst.exists() and group.exists():
+        raise Fail(f"{name} is an instance and a group: say which, instance:{name} or group:{name}",
+                   code="ambiguous")
+    raise Fail(f"there is no instance or group {name}.", code="no_member")
+
+
+def create_group(ws, key, leader=None, on_event=None):
+    """A group: a normal one, or, with a leader, a dependency one (a leader
+    and its guards)."""
+    report = report_to(on_event)
+    key = key.lower()
+    groups.check_group_key(key)
+    group = ws.group(key)
+    if group.dir.exists():
+        raise Fail(f"there is already a group {key}.", code="exists")
+    if leader is None:
+        group.save({"kind": groups.NORMAL, "instances": [], "groups": []})
+        report.step(f"group {key} created: add instances and groups to it with  "
+                    f"marionette.py group add {key} ...", stage="created")
+        return group
+    lead = ws.instance(leader)
+    _check_free(ws, lead)
+    group.save({"kind": groups.DEPENDENCY, "leader": lead.key, "guards": []})
+    report.step(f"dependency group {key} created, led by {lead.key} ({lead.name} on {lead.slug}): add its "
+                f"guards with  marionette.py group add {key} <instance>", stage="created")
+    return group
+
+
+def _check_free(ws, node):
+    """One group at most: what imposes on it is then one chain."""
+    parent = groups.parent_of(ws, node)
+    if parent is not None:
+        raise Fail(f"{node.id} is already in {parent.id}: one group at most, so what imposes on it is "
+                   "never two groups that disagree.",
+                   lines=[f"take it out first:  marionette.py group remove {parent.key} {node.key}"],
+                   code="in_a_group")
+    if isinstance(node, Instance) and groups.dependency_of(node)[1] == "leader":
+        raise Fail(f"{node.key} leads a dependency group: that group goes in, not the instance.",
+                   code="in_a_group")
+
+
+def group_add(ws, key, refs, on_event=None):
+    """Instances and groups into a normal group; guards into a dependency
+    one (on its leader's server, with the role of a guard, which is set on
+    the instance if it had another)."""
+    report = report_to(on_event)
+    group = ws.group(key).require()
+    data = group.data
+    for ref in refs:
+        node = _member(ws, ref)
+        _check_free(ws, node)
+        if group.kind == groups.DEPENDENCY:
+            if not isinstance(node, Instance):
+                raise Fail("a dependency group holds a leader and its guards: instances, not groups.",
+                           code="not_an_instance")
+            lead = Instance(ws, group.leader)
+            if node == lead:
+                raise Fail(f"{node.key} is the leader of {group.id}.", code="leader")
+            if node.slug != lead.slug:
+                raise Fail(f"{node.key} plays on {node.slug} and the leader {lead.key} on {lead.slug}: a guard "
+                           "plays where its leader does.", code="leader_elsewhere")
+            data["guards"] = data.get("guards", []) + [node.key]
+            group.save(data)
+            if settings.get(node, "role") != "guard":
+                settings.set_value(node, "role", "guard")
+                report.detail(f"{node.key}: role guard (set on the instance)")
+            settings.render(node)
+            report.step(f"{node.key} guards {lead.key} ({group.id})", stage="grouped")
+            continue
+        if isinstance(node, groups.Group) and (node == group or group in groups.subgroups(node)):
+            raise Fail(f"{node.id} would end up inside itself.", code="cycle")
+        field = "instances" if isinstance(node, Instance) else "groups"
+        data[field] = data.get(field, []) + [node.key]
+        group.save(data)
+        report.step(f"{node.id} is in {group.id} now", stage="grouped")
+    return group
+
+
+def group_remove(ws, key, refs, on_event=None):
+    report = report_to(on_event)
+    group = ws.group(key).require()
+    data = group.data
+    for ref in refs:
+        node = _member(ws, ref)
+        field = ("guards" if group.kind == groups.DEPENDENCY else
+                 "instances" if isinstance(node, Instance) else "groups")
+        if node.key not in data.get(field, []):
+            if group.kind == groups.DEPENDENCY and node.key == group.leader:
+                raise Fail(f"{node.key} leads {group.id}: delete the group instead "
+                           f"(marionette.py group delete {group.key}).", code="leader")
+            raise Fail(f"{node.id} is not in {group.id}.", code="not_in_group")
+        data[field] = [k for k in data[field] if k != node.key]
+        group.save(data)
+        if isinstance(node, Instance):
+            settings.render(node)
+        report.step(f"{node.id} is out of {group.id}", stage="ungrouped")
+        if group.kind == groups.DEPENDENCY and settings.get(node, "role") == "guard":
+            report.detail(f"it is still a guard, with no leader: it will not start until it has one, or "
+                          f"marionette.py set {node.key} role main")
+    return group
+
+
+def delete_group(ws, key, on_event=None):
+    """The group goes, not what was in it: its instances and groups stay,
+    in no group. Nothing is moved into the group around it behind anyone's
+    back."""
+    report = report_to(on_event)
+    group = ws.group(key).require()
+    parent = groups.parent_of(ws, group)
+    if parent is not None:
+        pdata = parent.data
+        pdata["groups"] = [k for k in pdata.get("groups", []) if k != group.key]
+        parent.save(pdata)
+    inside = group.instance_keys() + group.group_keys()
+    members = [Instance(ws, k) for k in group.instance_keys()]
+    shutil.rmtree(group.dir)
+    for inst in members:
+        if inst.exists():
+            settings.render(inst)         # a guard of it escorts nobody now
+    report.step(f"{group.id} deleted" + (f"; {', '.join(inside)} are in no group now" if inside else ""),
+                stage="deleted")
+
+
+def clone_group(ws, key, new_key=None, on_event=None):
+    """A copy of a group and of everything in it: each instance cloned (on
+    its own server, with a name of its own: alice-1), each group inside
+    cloned the same way, and the copy holding the copies. Its settings and
+    rules come along. Nothing is asked: the clones are the same players as
+    the originals, and `start` is what refuses to run both."""
+    report = report_to(on_event)
+    src = ws.group(key).require()
+    return _clone_group(ws, src, new_key, report)
+
+
+def _clone_group(ws, src, new_key, report):
+    new_key = (new_key or ws.free_key(src.key, ws.group_keys())).lower()
+    groups.check_group_key(new_key)
+    dst = ws.group(new_key)
+    if dst.dir.exists():
+        raise Fail(f"there is already a group {new_key}.", code="exists")
+    # Taken now, so a group inside called like it does not take the name.
+    dst.save({"kind": src.kind})
+    data = src.data
+
+    def copy(key_):
+        return clone_instance(ws, key_, on_event=report.sink).key
+
+    if src.kind == groups.DEPENDENCY:
+        data["leader"] = copy(src.leader) if src.leader else None
+        data["guards"] = [copy(k) for k in src.guards]
+    else:
+        data["instances"] = [copy(k) for k in src.instance_keys()]
+        data["groups"] = [_clone_group(ws, ws.group(k), None, report).key for k in src.group_keys()
+                          if ws.group(k).exists()]
+    dst.save(data)
+    for key_ in dst.instance_keys():
+        settings.render(Instance(ws, key_))   # its guards escort its leader
+    report.step(f"{dst.id} cloned from {src.key}", stage="created")
+    return dst
+
+
+def _heaps_fit(instances, report):
+    """A warning when these would not fit in the memory there is."""
+    from .doctor import free_memory_gb, heap_gb
+    avail = free_memory_gb()
+    need = sum(heap_gb(settings.get(i, "heap")) or 0 for i in instances)
+    if avail is not None and need > avail:
+        report.warning(f"{len(instances)} instance(s) want {need:g} GB of heap and {avail:.1f} GB are "
+                       "available: not all of them may start")
+
+
+def start_group(ws, key, on_event=None, cancel=None):
+    """Everything in a group, and in the groups inside it: each client, in
+    its server, then its bridge; leaders before their guards (a guard whose
+    leader is outside the group brings it along). What is running is left
+    as it is. One that does not start does not stop the rest, except its
+    guards. Returns (the ones that started or were in, the ones that did not,
+    with why)."""
+    report = report_to(on_event)
+    group = ws.group(key).require()
+    every = groups.flatten(group)
+    todo = [i for i in every if not (client_running(i) and bridge_pid(i))]
+    report.step(f"starting {group.id}: {len(every)} instance(s), {len(todo)} to start", stage="group")
+    _heaps_fit(todo, report)
+    up, failed = [i for i in every if i not in todo], []
+    for inst in todo:
+        if cancel:
+            cancel.check()
+        leader = groups.leader_of(inst)
+        if leader is not None and leader.key in {k for k, _ in failed}:
+            failed.append((inst.key, f"its leader {leader.key} did not start"))
+            report.warning(f"{inst.key}: not started, its leader {leader.key} did not start")
+            continue
+        try:
+            bring_up(inst, on_event=report.sink, cancel=cancel)
+            up.append(inst)
+        except Cancelled:
+            raise
+        except Fail as e:
+            failed.append((inst.key, str(e)))
+            report.warning(f"{inst.key} did not start: {e}", list(e.lines))
+    report.step(f"{group.id}: {len(up)} running" + (f", {len(failed)} not: "
+                + ", ".join(k for k, _ in failed) if failed else ""), stage="group")
+    return up, failed
+
+
+def stop_group(ws, key, on_event=None):
+    """Everything in a group, and in the groups inside it."""
+    report = report_to(on_event)
+    group = ws.group(key).require()
+    stopped = set()
+    for inst in groups.flatten(group):
+        if inst.key in stopped or not (client_running(inst) or bridge_pid(inst)):
+            continue
+        stop(inst, on_event=report.sink, _stopped=stopped)
+    report.step(f"{group.id} stopped ({len(stopped)} instance(s))", stage="group")
+    return stopped
+
+
+def group_tree(ws):
+    """The groups as a tree: [(depth, node, what it is)], top-level groups
+    first, then the instances in no group."""
+    rows = []
+
+    def walk(g, depth, seen):
+        if g.key in seen:
+            return
+        seen = seen | {g.key}
+        lock = settings.get(g, "lock") == "yes"
+        rows.append((depth, g, g.kind + (", locked" if lock else "")))
+        if g.kind == groups.DEPENDENCY:
+            for k in g.instance_keys():
+                inst = Instance(ws, k)
+                what = "leader" if k == g.leader else "guard"
+                rows.append((depth + 1, inst, f"{what}: {inst.name} on {inst.slug}" if inst.exists()
+                             else f"{what}: (no such instance)"))
+            return
+        for k in g.instance_keys():
+            inst = Instance(ws, k)
+            rows.append((depth + 1, inst, f"{inst.name} on {inst.slug}" if inst.exists()
+                         else "(no such instance)"))
+        for k in g.group_keys():
+            sub = ws.group(k)
+            if sub.exists():
+                walk(sub, depth + 1, seen)
+
+    for g in ws.groups():
+        if groups.parent_of(ws, g) is None:
+            walk(g, 0, set())
+    loose = [i for i in ws.instances() if groups.parent_of(ws, i) is None]
+    return rows, loose
 
 
 # --- rules ----------------------------------------------------------------------
@@ -902,10 +1229,14 @@ def _refuse_imposed(inst, change):
     layer, label = rules.source(rules.empty(), rules.empty(), imposed, family, key)
     if layer == "imposed":
         what = f"its whole {kind} list" if key == "*" or family in imposed["replace"] else key
+        if label.startswith("group "):
+            fix = [f"that group's rules:  marionette.py rules --group {label[6:]} ...",
+                   f"or the groups around this instance leave it alone:  marionette.py set {inst.key} lock yes"]
+        else:
+            fix = ["the global rules:  marionette.py rules --global ...",
+                   f"or this instance ignores them:  marionette.py set {inst.key} ignore_global yes"]
         raise Fail(f"{what} is {rules.say_source(layer, label)}: it is changed there, not here",
-                   lines=["the global rules:  marionette.py rules --global ...",
-                          f"or this instance ignores them:  marionette.py set {inst.key} ignore_global yes"],
-                   code="imposed")
+                   lines=fix, code="imposed")
 
 
 def edit_rules(inst, words, on_event=None):
@@ -962,11 +1293,12 @@ def _push_running(instances, report):
         report.detail(f"{rest} not running: on their next start")
 
 
-def edit_layer(ws, words, bot=None, slug=None, on_event=None):
+def edit_layer(ws, words, bot=None, slug=None, group=None, on_event=None):
     """One change to the rules this launcher holds: a bot's (bot.json), a
-    server's (servers/<slug>/rules.json), or, with neither, the global ones
-    (launcher.json), which are imposed. The running instances they concern
-    get them at once."""
+    server's (servers/<slug>/rules.json), a group's (group.json), which it
+    imposes on what is inside it, or, with none of them, the global ones
+    (launcher.json), imposed on every instance. The running instances they
+    concern get them at once."""
     report = report_to(on_event)
     if bot is not None:
         bot.require()
@@ -974,6 +1306,9 @@ def edit_layer(ws, words, bot=None, slug=None, on_event=None):
     elif slug is not None:
         ws.server(slug)
         layer, where, concerned = rules.of_server(ws, slug), f"server {slug}", ws.instances(slug)
+    elif group is not None:
+        group.require()
+        layer, where, concerned = rules.of_group(group), group.id, groups.flatten(group)
     else:
         layer, where = rules.of_global(ws), "global"
         concerned = [i for i in ws.instances() if settings.get(i, "ignore_global") != "yes"]
@@ -982,6 +1317,8 @@ def edit_layer(ws, words, bot=None, slug=None, on_event=None):
         rules.save_bot(bot, layer)
     elif slug is not None:
         rules.save_server(ws, slug, layer)
+    elif group is not None:
+        rules.save_group(group, layer)
     else:
         rules.save_global(ws, layer)
     report.step(f"{where}: {' '.join(rules.pretty_change(*change))}", stage="rules")
@@ -989,7 +1326,7 @@ def edit_layer(ws, words, bot=None, slug=None, on_event=None):
     return layer
 
 
-def layer_lines(ws, bot=None, slug=None):
+def layer_lines(ws, bot=None, slug=None, group=None):
     """(where it is kept, the layer in a few lines)."""
     if bot is not None:
         bot.require()
@@ -997,6 +1334,9 @@ def layer_lines(ws, bot=None, slug=None):
     if slug is not None:
         ws.server(slug)
         return str(ws.servers_dir / slug / "rules.json"), rules.describe(rules.of_server(ws, slug))
+    if group is not None:
+        group.require()
+        return str(group.json), rules.describe(rules.of_group(group))
     return str(ws.config_file), rules.describe(rules.of_global(ws))
 
 
@@ -1037,7 +1377,12 @@ def status_of(inst, api=None):
     return InstanceStatus(key=inst.key, name=inst.name, server=inst.slug or "-", port=inst.port,
                           client=running, hands=port_in_use(inst.port),
                           inside=(api.is_inside(inst.name) and running) if api else None,
-                          bridge=bridge_pid(inst), guard_of=settings.get(inst, "escort"))
+                          bridge=bridge_pid(inst), guard_of=_leader_name(inst))
+
+
+def _leader_name(inst):
+    leader = groups.leader_of(inst)
+    return leader.name if leader is not None else ""
 
 
 def survey(ws, key=None):
@@ -1084,12 +1429,77 @@ def migrate(ws, dry_run=False, on_event=None):
     copied, so it takes a second and no space). The state its bridge kept
     in the state folder moves to its server's. Before anything, a backup of
     every small file (not the games) goes to state/backups/. A bot that is
-    running is left alone: stop it first. Returns the instances made."""
+    running is left alone: stop it first.
+
+    And an instance that names an `escort` (a guard, from before groups)
+    goes into a dependency group led by that player's instance on its server.
+
+    Returns the instances made."""
     report = report_to(on_event)
     legacy = ws.legacy_bots()
-    if not legacy:
-        report.step("nothing to migrate: no bot folder in the layout from before instances")
+    if not legacy and not _escorted(ws):
+        report.step("nothing to migrate: no bot folder in the layout from before instances, "
+                    "and no escort to turn into a group")
         return []
+    made = _migrate_legacy(ws, legacy, dry_run, report) if legacy else []
+    _escorts_to_groups(ws, dry_run, report)
+    return made
+
+
+def _escorted(ws):
+    return [i for i in ws.instances() if i.data.get("escort")]
+
+
+def _escorts_to_groups(ws, dry_run, report):
+    """`escort` was an instance setting naming its leader's player; it is a
+    dependency group now, declared once, which also stops the leader's
+    guards with it and starts the leader before them."""
+    escorted = _escorted(ws)
+    if escorted and not dry_run:
+        backups = ws.state_dir / "backups"
+        backups.mkdir(parents=True, exist_ok=True)
+        backup = backups / time.strftime("escorts-before-groups-%Y%m%d-%H%M%S.tar.gz")
+        with tarfile.open(backup, "w:gz") as tar:
+            for inst in escorted:
+                tar.add(inst.json, arcname=f"{inst.key}/instance.json")
+        report.detail(f"backup of the instances with an escort: {backup}")
+    for inst in escorted:
+        boss = str(inst.data["escort"]).strip().lower()
+        here = [i for i in ws.instances(inst.slug) if i.player == boss and i != inst]
+        if not here:
+            report.warning(f"{inst.key}: its escort {boss} is not an instance on {inst.slug}; left as it was")
+            continue
+        leader = next((i for i in here if i.key == boss), here[0])
+        existing = next((g for g in ws.groups() if g.kind == groups.DEPENDENCY and g.leader == leader.key),
+                        None)
+        key = existing.key if existing else ws.free_key(f"{leader.key}-guards", ws.group_keys())
+        if dry_run:
+            report.detail(f"{inst.key}: guard of {leader.key}, in the dependency group {key}")
+            continue
+        parent = groups.parent_of(ws, inst)
+        if parent is not None and parent != existing:
+            report.warning(f"{inst.key}: it is in {parent.id} already; its escort is left as it was")
+            continue
+        if existing is None:
+            if groups.parent_of(ws, leader) is not None:
+                report.warning(f"{leader.key} is in {groups.parent_of(ws, leader).id}: the new group "
+                               f"{key} is not put there; add it:  marionette.py group add ... group:{key}")
+            existing = ws.group(key)
+            existing.save({"kind": groups.DEPENDENCY, "leader": leader.key, "guards": []})
+        gdata = existing.data
+        if inst.key not in gdata.get("guards", []):
+            gdata["guards"] = gdata.get("guards", []) + [inst.key]
+            existing.save(gdata)
+        data = inst.data
+        data.pop("escort", None)
+        if settings.get(inst, "role") != "guard":
+            data["role"] = "guard"
+        inst.save(data)
+        settings.render(inst)
+        report.detail(f"{inst.key}: guard of {leader.key}, in the dependency group {key}")
+
+
+def _migrate_legacy(ws, legacy, dry_run, report):
     plan = []
     for key in legacy:
         d = ws.bots_dir / key

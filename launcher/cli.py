@@ -172,8 +172,23 @@ def cmd_set(ws, args):
     marionette.py set alice heap             one
     marionette.py set alice heap 4g          change it, for this instance
     marionette.py set alice heap --default   take it out of the instance: the bot's, or the default
-    marionette.py set --bot alice model sonnet    the bot's, for all its instances"""
-    target = ws.bot(args.name).require() if args.bot else ws.instance(args.name)
+    marionette.py set --bot alice model sonnet    the bot's, for all its instances
+    marionette.py set --group team model haiku    imposed on everything in the group
+    marionette.py set --global model sonnet       imposed on every instance (launcher.json)"""
+    if args.global_:
+        # With --global there is no name: what came as one is the setting.
+        words = [w for w in (args.name, args.key) if w] + list(args.value or [])
+        args.name, args.key, args.value = None, (words[0] if words else None), words[1:]
+        target = ws.global_config()
+    elif not args.name:
+        raise Fail("say whose:  marionette.py set <instance>, or --bot <bot>, --group <group>, --global",
+                   code="bad_setting")
+    elif args.bot:
+        target = ws.bot(args.name).require()
+    elif args.group:
+        target = ws.group(args.name).require()
+    else:
+        target = ws.instance(args.name)
     if args.value or args.default:
         if not args.key:
             raise Fail("say which setting:  marionette.py set <instance> <setting> <value>",
@@ -230,21 +245,22 @@ def cmd_rules(ws, args):
     marionette.py rules --bot alice break allow oak_log   the bot's config, for all its instances
     marionette.py rules --server create food ban beef     a server's, for every bot on it
     marionette.py rules --global food replace             imposed on every instance"""
-    layered = args.bot or args.server or args.global_
+    layered = args.bot or args.server or args.group or args.global_
     words = ([args.name] if args.name and layered else []) + list(args.words)
     if layered:
         bot = ws.bot(args.bot) if args.bot else None
+        group = ws.group(args.group) if args.group else None
         if not words:
-            where, lines = operations.layer_lines(ws, bot=bot, slug=args.server)
+            where, lines = operations.layer_lines(ws, bot=bot, slug=args.server, group=group)
             say(f"{where}:")
             for line in lines or ["(nothing: it decides nothing)"]:
                 say(f"  {line}")
             return 0
-        operations.edit_layer(ws, words, bot=bot, slug=args.server, on_event=print_event)
+        operations.edit_layer(ws, words, bot=bot, slug=args.server, group=group, on_event=print_event)
         return 0
     if not args.name:
-        raise Fail("say whose:  marionette.py rules <instance>, or --bot <bot>, --server <slug>, --global",
-                   code="bad_rules")
+        raise Fail("say whose:  marionette.py rules <instance>, or --bot <bot>, --server <slug>, "
+                   "--group <group>, --global", code="bad_rules")
     inst = ws.instance(args.name)
     if words:
         operations.edit_rules(inst, words, on_event=print_event)
@@ -265,6 +281,64 @@ def cmd_rules(ws, args):
             say(f"    {offs[family]}: " + ", ".join(i + (f" ({who})" if who else "") for i, who in off))
     if view.waiting:
         say("  waiting for the server: " + "; ".join(view.waiting))
+    return 0
+
+
+def cmd_groups(ws, args):
+    rows, loose = operations.group_tree(ws)
+    if not rows:
+        say(f"no groups under {ws.groups_dir}")
+    for depth, node, what in rows:
+        say(f"  {'  ' * depth}{node.key:<{max(4, 22 - 2 * depth)}} {what}")
+    if loose:
+        say(f"  in no group: {', '.join(i.key for i in loose)}")
+
+
+def cmd_group(ws, args):
+    """marionette.py group create team                   a normal group
+    marionette.py group create alice-guards --leader alice   a dependency group: a leader and its guards
+    marionette.py group add team carol group:alice-guards   instances and groups into it (guards, in a dependency one)
+    marionette.py group remove team carol
+    marionette.py group start team | stop team        everything in it
+    marionette.py group clone team [--as NAME]        it and everything in it, instances included
+    marionette.py group delete team                   the group; what was in it stays
+    marionette.py group team                          what it is and what is in it"""
+    action, name, rest = args.action, args.name, list(args.members)
+    actions = ("create", "add", "remove", "delete", "clone", "start", "stop")
+    if action not in actions:
+        # `group team`: show it.
+        group = ws.group(action).require()
+        say(f"{group.id}: {group.kind}" + (", locked" if settings.get(group, "lock") == "yes" else ""))
+        if group.kind == "dependency":
+            say(f"  leader: {group.leader}")
+            say(f"  guards: {', '.join(group.guards) or '(none yet)'}")
+        else:
+            say(f"  instances: {', '.join(group.instance_keys()) or '(none)'}")
+            say(f"  groups: {', '.join(group.group_keys()) or '(none)'}")
+        given = settings.own_values(group)
+        say("  settings: " + (", ".join(f"{k} {v}" for k, v in given.items()) or "none"))
+        where, lines = operations.layer_lines(ws, group=group)
+        say("  rules: " + ("; ".join(lines) or "none"))
+        return 0
+    if not name:
+        raise Fail(f"say which group:  marionette.py group {action} <group>", code="bad_group")
+    if action == "create":
+        operations.create_group(ws, name, leader=args.leader, on_event=print_event)
+    elif action in ("add", "remove"):
+        if not rest:
+            raise Fail(f"say what:  marionette.py group {action} {name} <instance or group>...",
+                       code="bad_group")
+        fn = operations.group_add if action == "add" else operations.group_remove
+        fn(ws, name, rest, on_event=print_event)
+    elif action == "delete":
+        operations.delete_group(ws, name, on_event=print_event)
+    elif action == "clone":
+        operations.clone_group(ws, name, args.as_, on_event=print_event)
+    elif action == "start":
+        _, failed = cancellable(lambda cancel: operations.start_group(ws, name, print_event, cancel))
+        return 1 if failed else 0
+    elif action == "stop":
+        operations.stop_group(ws, name, on_event=print_event)
     return 0
 
 
@@ -364,13 +438,29 @@ def build_parser():
     c.add_argument("name", nargs="?", metavar="instance")
     c.set_defaults(fn=cmd_status)
 
-    c = sub.add_parser("set", help="see or change settings (model, heap, owner...), per instance or per bot")
-    c.add_argument("name", metavar="instance", help="an instance, or a bot with --bot")
+    c = sub.add_parser("set", help="see or change settings (model, heap, owner, role...), per instance, "
+                                   "bot, group or globally")
+    c.add_argument("name", nargs="?", metavar="instance", help="an instance, or a bot with --bot, a group "
+                   "with --group; nothing with --global")
     c.add_argument("key", nargs="?", help="one setting; without it, all of them")
     c.add_argument("value", nargs="*", help="its new value (a model may be two words: haiku low)")
     c.add_argument("--default", action="store_true", help="take it out of this layer")
     c.add_argument("--bot", action="store_true", help="NAME is a bot: its settings, for all its instances")
+    c.add_argument("--group", action="store_true", help="NAME is a group: imposed on everything in it")
+    c.add_argument("--global", dest="global_", action="store_true",
+                   help="imposed on every instance (launcher.json)")
     c.set_defaults(fn=cmd_set)
+
+    sub.add_parser("groups", help="the groups, as a tree, and the instances in none").set_defaults(fn=cmd_groups)
+
+    c = sub.add_parser("group", help="create, fill, start, stop, clone or delete a group")
+    c.add_argument("action", help="create, add, remove, delete, clone, start, stop; or a group's name to see it")
+    c.add_argument("name", nargs="?", metavar="group")
+    c.add_argument("members", nargs="*", help="for add and remove: instances and groups (group:<name> "
+                   "when a name is both)")
+    c.add_argument("--leader", metavar="INSTANCE", help="for create: a dependency group, led by it")
+    c.add_argument("--as", dest="as_", metavar="GROUP", help="for clone: its name (default: <group>-1...)")
+    c.set_defaults(fn=cmd_group)
 
     c = sub.add_parser("account", help="Minecraft accounts: list, add (log in once), remove")
     c.add_argument("action", nargs="?", choices=("list", "add", "remove"), default="list")
@@ -386,6 +476,7 @@ def build_parser():
                    "<item>, break allow|forbid|default <block>, food|break replace|add")
     c.add_argument("--bot", metavar="BOT", help="the bot's config, under every instance of it")
     c.add_argument("--server", metavar="SLUG", help="a server's, over the config of every bot on it")
+    c.add_argument("--group", metavar="GROUP", help="a group's, imposed on everything in it")
     c.add_argument("--global", dest="global_", action="store_true",
                    help="imposed on every instance (launcher.json)")
     c.set_defaults(fn=cmd_rules)

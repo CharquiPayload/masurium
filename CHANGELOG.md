@@ -55,7 +55,7 @@ setting ignored it without a word.
   the same functions the command line uses (`launcher/`, a package).
 - A start, restart or connect can be cancelled while it waits, and a
   cancelled start stops the client it had launched. Ctrl+C does exactly that.
-- `set` sees and changes a bot's settings (owner, model, escort, heap,
+- `set` sees and changes a bot's settings (owner, model, role, heap,
   account, port) through one table that says what each
   accepts and when a change counts; a setting read at start is refused while
   the client runs. `doctor` names hand-edited values `set` would refuse.
@@ -90,6 +90,18 @@ setting ignored it without a word.
   imposed on every instance (`launcher.json`; `ignore_global` exempts one).
   They are sent on every start and to running instances when they change; a
   rule written wrong stops the start and `doctor` names it.
+- Groups. A normal group holds instances and other groups, started and
+  stopped together (`group start`, `group stop`, with a warning when their
+  heaps do not fit). A dependency group holds a leader and its guards, on one
+  server: starting a guard starts its leader first, stopping the leader stops
+  its guards, and a guard no group names does not start. Groups nest, each
+  instance and group in one at most; their settings (`set --group`) and rules
+  (`rules --group`) impose on what is inside them, the outer over the inner,
+  and a global config (`set --global`, `rules --global`) over all of them.
+  `lock` keeps the groups around an instance or a group out, `ignore_global`
+  the global config. `groups` shows the tree; `group clone` copies a group
+  with copies of every instance in it. The `escort` setting became the
+  dependency group, and `migrate` turns one into the other.
 - Each server can have its own `servers/<slug>/server.env` (address and token
   of its server mod, readable by its owner only). The launcher, the bridge and
   the MCP server then talk to the server each bot is on, not to the one the

@@ -300,6 +300,7 @@ hard links to the server's pack, so **creating a bot costs a few megabytes**.
 servers/<slug>/        server.conf + mods/ (one server and ITS client pack), server.env (its token)
 accounts/<account>/    account.json + the HeadlessMC folder its login lives in
 bots/<bot>/            bot.json + personality.txt: a character, and nothing heavy
+groups/<group>/        group.json: instances and groups, or a leader and its guards
 instances/<instance>/  instance.json (which bot, which server, its port, its own settings),
                        mods/ (its extras), gamedir/, hmc/, run/: a bot on a server, what runs
 shared/                the HeadlessMC launcher and the mods every instance uses
@@ -316,13 +317,21 @@ happen is both RUNNING, which is one player joining twice; `start` refuses it
 (the same player on one server, or an online account already playing
 anywhere), saying which instance is in the way.
 
-**Settings come in layers**, weakest first: the bot's (`bot.json`), then the
-instance's (`instance.json`); groups and a global layer will come on top. One
-table (`launcher/settings.py`) says what each setting accepts, at which layers,
-and when a change counts. The bridge knows nothing about layers: on every
-start and every change the launcher writes the resolved values into the
-instance's folder as one small file each (`model`, `owner`, `escort`...),
-which is what the bridge always read in a bot's folder.
+**Settings come in layers**, weakest first: the bot's (`bot.json`), the
+instance's (`instance.json`), its groups' from its own outwards, and the global
+config (`launcher.json`). The outer ones impose; a `lock` on an instance or a
+group keeps the groups around it out, and `ignore_global` the global config.
+One table (`launcher/settings.py`) says what each setting accepts, at which
+layers, and when a change counts. The bridge knows nothing about layers: on
+every start and every change the launcher writes the resolved values into the
+instance's folder as one small file each (`model`, `owner`, and `escort`, its
+leader's player when it is a guard), which is what the bridge always read in a
+bot's folder.
+
+**Groups are a tree.** An instance or a group is in one group at most, so what
+imposes on it is one chain and never two groups that could disagree. A
+dependency group (a leader and its guards) is declared by hand: guessed from
+names, a guard could start next to a leader on another server.
 
 **An account's login lives once.** HeadlessMC keeps a login in its own folder
 (`HeadlessMC/auth/.accounts.json`, a path it does not let be moved) and renews

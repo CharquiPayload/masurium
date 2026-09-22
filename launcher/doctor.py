@@ -7,7 +7,7 @@ import sys
 import urllib.error
 from collections import namedtuple
 
-from . import rules, settings
+from . import groups, rules, settings
 from .api import UNREACHABLE
 from .accounts import players_in
 from .bots import check_name
@@ -203,8 +203,12 @@ def checks(ws):
 
     if ws.config_file.is_file():
         try:
-            add("launcher.json", True, "global rules: " + ("; ".join(rules.describe(rules.of_global(ws)))
-                                                           or "none"))
+            wrong = [why for _, why in settings.problems(ws.global_config())]
+            layer = rules.of_global(ws)
+            given = settings.own_values(ws.global_config())
+            add("launcher.json", not wrong, "; ".join(wrong) or (
+                "global settings: " + (", ".join(f"{k} {v}" for k, v in given.items()) or "none")
+                + "; global rules: " + ("; ".join(rules.describe(layer)) or "none")))
         except Fail as e:
             add("launcher.json", False, str(e))
 
@@ -259,15 +263,32 @@ def checks(ws):
             # folder being there never meant a login.
             problems.append(f"online account never logged in (marionette.py login {inst.key}, or "
                             "an account of the launcher: marionette.py account add)")
-        escort = settings.get(inst, "escort").lower()
-        if escort and escort == inst.player:
-            problems.append("escorts itself")
+        group, place = groups.dependency_of(inst)
+        if settings.get(inst, "role") == "guard" and place != "guard":
+            problems.append("a guard, and no dependency group names it as one: it will not start")
         problems += [why for k, why in settings.problems(inst) if k != "port"]
         players.setdefault((inst.slug, inst.player), []).append(inst.key)
         waiting = len(rules.pending(inst))
         add(f"instances/{inst.key}", not problems,
             "; ".join(problems) or f"{inst.name} on {inst.slug}, port {port}"
             + (f"; {waiting} rule change(s) waiting for its server" if waiting else ""))
+    keys = ws.group_keys()
+    if keys:
+        add("groups", True, ", ".join(keys))
+    wrong = groups.problems(ws)
+    for g in ws.groups():
+        mine = [why for where, why in wrong if where == g.id]
+        mine += [why for _, why in settings.problems(g)]
+        try:
+            rules.of_group(g)
+        except Fail as e:
+            mine.append(str(e))
+        add(f"groups/{g.key}", not mine, "; ".join(mine) or (
+            f"{g.leader} and {len(g.guards)} guard(s)" if g.kind == groups.DEPENDENCY
+            else f"{len(g.instance_keys())} instance(s), {len(g.group_keys())} group(s)"))
+    for where, why in wrong:
+        if not where.startswith("group "):
+            add(where, False, why)
     for (slug, player), keys_ in sorted(players.items()):
         if len(keys_) > 1:
             add(f"{player} on {slug}", None, f"{len(keys_)} instances ({', '.join(keys_)}); "

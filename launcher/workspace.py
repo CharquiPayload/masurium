@@ -7,6 +7,8 @@ Four folders, outside the repo because they are heavy and are not code:
     bots/<bot>/            a character: its name, personality and settings
     instances/<name>/      a bot on a server, which is what runs: its game, its
                            HeadlessMC, its logs and its own settings
+    groups/<name>/         instances started together, a leader with its guards,
+                           and the settings and rules they impose
     shared/                what every instance uses: HeadlessMC and the Marionette mods
 
 plus server.env, the way to the server mod's API; the state folder, where
@@ -65,7 +67,7 @@ class Server:
 
 class Workspace:
     def __init__(self, bots_dir, servers_dir, shared_dir, env_file, home=None, environ=None,
-                 instances_dir=None, state_dir=None, accounts_dir=None):
+                 instances_dir=None, state_dir=None, accounts_dir=None, groups_dir=None):
         self.bots_dir = pathlib.Path(bots_dir)
         self.servers_dir = pathlib.Path(servers_dir)
         self.shared_dir = pathlib.Path(shared_dir)
@@ -77,6 +79,7 @@ class Workspace:
         # server always kept their state (~/.marionette).
         self.state_dir = pathlib.Path(state_dir) if state_dir else self.env_file.parent
         self.accounts_dir = pathlib.Path(accounts_dir) if accounts_dir else self.bots_dir.parent / "accounts"
+        self.groups_dir = pathlib.Path(groups_dir) if groups_dir else self.bots_dir.parent / "groups"
 
     @classmethod
     def from_environment(cls, environ=None, home=None):
@@ -99,7 +102,8 @@ class Workspace:
                    env_file, home, environ,
                    instances_dir=pick("MARIONETTE_INSTANCES_DIR", home / "instances"),
                    state_dir=pick("MARIONETTE_STATE_DIR", env_file.parent),
-                   accounts_dir=pick("MARIONETTE_ACCOUNTS_DIR", home / "accounts"))
+                   accounts_dir=pick("MARIONETTE_ACCOUNTS_DIR", home / "accounts"),
+                   groups_dir=pick("MARIONETTE_GROUPS_DIR", home / "groups"))
 
     def __repr__(self):
         return (f"Workspace(bots={self.bots_dir}, instances={self.instances_dir}, "
@@ -134,6 +138,7 @@ class Workspace:
         env["MARIONETTE_INSTANCES_DIR"] = str(self.instances_dir)
         env["MARIONETTE_STATE_DIR"] = str(self.state_dir)
         env["MARIONETTE_ACCOUNTS_DIR"] = str(self.accounts_dir)
+        env["MARIONETTE_GROUPS_DIR"] = str(self.groups_dir)
         env["MARIONETTE_ENV"] = str(self.env_file)
         local_bin = str(self.home / ".local" / "bin")
         env["PATH"] = local_bin + os.pathsep + env.get("PATH", "")
@@ -240,6 +245,24 @@ class Workspace:
         if not self.accounts_dir.is_dir():
             return []
         return sorted(d.name for d in self.accounts_dir.iterdir() if (d / "account.json").is_file())
+
+    # --- groups -----------------------------------------------------------------
+
+    def group(self, key):
+        from .groups import Group
+        return Group(self, key)
+
+    def group_keys(self):
+        if not self.groups_dir.is_dir():
+            return []
+        return sorted(d.name for d in self.groups_dir.iterdir() if (d / "group.json").is_file())
+
+    def groups(self):
+        return [self.group(k) for k in self.group_keys()]
+
+    def global_config(self):
+        from .groups import Global
+        return Global(self)
 
     # --- bots (characters) ------------------------------------------------------
 
