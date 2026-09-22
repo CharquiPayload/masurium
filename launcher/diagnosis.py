@@ -74,4 +74,4 @@ def complaints(bot):
     shows up as a mod rejection, not as "could not connect"."""
     return tail_lines(bot.client_log, 8,
                       r"disconnect|kick|refused|timed out|Unknown host|failed|"
-                      r"mod rejections|incompatible|missing mods|negotiation")
+                      r"mod rejections|incompatible|missing mods|negotiation|no Marionette")

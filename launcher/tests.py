@@ -148,6 +148,16 @@ def quick_server_env():
                                     "MARIONETTE_TOKEN=t\n")
 
 
+def serve_a_server_mod(players=(), token="t"):
+    """server.env pointed at a fake server mod that answers, with `players`
+    connected: what `start` needs to get past its first question. Returns the
+    HTTP server, to shut down."""
+    httpd, port = fake_server_mod(token, list(players))
+    (TMP / "server.env").write_text(f"MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT={port}\n"
+                                    "MARIONETTE_TOKEN=t\n")
+    return httpd
+
+
 def start_keeper(key="alice"):
     """A keeper holding the fake game for an instance, as `start` launches it."""
     inst = WS.instance(key)
@@ -835,7 +845,7 @@ def tests_conflicts():
 
 def tests_keeper_failures():
     print("\nKeeper failures: said at once, not after five minutes")
-    quick_server_env()
+    httpd = serve_a_server_mod()
     bot = WS.instance("alice")
     WS.environ["MARIONETTE_JAVA"] = str(TMP / "no-such-java")
     try:
@@ -883,6 +893,7 @@ def tests_keeper_failures():
     check("...and says the keeper did not get the game going",
           "did not get the game going" in text and result.code == "keeper_failed", text)
     keeper.clear_run_files(bot)
+    httpd.shutdown()
     layout()
 
 
@@ -959,6 +970,45 @@ def tests_logwatch():
 
 
 
+def tests_server_mod_missing():
+    print("\nNo Marionette on the server: said before a game is loaded for nothing")
+    inst = WS.instance("alice")
+    quick_server_env()
+    files.unlink_quietly(inst.keeper_log)
+    text, result = said(ops.start, inst)
+    check("a server mod that does not answer stops the start before the game",
+          isinstance(result, Fail) and result.code == "server_mod_down"
+          and "Is Marionette in that server's mods folder" in text
+          and "starting alice" not in text and not inst.keeper_log.exists(), text)
+    httpd = serve_a_server_mod(token="another")
+    try:
+        text, result = said(ops.start, inst)
+        check("one that answers with a refusal is a wrong token, and says so",
+              isinstance(result, Fail) and result.code == "server_mod_refused"
+              and "token is not the one" in text, text)
+    finally:
+        httpd.shutdown()
+
+    import threading
+    from launcher.events import Report
+    httpd = serve_a_server_mod(players=[])
+    start_keeper("alice")
+    try:
+        check("a keeper is up", wait(lambda: keeper.keeper_alive(inst), 10))
+        threading.Timer(1.0, lambda: keeper.keeper_ask(inst, "@stop")).start()
+        lines = []
+        started = time.monotonic()
+        joined = ops.join(inst, WS.server("test"), WS.api_for(WS.server("test")),
+                          Report(lambda e: lines.append(e.text)), attempts=3)
+        took = time.monotonic() - started
+        check("joining stops waiting as soon as the client closes, not after 3 x 3 minutes",
+              joined is False and took < 30 and "the client closed" in lines, f"{took:.0f}s {lines}")
+    finally:
+        said(ops.stop, inst)
+        httpd.shutdown()
+        layout()
+
+
 # --- cancelling -------------------------------------------------------------
 
 def slow_java():
@@ -974,7 +1024,7 @@ def tests_cancel():
     print("\nCancel: a start cut short stops what it started, at once")
     import threading
     from launcher.events import Cancel, Cancelled
-    quick_server_env()
+    httpd = serve_a_server_mod()
     bot = WS.instance("alice")
 
     cancel = Cancel()
@@ -1041,6 +1091,7 @@ def tests_cancel():
           "cancelling" in out and "cancelled" in out
           and wait(lambda: not processes.pid_alive(game_pid), 10), out)
     keeper.clear_run_files(bot)
+    httpd.shutdown()
     layout()
 
 
@@ -1429,6 +1480,7 @@ if __name__ == "__main__":
     tests_logwatch()
     tests_status()
     tests_cancel()
+    tests_server_mod_missing()
     tests_settings()
     tests_server_apis()
     tests_migrate()

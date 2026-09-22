@@ -60,6 +60,12 @@ setting ignored it without a word.
   anywhere) and says which instance is in the way. Each server's bridges keep
   their state apart, so two instances of one bot on two servers share nothing.
   `migrate` moves bots from the layout before instances, with a backup first.
+- No Marionette on the server, no bot there. `start` asks the server's mod
+  before it loads a game and says what is wrong (not there or not up, or a
+  wrong token); and the bot mod itself, a few seconds after joining a server
+  whose command tree has no `/marionette`, leaves and closes its game, for a
+  bot started without the launcher. A start that sees its client close while
+  joining stops waiting at once.
 - Each server can have its own `servers/<slug>/server.env` (address and token
   of its server mod, readable by its owner only). The launcher, the bridge and
   the MCP server then talk to the server each bot is on, not to the one the

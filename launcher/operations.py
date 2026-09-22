@@ -14,6 +14,7 @@ import shutil
 import sys
 import tarfile
 import time
+import urllib.error
 from dataclasses import dataclass
 
 from . import settings
@@ -290,6 +291,11 @@ def join(inst, server, api, report, attempts, patience=18, cancel=None):
             if api.is_inside(inst.name):
                 report.step(f"{inst.name} is IN (attempt {attempt}, {i * 10}s)", stage="in")
                 return True
+            # A client that closed will not join however long this waits: the
+            # bot mod closes the game itself on a server without Marionette.
+            if not keeper_alive(inst):
+                report.detail("the client closed")
+                return False
         report.detail(f"attempt {attempt} failed")
     return False
 
@@ -363,6 +369,22 @@ def _start_steps(inst, report, cancel, launched):
     clear_run_files(inst)
     if cancel:
         cancel.check()
+    # Without Marionette on the server's side there is nothing for the bot to
+    # talk to (no /players, no chat for the bridge, no commands): said now,
+    # before 3 GB of game are loaded for nothing. The bot mod checks the same
+    # from inside the game, for a bot started without this launcher.
+    try:
+        api.get("/players")
+    except urllib.error.HTTPError as e:
+        raise Fail(f"the server mod of {inst.slug} at {api.address} said HTTP {e.code}"
+                   + (": the token is not the one the server has." if e.code in (401, 403) else "."),
+                   code="server_mod_refused")
+    except UNREACHABLE as e:
+        raise Fail(f"the server mod of {inst.slug} does not answer at {api.address}: "
+                   f"{getattr(e, 'reason', e)}.",
+                   lines=["Is Marionette in that server's mods folder, and is the server up?",
+                          "(and are that address and port the ones in server.env?)"],
+                   code="server_mod_down")
 
     settings.render(inst)
     report.step(f"preparing the mods of {inst.slug}", stage="preparing")
