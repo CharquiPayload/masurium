@@ -1,5 +1,8 @@
 package marionette.bot;
 
+import java.util.Map;
+import java.util.function.Predicate;
+
 /**
  * Whether this client is a bot at all.
  *
@@ -27,6 +30,34 @@ package marionette.bot;
  * cannot change should not be read as if it could.
  */
 public final class Bot {
+
+    /**
+     * Add-ons a bot with no screen cannot do without, keyed by the third-party mod that
+     * makes them necessary. Veil assumes a GPU and kills a headless client at startup,
+     * before the mod handshake, unless the add-on is there to keep it off the GPU. The
+     * launcher's doctor reads the same table, and the add-on's own mods.toml pins the
+     * exact version of the mod it is for: this only says that it has to be there.
+     */
+    static final Map<String, String> ADDON_FOR = Map.of("veil", "marionette_veil");
+
+    /**
+     * Why this client must not start, or {@code null} when nothing is missing. Asked
+     * at construction against the loaded mod list, and refused out loud: a crash
+     * report that names the missing add-on beats one that names a vertex attribute.
+     */
+    static String missingAddon(boolean headless, Predicate<String> loaded) {
+        if (!headless) {
+            return null;
+        }
+        for (Map.Entry<String, String> e : ADDON_FOR.entrySet()) {
+            if (loaded.test(e.getKey()) && !loaded.test(e.getValue())) {
+                return "this pack carries '" + e.getKey() + "', and a bot with no screen "
+                        + "cannot run it without the '" + e.getValue() + "' add-on. Put its "
+                        + "jar next to marionette's (see addons/ in the repository).";
+            }
+        }
+        return null;
+    }
 
     /** The property that decides it all. No name, no bot. */
     public static final String NAME_PROPERTY = "marionette.name";

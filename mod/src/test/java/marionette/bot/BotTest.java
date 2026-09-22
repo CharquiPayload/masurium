@@ -110,4 +110,29 @@ class BotTest {
         assertEquals("marionette.server", Bot.SERVER_PROPERTY);
         assertEquals("marionette.bot.port", Bot.PORT_PROPERTY);
     }
+
+    @Test
+    @DisplayName("headless, Veil in the pack and no add-on: refused, naming the add-on")
+    void veilWithoutTheAddonIsRefused() {
+        String why = Bot.missingAddon(true, id -> id.equals("veil"));
+        assertTrue(why != null && why.contains("marionette_veil"), String.valueOf(why));
+    }
+
+    @Test
+    @DisplayName("with the add-on there, nothing is missing")
+    void veilWithTheAddonIsFine() {
+        assertNull(Bot.missingAddon(true, id -> id.equals("veil") || id.equals("marionette_veil")));
+    }
+
+    @Test
+    @DisplayName("a bot with a window has a GPU: Veil is not its problem")
+    void aWindowNeedsNoAddon() {
+        assertNull(Bot.missingAddon(false, id -> id.equals("veil")));
+    }
+
+    @Test
+    @DisplayName("no Veil, no add-on needed")
+    void noVeilNoAddon() {
+        assertNull(Bot.missingAddon(true, id -> false));
+    }
 }

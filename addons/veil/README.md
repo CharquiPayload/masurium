@@ -24,3 +24,15 @@ Veil the jar does nothing.
 
 The jar goes in `shared/mods/`, with the core: every bot links it. It is client
 side only; the server does not need it and does not mind it.
+
+**One exact version.** This add-on is for Veil **4.3.2** (the one inside Sable
+2.0.5), declared as `veil [4.3.2]` in its `mods.toml`. Its mixins reach into
+that version's internals, and a Veil that moved them would not crash the mixins,
+it would leave them silently unapplied and the crash would be back. So with any
+other Veil, NeoForge refuses to load the add-on, on purpose, and a new version of
+the add-on is due, tested against that Veil. Without Veil in the pack it loads
+and does nothing.
+
+The core knows about this add-on: a headless bot whose pack carries Veil refuses
+to start without it (`Bot.ADDON_FOR`), and the launcher's `doctor` reports it
+before a java is launched.

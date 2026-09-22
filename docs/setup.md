@@ -14,8 +14,10 @@ that order. The rest can wait until you have a bot in the game.
 - The mod: `marionette-<version>.jar`, the same file the bots use.
 
 **If the server's pack carries Veil** (it ships inside Sable, among others), the
-bots also need `marionette-veil-<version>.jar` in `shared/mods/`: without it a
-headless client crashes at startup. See `addons/veil/README.md`. The server does
+bots also need `marionette-veil-<version>.jar` in `shared/mods/`: a headless
+client refuses to start without it, saying so, and `doctor` says so before that.
+The add-on is for one exact Veil version; with another, NeoForge refuses to load
+it and a new add-on version is due. See `addons/veil/README.md`. The server does
 not need it.
 
 **Accounts: bots work online or offline**

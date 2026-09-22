@@ -40,10 +40,16 @@ versionRange = "[1.21.1,1.22)"
 ordering = "NONE"
 side = "CLIENT"
 
+# ONE exact version, on purpose. The mixins reach into this version's internals,
+# and a Veil that moved them would not break the mixins: it would leave them
+# silently unapplied, and the crash would be back. So with any other Veil,
+# NeoForge refuses to load this add-on, and a new version of it is due, tested
+# against that Veil. Optional: without Veil in the pack the add-on loads and
+# does nothing.
 [[mods.dependencies.marionette_veil]]
 modId = "veil"
 type = "optional"
-versionRange = "[4.0.0,)"
+versionRange = "[4.3.2]"
 ordering = "NONE"
 side = "CLIENT"
 

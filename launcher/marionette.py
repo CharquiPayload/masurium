@@ -913,7 +913,44 @@ def crash_report(bot):
     return None
 
 
-def crash_summary(report, width=200):
+def explain_crash(bot):
+    """If this run crashed, say where the report is and what it says; True
+    when there was one. The game said why, in its own report; its last
+    lines are a mod list that says nothing."""
+    report = crash_report(bot)
+    if not report:
+        return False
+    # A mod that refused to construct is the FIRST thing to look at: the game
+    # goes on to draw the loading-error screen, and what finally crashes is
+    # whatever draws it, so the report names the wrong thing. The refusal
+    # and its reason are in the log, a few lines apart.
+    for l in refusals(bot):
+        say("    " + l)
+    say(f"==> the game crashed: {report}")
+    for l in crash_summary(report):
+        say("    " + l)
+    return True
+
+
+def refusals(bot, width=220):
+    """The mods that failed to construct, each with the line that says why."""
+    try:
+        lines = bot.client_log.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    out = []
+    for i, l in enumerate(lines):
+        if "Failed to create mod instance" not in l:
+            continue
+        out.append(l.strip()[:width])
+        for follow in lines[i + 1:i + 4]:
+            if "Exception" in follow or "Error" in follow:
+                out.append("  " + follow.strip()[:width])
+                break
+    return out
+
+
+def crash_summary(report, width=220):
     """What a person reads first in a crash report: the description, the
     exception, and the mod frames nearest the top, which are the ones that
     name the culprit. The mod list at the end says nothing."""
@@ -1008,14 +1045,7 @@ def cmd_start(args):
     wait_for(ready_or_dead, 300, every=5)
     if not log_has(bot.client_log, HMC_READY):
         say("==> the hmc-specifics mod did not initialize. Without it there is no connect.")
-        report = crash_report(bot)
-        if report:
-            # The game said why, in its own report; its last lines are a mod
-            # list that says nothing.
-            say(f"==> the game crashed: {report}")
-            for l in crash_summary(report):
-                say("    " + l)
-        else:
+        if not explain_crash(bot):
             if bot.read("account", "online") == "online":
                 say(f"    (online account: if HeadlessMC asked for a login, run marionette.py login {bot.name})")
             for l in tail_lines(bot.client_log, 5) + tail_lines(bot.keeper_log, 3):
@@ -1026,8 +1056,13 @@ def cmd_start(args):
     # when an order does nothing. Better to know here.
     if not wait_for(lambda: port_in_use(bot.port), 20, every=2):
         say(f"==> the bot mod did not open port {bot.port}. It would join without hands.")
-        for l in tail_lines(bot.client_log, 5, r"marionette_bot|address already in use|BindException"):
-            say("    " + l)
+        # A mod that refused to construct (a missing add-on, say) shows up
+        # here first: the game goes on loading without it, and crashes a
+        # little later with the reason in its report.
+        wait_for(lambda: crash_report(bot) is not None, 15, every=3)
+        if not explain_crash(bot):
+            for l in tail_lines(bot.client_log, 5, r"marionette_bot|address already in use|BindException"):
+                say("    " + l)
         return 1
 
     if join(bot, server, env, attempts=5):
@@ -1278,6 +1313,39 @@ def cmd_deploy_mod(args):
 
 # --- doctor -------------------------------------------------------------------
 
+# Third-party mods a headless bot cannot run without an add-on, and the add-on's
+# jar family. The same table lives in the bot mod (Bot.ADDON_FOR), which refuses
+# to start without it; here it is caught before a 3 GB java is launched.
+ADDON_FOR = {"veil": "marionette-veil"}
+
+
+def pack_carries(pack, mod_id):
+    """The jars of a pack that are, or carry inside them (jar-in-jar), the mod
+    with this id. Veil, for one, is never a jar of its own in a pack: it ships
+    inside Sable and others, listed in their META-INF/jarjar/metadata.json."""
+    import zipfile
+    found = []
+    for jar in sorted((pathlib.Path(pack) / "mods").glob("*.jar")):
+        if jar.name.lower().startswith(mod_id.lower() + "-"):
+            found.append(jar.name)
+            continue
+        try:
+            with zipfile.ZipFile(jar) as z:
+                if "META-INF/jarjar/metadata.json" not in z.namelist():
+                    continue
+                meta = json.loads(z.read("META-INF/jarjar/metadata.json").decode("utf-8", "replace"))
+        except (OSError, zipfile.BadZipFile, ValueError):
+            continue
+        for entry in meta.get("jars", []):
+            ident = entry.get("identifier", {})
+            path = str(entry.get("path", ""))
+            if ident.get("artifact", "").lower().startswith(mod_id.lower()) \
+                    or pathlib.Path(path).name.lower().startswith(mod_id.lower() + "-"):
+                found.append(jar.name)
+                break
+    return found
+
+
 def run_quiet(args, timeout=20):
     try:
         r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
@@ -1405,6 +1473,14 @@ def doctor_checks():
             continue
         n = len(list((s["pack"] / "mods").glob("*.jar")))
         add(f"servers/{slug}", True, f"{address_of(s)} {s['version']} {n} client mods")
+        # A mod that needs an add-on on a headless bot, with the add-on missing:
+        # the client would crash at startup, before the mod handshake.
+        for mod_id, addon in ADDON_FOR.items():
+            carriers = pack_carries(s["pack"], mod_id)
+            if carriers and not any(jar_family(j.name) == addon for j in every):
+                add(f"servers/{slug}: {mod_id}", False,
+                    f"carried by {', '.join(carriers)}; a headless bot needs {addon}-<version>.jar "
+                    f"in shared/mods (see addons/)")
 
     keys = bot_keys()
     add("bots", True if keys else None, ", ".join(keys) if keys else f"none yet under {BOTS_DIR}")

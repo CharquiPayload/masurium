@@ -26,6 +26,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import org.slf4j.Logger;
 
@@ -206,6 +207,13 @@ public class MarionetteBot {
                         Bot.NAME_PROPERTY);
             }
             return;
+        }
+        // Refused here, at construction, where NeoForge turns it into a loading error
+        // that quotes the message: the alternative is a crash minutes later inside a
+        // third-party mod, naming something that is not the cause. See Bot.ADDON_FOR.
+        String missing = Bot.missingAddon(Bot.headless(), id -> ModList.get().isLoaded(id));
+        if (missing != null) {
+            throw new IllegalStateException("[marionette-bot] " + missing);
         }
         BOSS = defaultEscort;
         NeoForge.EVENT_BUS.register(this);

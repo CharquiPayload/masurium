@@ -7,6 +7,7 @@ keeper, which is run for real against a fake game that echoes what it is told.
 
 Run:  python3 launcher/tests.py
 """
+import json
 import os
 import pathlib
 import stat
@@ -379,6 +380,25 @@ def tests_doctor():
           any(l == "shared/mods add-ons" and ok is False for l, ok, _ in checks))
     for p in (TMP / "shared" / "mods").glob("marionette-veil-*.jar"):
         p.unlink()
+
+    # A mod that carries Veil inside it (jar-in-jar), the way Sable does.
+    import zipfile
+    carrier = TMP / "servers" / "test" / "mods" / "sable-neoforge-1.21.1-2.0.5.jar"
+    with zipfile.ZipFile(carrier, "w") as z:
+        z.writestr("META-INF/jarjar/metadata.json", json.dumps({"jars": [
+            {"identifier": {"group": "foundry.veil", "artifact": "veil-neoforge"},
+             "path": "META-INF/jarjar/veil-neoforge-1.21.1-4.3.2.jar"}]}))
+    check("pack_carries finds Veil inside Sable", m.pack_carries(TMP / "servers" / "test", "veil") == [carrier.name])
+    check("...and nothing where there is nothing", m.pack_carries(TMP / "servers" / "test", "watut") == [])
+    checks = m.doctor_checks()
+    check("Veil in a pack without the add-on is a problem",
+          any(l == "servers/test: veil" and ok is False and "marionette-veil" in d for l, ok, d in checks))
+    (TMP / "shared" / "mods" / "marionette-veil-1.0.0.jar").write_bytes(b"a")
+    checks = m.doctor_checks()
+    check("...and not with the add-on in shared/mods",
+          not any(l == "servers/test: veil" for l, ok, d in checks))
+    (TMP / "shared" / "mods" / "marionette-veil-1.0.0.jar").unlink()
+    carrier.unlink()
     m.Bot("Bob").write("port", m.FIRST_PORT)          # same as Alice's
     checks = m.doctor_checks()
     check("two bots on one port are a problem",

@@ -50,6 +50,15 @@ setting ignored it without a word.
   from touching a GPU that a headless bot does not have. Two mixins, applied only
   on a bot with no screen; nothing of Veil's own jar is touched. The core no
   longer carries a mixin against any third-party mod.
+- An add-on is for the **exact version** of the mod it is for (`veil [4.3.2]`):
+  its mixins reach into that version's internals, and with another one NeoForge
+  refuses to load the add-on instead of letting it half-apply. Without the mod
+  in the pack, the add-on loads and does nothing.
+- The core **refuses to start a headless bot** whose pack carries a mod that
+  needs an add-on when the add-on is missing, naming the add-on in the crash
+  report instead of letting the game die somewhere in a vertex attribute.
+  `doctor` says the same before a java is launched, reading the packs'
+  jar-in-jar metadata.
 
 ### Bot half
 - A* path finder with tick-based costs, partial routes, goal conditions, anti-
