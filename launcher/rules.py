@@ -354,7 +354,10 @@ def save_global(ws, layer):
         data.pop("rules", None)
     else:
         data["rules"] = dump(layer)
-    ws.save_config(data)
+    if data:
+        ws.save_config(data)
+    else:
+        ws.config_file.unlink(missing_ok=True)
 
 
 # --- the server's side ----------------------------------------------------------

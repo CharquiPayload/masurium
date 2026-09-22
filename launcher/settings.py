@@ -237,7 +237,8 @@ def problems(target):
     edited by hand."""
     out = []
     for key, value in target.data.items():
-        if key in ("name", "bot", "server") or value in (None, ""):
+        # Not settings: who it is, and its rules (checked in rules.py).
+        if key in ("name", "bot", "server", "rules") or value in (None, ""):
             continue
         if key in RETIRED:
             out.append((key, f"'{key}' is no longer a setting: {RETIRED[key]}; it can go"))

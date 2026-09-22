@@ -1548,7 +1548,10 @@ def tests_rules():
         text, code = run_cli("rules", "--bot", "rulesy")
         check("`rules --bot <bot>` shows the bot's layer", code == 0 and "food ban beef, cod" in text, text)
         text, code = run_cli("rules", "--global", "pref", "hunt_players", "default")
-        check("`rules --global <change>` changes the global ones", code == 0 and WS.config() == {}, WS.config())
+        check("`rules --global <change>` changes the global ones, and the file goes when nothing is left",
+              code == 0 and WS.config() == {} and not WS.config_file.exists(), WS.config())
+        check("doctor does not take a bot's rules for a setting",
+              any(c.label == "bots/rulesy" and c.ok for c in doctor.checks(WS)))
     finally:
         httpd.shutdown()
 
