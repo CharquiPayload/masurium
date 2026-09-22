@@ -64,10 +64,6 @@ def _check_port(target, value):
     return None
 
 
-def _check_language(target, value):
-    return None if re.match(r"^[a-z]{2,3}$", value) else "a language code such as en or es"
-
-
 def _check_owner(target, value):
     return None if PLAYER_NAME.match(value) else "a Minecraft player name: letters, digits, underscore"
 
@@ -115,8 +111,6 @@ SETTINGS = {s.key: s for s in [
     Setting("heap", "the game's memory (Java heap)", _heap_default, ("2g", "3g", "4g", "6g"),
             applies="start"),
     Setting("port", "the local port of the bot mod: its hands", "", applies="start", layers=(INSTANCE,)),
-    Setting("language", "the language it speaks in the chat", "en", ("en", "es", "pt", "fr", "de", "it")),
-    Setting("gender", "grammatical gender, for languages that inflect", "f", ("f", "m")),
     Setting("escort", "another instance on its server, by player name: this one becomes its guard",
             "", layers=(INSTANCE,)),
     Setting("model", "its brain's model and effort", "opus medium",
@@ -125,17 +119,25 @@ SETTINGS = {s.key: s for s in [
             _owner_default, applies="now"),
 ]}
 
-CHECKS = {"port": _check_port, "language": _check_language, "owner": _check_owner,
+CHECKS = {"port": _check_port, "owner": _check_owner,
           "model": _check_model, "escort": _check_escort, "heap": _check_heap}
 # Case matters in names (a player, a bot as the game shows it); in codes and
 # sizes it does not.
-LOWERCASE = ("account", "language", "gender", "heap")
+LOWERCASE = ("account", "heap")
+# Settings there were once, and where what they said goes now.
+RETIRED = {
+    "language": "the personality says which language the bot speaks",
+    "gender": "the personality says who the bot is",
+}
 
 
 def setting(key):
     try:
         return SETTINGS[key]
     except KeyError:
+        if key in RETIRED:
+            raise Fail(f"'{key}' is no longer a setting: {RETIRED[key]} (personality.txt).",
+                       code="bad_setting")
         raise Fail(f"there is no setting '{key}'. These are:", lines=list(SETTINGS), code="bad_setting")
 
 
@@ -227,6 +229,9 @@ def problems(target):
     for key, value in target.data.items():
         if key in ("name", "bot", "server") or value in (None, ""):
             continue
+        if key in RETIRED:
+            out.append((key, f"'{key}' is no longer a setting: {RETIRED[key]}; it can go"))
+            continue
         if key not in SETTINGS:
             out.append((key, f"'{key}' is not a setting"))
             continue
@@ -241,7 +246,9 @@ def problems(target):
 # The flat files the bridge and the MCP server read in an instance's folder, one
 # value each, written only when a layer sets them: without the file they apply
 # the same defaults as the table above (MARIONETTE_OWNER for the owner).
-RENDERED = ("account", "language", "gender", "escort", "model", "owner")
+RENDERED = ("account", "escort", "model", "owner")
+# Files an older launcher rendered, removed wherever they are left.
+STALE = ("language", "gender")
 
 
 def render(inst):
@@ -267,6 +274,8 @@ def render(inst):
             unlink_quietly(inst.dir / key)
         else:
             put(key, value)
+    for key in STALE:
+        unlink_quietly(inst.dir / key)
     put("port", inst.port)
     put("server", inst.slug)
     bot = inst.bot

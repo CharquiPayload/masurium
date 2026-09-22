@@ -1,85 +1,167 @@
 package marionette.common;
 
+import java.io.IOException;
+import java.io.Reader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * The few sentences a bot says on its own initiative, in the language it speaks.
+ * The few sentences a bot says on its own, without its brain.
  *
- * <p>Everything the brain says already comes out in the bot's language, because its prompt
- * says so. These do not go through the brain: they are the urgent ones, said by the body in
- * the same tick (a creeper next to the person being escorted, being cornered), so they
- * carry their own translations. A live test found the hole the loud way: a bot speaking
- * Spanish warned "Alice, creeper 15 blocks from you".
+ * <p>Everything else it says comes from the brain, in its own voice and in the language
+ * its personality speaks. These do not go through the brain when they are said: they are
+ * the urgent ones, said by the body in the same tick (a creeper next to the person being
+ * escorted, being cornered), where ten seconds of thinking would be ten seconds late.
  *
- * <p>Language and grammatical gender arrive as JVM properties from the launcher, which
- * reads them from {@code bots/<bot>/language} and {@code bots/<bot>/gender}. An unknown
- * language falls back to English, so a bot never goes mute over a missing translation.
+ * <p>So the brain writes them BEFOREHAND. When its bridge starts, it asks the brain for its
+ * own version of each of these sentences and writes them to
+ * {@code config/marionette-phrases.properties}; the body says those, at once, in the bot's
+ * voice. What is not written there yet, or was written wrong (a placeholder lost on the
+ * way), is said as below: plain, neutral English. The mod itself speaks nothing else.
  *
- * <p>In a language that inflects, {@code {a}} marks the letter that changes with gender:
- * feminine {@code a}, masculine {@code o} ("malherid{a}").
+ * <p>Placeholders have names, {@code {player}}, because another language may want them in
+ * another order. The arguments of {@link #of} fill them in the order they appear in the
+ * English sentence.
  */
 public final class Phrases {
 
     private Phrases() {}
 
-    /** English is the source: every other language is checked against these keys. */
-    private static final Map<String, String> EN = Map.of(
-            "shelter", "night fell and I am out in the open; moving to %s",
+    /** The English sentences, and the catalog the brain writes its own versions of. */
+    private static final Map<String, String> EN = ordered(
+            "shelter", "Night fell and I am out in the open; moving to {place}.",
             "known_spot", "a known spot",
-            "hurt_cornered", "badly hurt and with no way out",
-            "creeper_cornered", "creeper on top of me and no way out",
-            "explored", "I reached %d %d %d, %s. %s",
-            "turning_back", "Turning back",
-            "nothing_here", "No %s here: on to segment %d of %d",
-            "next_segment", "on to segment %d of %d",
-            "escort_creeper", "%s, creeper %d blocks from you",
-            "recovered", "I respawned. Going for my things to %s");
+            "hurt_cornered", "Badly hurt and with no way out.",
+            "creeper_cornered", "Creeper on top of me and no way out.",
+            "explored", "I reached {x} {y} {z}, {what}. {next}",
+            "turning_back", "Turning back.",
+            "nothing_here", "No {what} here: on to segment {segment} of {segments}.",
+            "next_segment", "On to segment {segment} of {segments}.",
+            "escort_creeper", "{player}, creeper {blocks} blocks from you!",
+            "recovered", "I respawned. Going for my things at {place}.");
 
-    private static final Map<String, String> ES = Map.of(
-            "shelter", "cayó la noche y estoy a la intemperie; me voy a %s",
-            "known_spot", "un sitio conocido",
-            "hurt_cornered", "malherid{a} y sin salida",
-            "creeper_cornered", "creeper encima y sin salida",
-            "explored", "Llegué a %d %d %d, %s. %s",
-            "turning_back", "Me devuelvo",
-            "nothing_here", "Aquí no hay %s: sigo al tramo %d de %d",
-            "next_segment", "sigo al tramo %d de %d",
-            "escort_creeper", "%s, creeper a %d bloques de ti",
-            "recovered", "Reaparecí. Voy por mis cosas a %s");
+    /** Where the brain's versions are, relative to the game folder (like the rest of
+     *  config/). */
+    public static final Path FILE = Path.of("config", "marionette-phrases.properties");
+    /** What a sentence may be at most: the chat cuts a little past this. */
+    static final int LIMIT = 240;
 
-    private static final Map<String, Map<String, String>> BY_LANGUAGE =
-            Map.of("en", EN, "es", ES);
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\{([a-z]+)\\}");
 
-    private static final String LANGUAGE = setting("marionette.language",
-            "MARIONETTE_LANGUAGE", "en").toLowerCase();
-    private static final String GENDER = setting("marionette.gender",
-            "MARIONETTE_GENDER", "f").toLowerCase();
+    private static Map<String, String> own = Map.of();
+    private static long ownStamp = -1;
 
-    private static String setting(String property, String variable, String byDefault) {
-        String v = System.getProperty(property,
-                System.getenv().getOrDefault(variable, byDefault)).strip();
-        return v.isEmpty() ? byDefault : v;
+    private static Map<String, String> ordered(String... pairs) {
+        Map<String, String> m = new LinkedHashMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            m.put(pairs[i], pairs[i + 1]);
+        }
+        return Collections.unmodifiableMap(m);
     }
 
-    /** The sentence for that key, filled in, in the bot's language. */
+    /** The English catalog: key -> sentence, placeholders included. */
+    public static Map<String, String> catalog() {
+        return EN;
+    }
+
+    /** The sentence for that key, filled in: the bot's own if it wrote a good one. */
     public static String of(String key, Object... arguments) {
-        return in(LANGUAGE, GENDER, key, arguments);
+        return fill(key, ownVersions().get(key), arguments);
     }
 
-    /** The same, choosing the language and gender: this is what the tests use. */
-    public static String in(String language, String gender, String key, Object... arguments) {
-        String pattern = BY_LANGUAGE.getOrDefault(language, EN).get(key);
-        if (pattern == null) pattern = EN.get(key);
-        if (pattern == null) {
+    /** The same, with its own versions given: this is what the tests use. */
+    public static String of(Map<String, String> versions, String key, Object... arguments) {
+        return fill(key, versions.get(key), arguments);
+    }
+
+    private static String fill(String key, String version, Object... arguments) {
+        String english = EN.get(key);
+        if (english == null) {
             throw new IllegalArgumentException("there is no sentence called " + key);
         }
-        String said = gender.startsWith("m") ? pattern.replace("{a}", "o")
-                                             : pattern.replace("{a}", "a");
-        return arguments.length == 0 ? said : String.format(said, arguments);
+        String pattern = version != null && acceptable(key, version) ? version : english;
+        List<String> names = placeholders(english);
+        String said = pattern;
+        for (int i = 0; i < names.size() && i < arguments.length; i++) {
+            said = said.replace("{" + names.get(i) + "}", String.valueOf(arguments[i]));
+        }
+        return said;
     }
 
-    /** The keys, so a test can check that no language is missing one. */
-    public static Map<String, Map<String, String>> byLanguage() {
-        return BY_LANGUAGE;
+    /** The placeholders of a sentence, in order, each once. */
+    static List<String> placeholders(String sentence) {
+        List<String> out = new ArrayList<>();
+        Matcher m = PLACEHOLDER.matcher(sentence);
+        while (m.find()) {
+            if (!out.contains(m.group(1))) {
+                out.add(m.group(1));
+            }
+        }
+        return out;
+    }
+
+    /** Whether the brain's version of a sentence can be said: it keeps exactly the
+     *  placeholders of the English one (a lost {blocks} would say a warning without the
+     *  distance; an invented one would reach the chat as it is), fits in the chat, is one
+     *  line, and is not a command. */
+    public static boolean acceptable(String key, String version) {
+        String english = EN.get(key);
+        if (english == null || version == null) {
+            return false;
+        }
+        String v = version.strip();
+        if (v.isEmpty() || v.length() > LIMIT || v.contains("\n") || v.startsWith("/")) {
+            return false;
+        }
+        Set<String> want = new TreeSet<>(placeholders(english));
+        Set<String> got = new TreeSet<>(placeholders(v));
+        return want.equals(got) && !v.replaceAll("\\{[a-z]+\\}", "").contains("{");
+    }
+
+    /** The versions in the file, read again only when the file changes. */
+    private static synchronized Map<String, String> ownVersions() {
+        long stamp;
+        try {
+            stamp = Files.exists(FILE) ? Files.getLastModifiedTime(FILE).toMillis() : 0;
+        } catch (IOException e) {
+            stamp = 0;
+        }
+        if (stamp != ownStamp) {
+            own = read(FILE);
+            ownStamp = stamp;
+        }
+        return own;
+    }
+
+    /** A versions file, as key -> sentence; empty when there is none. */
+    public static Map<String, String> read(Path file) {
+        Map<String, String> out = new LinkedHashMap<>();
+        if (!Files.exists(file)) {
+            return out;
+        }
+        Properties p = new Properties();
+        try (Reader r = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+            p.load(r);
+        } catch (IOException | IllegalArgumentException e) {
+            return out;
+        }
+        for (String key : EN.keySet()) {
+            String v = p.getProperty(key);
+            if (v != null) {
+                out.put(key, v.strip());
+            }
+        }
+        return out;
     }
 }

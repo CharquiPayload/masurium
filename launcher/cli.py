@@ -199,6 +199,10 @@ def cmd_set(ws, args):
     return 0
 
 
+def cmd_phrases(ws, args):
+    operations.rewrite_phrases(ws.instance(args.name), print_event)
+
+
 def cmd_deploy_mod(ws, args):
     operations.deploy_mod(ws, args.jar, print_event)
 
@@ -291,13 +295,17 @@ def build_parser():
     c.add_argument("name", nargs="?", metavar="instance")
     c.set_defaults(fn=cmd_status)
 
-    c = sub.add_parser("set", help="see or change settings (language, heap, owner...), per instance or per bot")
+    c = sub.add_parser("set", help="see or change settings (model, heap, owner...), per instance or per bot")
     c.add_argument("name", metavar="instance", help="an instance, or a bot with --bot")
     c.add_argument("key", nargs="?", help="one setting; without it, all of them")
     c.add_argument("value", nargs="*", help="its new value (a model may be two words: haiku low)")
     c.add_argument("--default", action="store_true", help="take it out of this layer")
     c.add_argument("--bot", action="store_true", help="NAME is a bot: its settings, for all its instances")
     c.set_defaults(fn=cmd_set)
+
+    c = sub.add_parser("phrases", help="have the brain write again what the bot says without it")
+    c.add_argument("name", metavar="instance")
+    c.set_defaults(fn=cmd_phrases)
 
     c = sub.add_parser("deploy-mod", help="put a built jar in shared/mods, safely (the core by default)")
     c.add_argument("jar", nargs="?", help="a jar to deploy instead of the core, such as an add-on's")

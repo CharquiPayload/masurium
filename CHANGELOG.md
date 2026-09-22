@@ -45,8 +45,8 @@ setting ignored it without a word.
   the same functions the command line uses (`launcher/`, a package).
 - A start, restart or connect can be cancelled while it waits, and a
   cancelled start stops the client it had launched. Ctrl+C does exactly that.
-- `set` sees and changes a bot's settings (language, gender, owner, model,
-  escort, heap, account, server, port) through one table that says what each
+- `set` sees and changes a bot's settings (owner, model, escort, heap,
+  account, port) through one table that says what each
   accepts and when a change counts; a setting read at start is refused while
   the client runs. `doctor` names hand-edited values `set` would refuse.
   `MARIONETTE_HEAP` and `MARIONETTE_VERSION` replace the old `HEAP` and
@@ -134,8 +134,10 @@ setting ignored it without a word.
 - Per-server memory: places, a diary, people, placed blocks, staircases,
   standing orders, preferences, break whitelist, food blacklist and trash list.
 - What the body says by itself without waiting for the brain (a creeper next to
-  whoever it escorts, being cornered, what it found exploring) comes out in the
-  bot's own language and grammatical gender.
+  whoever it escorts, being cornered, what it found exploring) is said in the
+  bot's own voice: its brain writes its version of each sentence once
+  (`marionette.py phrases` writes them again), and plain English stands in for
+  any it has not written well.
 - Body notices that wake the brain, with per-key cooldowns, and an in-memory
   logbook for diagnosis.
 
@@ -144,7 +146,7 @@ setting ignored it without a word.
   file access.
 - Chat bridge with instant stop words, a hear list that keeps strangers away
   from the brain, orders from `/marionette bot` carried out without the model,
-  per-bot owner, personality, model and language (English or Spanish).
+  per-bot owner, personality (which says the language it speaks) and model.
 - Nothing that takes a bot out of the game can be asked through the chat, and
   the one lock the brain still touches (vetoed food) checks the name the bridge
   read in the chat, never one written by the brain.

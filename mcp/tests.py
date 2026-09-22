@@ -224,9 +224,8 @@ def tests_speaker():
     check("one bridge per bot: with the first one gone, another may start",
           bridge.only_one_bridge(lock).close() is None)
 
-    check("chat: asking to shut down points to the command, in both languages",
-          all("/marionette bot {name} {what}" in bridge.L10N[k]["by_command"]
-              for k in ("en", "es")))
+    check("chat: asking to shut down points to the command",
+          "/marionette bot {name} {what}" in bridge.PHRASES["by_command"])
 
 
 # --- what really matters: not lying -----------------------------------------
@@ -558,24 +557,8 @@ def tests_tab():
           bridge.guards_of("alice", base) == ["guard"])
     check("guard: without guards, empty list",
           bridge.guards_of("guard", base) == [])
-    (base / "guard" / "gender").write_text("m\n")
-    check("gender: comes from bots/<bot>/gender",
-          bridge.gender_of("guard", base) == "m")
-    check("gender: without a file, feminine",
-          bridge.gender_of("alice", base) == "f")
-    (base / "guard" / "language").write_text("es\n")
-    check("language: comes from bots/<bot>/language",
-          bridge.language_of("guard", base) == "es")
-    check("language: without a file, English",
-          bridge.language_of("alice", base) == "en")
-    check("gender: stuck and dead have no masculine form in English",
-          bridge.with_gender("stuck", "m") == "stuck"
-          and bridge.with_gender("dead", "m") == "dead")
-    check("gender: the rest, and the feminine, stay the same",
-          bridge.with_gender("idle", "m") == "idle"
-          and bridge.with_gender("stuck", "f") == "stuck")
-    check("gender: no gendered forms in English",
-          bridge.MASCULINE == {} and bridge.TAB_FALLBACK["stuck"] == "error")
+    check("tab: stuck falls back to error on an old server mod",
+          bridge.TAB_FALLBACK["stuck"] == "error")
     check("tab: every named state has a fallback for an old server mod",
           all(e in bridge.TAB_FALLBACK for _, _, e in bridge.FINE_STATES)
           and all(e in bridge.TAB_FALLBACK
@@ -927,6 +910,70 @@ def tests_server_env():
         _cfg.write_text("MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT=1\nMARIONETTE_TOKEN=test\n")
 
 
+def tests_phrases():
+    print("\nPhrases: said without the brain, in its own voice once it wrote them")
+    import tempfile as _tf
+    d = pathlib.Path(_tf.mkdtemp())
+    f = d / "config" / "marionette-phrases.properties"
+    catalog = {"escort_creeper": "{player}, creeper {blocks} blocks from you!",
+               "turning_back": "Turning back."}
+    body = {"file": str(f), "catalog": catalog}
+    real_request_bot, real_state = bridge.request_bot, bridge.STATE
+    bridge.request_bot = lambda route: body if route == "/phrases" else {}
+    bridge.OWN_PHRASES.update(file=None, stamp=None, versions={}, asked=0)
+    asked = []
+
+    def brain(cat):
+        asked.append(sorted(cat))
+        return {"escort_creeper": "¡{player}! Creeper a {blocks} bloques",
+                "turning_back": "Me devuelvo.",
+                "busy": "Estoy ocupada,\n ahora no",         # two lines: joined into one
+                "stop": "/stop",                               # a command: refused
+                "confused": "Se me fue el hilo, {who}?",       # an invented placeholder
+                "unknown_key": "whatever"}
+    try:
+        check("without versions, the English sentence, filled in",
+              bridge.phrase("by_command", name="alice", what="shutdown")
+              == "That is not done through the chat: my owner or an admin runs "
+                 "/marionette bot alice shutdown.")
+        n = bridge.write_phrases(ask=brain)
+        check("the brain is asked once, for the body's sentences and the bridge's",
+              len(asked) == 1 and "escort_creeper" in asked[0] and "shutdown" in asked[0])
+        versions = bridge.read_phrases(f)
+        check("what it wrote well is kept, one line each",
+              versions.get("turning_back") == "Me devuelvo."
+              and versions.get("busy") == "Estoy ocupada, ahora no", versions)
+        check("a command, an invented placeholder and an unknown key are left out",
+              "stop" not in versions and "confused" not in versions and "unknown_key" not in versions
+              and n == 3, versions)
+        check("the bridge says its own version, filled in",
+              bridge.phrase("busy") == "Estoy ocupada, ahora no")
+        check("...and English where it has none", bridge.phrase("stop") == "Ok, stopping.")
+        check("the file is written once: a second start does not ask again",
+              bridge.write_phrases(ask=brain) is None and len(asked) == 1)
+        check("asked again (the launcher's mark), it is rewritten",
+              bridge.write_phrases(force=True, ask=brain) == 3 and len(asked) == 2)
+        check("a brain that failed writes no versions and breaks nothing",
+              bridge.write_phrases(force=True, ask=lambda c: {}) == 0 and bridge.phrase("busy")
+              == bridge.PHRASES["busy"])
+        check("the JSON is found in the brain's answer, fences and all",
+              bridge.json_in("Sure:\n```json\n{\"a\": \"b\"}\n```") == {"a": "b"}
+              and bridge.json_in("no json here") is None)
+        check("a version must keep exactly the placeholders of the English one",
+              bridge.acceptable("{player}, creeper {blocks}", "{blocks}! {player}")
+              and not bridge.acceptable("{player}, creeper {blocks}", "creeper!")
+              and not bridge.acceptable("x", "a {b} c") and not bridge.acceptable("x", "a { c"))
+        bridge.STATE = str(d)
+        mark = d / f"phrases_{bridge.NAME.lower()}"
+        check("no mark, nothing asked", not bridge.phrases_asked())
+        mark.write_text("")
+        check("the launcher's mark is seen once, and taken", bridge.phrases_asked()
+              and not mark.exists() and not bridge.phrases_asked())
+    finally:
+        bridge.request_bot, bridge.STATE = real_request_bot, real_state
+        bridge.OWN_PHRASES.update(file=None, stamp=None, versions={}, asked=0)
+
+
 if __name__ == "__main__":
     tests_honesty()
     tests_ids()
@@ -942,6 +989,7 @@ if __name__ == "__main__":
     tests_chat()
     tests_speaker()
     tests_server_env()
+    tests_phrases()
 
     print(f"\n{done - len(failures)}/{done} checks pass")
     if failures:

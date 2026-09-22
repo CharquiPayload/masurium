@@ -300,7 +300,7 @@ instance's (`instance.json`); groups and a global layer will come on top. One
 table (`launcher/settings.py`) says what each setting accepts, at which layers,
 and when a change counts. The bridge knows nothing about layers: on every
 start and every change the launcher writes the resolved values into the
-instance's folder as one small file each (`language`, `model`, `owner`...),
+instance's folder as one small file each (`model`, `owner`, `escort`...),
 which is what the bridge always read in a bot's folder.
 
 **The bridge sees its server, not the machine.** A running instance is linked

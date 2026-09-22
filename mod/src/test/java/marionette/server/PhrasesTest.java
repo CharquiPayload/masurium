@@ -4,6 +4,10 @@ import marionette.common.Phrases;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,78 +16,85 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * What a bot says by itself, without the brain. A live test caught a bot speaking Spanish
- * warning "Alice, creeper 15 blocks from you".
+ * What a bot says by itself, without the brain: its own version when its brain wrote a
+ * good one, plain English when not.
  */
 class PhrasesTest {
 
     @Test
-    @DisplayName("the warning comes out in the bot's language, with its numbers")
-    void warningComesOutInTheBotsLanguage() {
-        assertEquals("Alice, creeper a 15 bloques de ti",
-                Phrases.in("es", "f", "escort_creeper", "Alice", 15));
-        assertEquals("Alice, creeper 15 blocks from you",
-                Phrases.in("en", "f", "escort_creeper", "Alice", 15));
+    @DisplayName("without a version of its own, plain English, with its numbers")
+    void englishWithoutAVersion() {
+        assertEquals("Alice, creeper 15 blocks from you!",
+                Phrases.of(Map.of(), "escort_creeper", "Alice", 15));
     }
 
     @Test
-    @DisplayName("an unknown language falls back to English instead of going mute")
-    void unknownLanguageFallsBackToEnglish() {
-        assertEquals(Phrases.in("en", "f", "creeper_cornered"),
-                Phrases.in("ja", "f", "creeper_cornered"));
-        assertEquals(Phrases.in("en", "f", "turning_back"),
-                Phrases.in("", "f", "turning_back"));
+    @DisplayName("the bot's own version is said, the placeholders in its own order")
+    void itsOwnVersion() {
+        Map<String, String> own = Map.of("escort_creeper",
+                "¡Cuidado {player}! Un creeper a {blocks} bloques de ti");
+        assertEquals("¡Cuidado Alice! Un creeper a 15 bloques de ti",
+                Phrases.of(own, "escort_creeper", "Alice", 15));
+        Map<String, String> reordered = Map.of("nothing_here",
+                "Tramo {segment}/{segments}: aquí no hay {what}");
+        assertEquals("Tramo 2/5: aquí no hay aldea",
+                Phrases.of(reordered, "nothing_here", "aldea", 2, 5));
     }
 
     @Test
-    @DisplayName("gender changes the ending where the language inflects")
-    void genderChangesTheEnding() {
-        assertEquals("malherida y sin salida", Phrases.in("es", "f", "hurt_cornered"));
-        assertEquals("malherido y sin salida", Phrases.in("es", "m", "hurt_cornered"));
-        // English does not inflect, and no marker must leak into what is said.
-        assertFalse(Phrases.in("en", "m", "hurt_cornered").contains("{"));
+    @DisplayName("a version that lost or invented a placeholder is not said: English is")
+    void aBrokenVersionIsNotSaid() {
+        assertFalse(Phrases.acceptable("escort_creeper", "Cuidado, un creeper cerca de ti"));
+        assertFalse(Phrases.acceptable("escort_creeper", "{player}, {blocks} {thing}"));
+        assertFalse(Phrases.acceptable("escort_creeper", "{player}, creeper a {blocks} {"));
+        assertFalse(Phrases.acceptable("turning_back", "/kill @a"));
+        assertFalse(Phrases.acceptable("turning_back", "Me devuelvo\ny algo más"));
+        assertFalse(Phrases.acceptable("turning_back", "x".repeat(300)));
+        assertFalse(Phrases.acceptable("no_such_key", "anything"));
+        assertTrue(Phrases.acceptable("turning_back", "Me devuelvo."));
+        assertEquals("Alice, creeper 15 blocks from you!", Phrases.of(
+                Map.of("escort_creeper", "Cuidado, un creeper cerca"), "escort_creeper", "Alice", 15));
     }
 
     @Test
-    @DisplayName("no language is missing a sentence, and none leaves a marker behind")
-    void noLanguageIsMissingASentence() {
-        Map<String, String> english = Phrases.byLanguage().get("en");
-        Phrases.byLanguage().forEach((language, sentences) -> {
-            assertEquals(english.keySet(), sentences.keySet(), "keys of " + language);
-            sentences.forEach((key, pattern) -> {
-                // {a} is the only marker; anything else left in is a typo that would
-                // reach the chat.
-                assertFalse(pattern.replace("{a}", "").contains("{"),
-                        language + "/" + key);
-                // A line starting with a slash would be a server command, not a sentence.
-                assertFalse(pattern.startsWith("/"), language + "/" + key);
-            });
+    @DisplayName("an unknown key is a bug, said loudly")
+    void unknownKey() {
+        assertThrows(IllegalArgumentException.class, () -> Phrases.of(Map.of(), "no_such_sentence"));
+    }
+
+    @Test
+    @DisplayName("the English catalog: no sentence is a command, and placeholders have names")
+    void theCatalog() {
+        Phrases.catalog().forEach((key, sentence) -> {
+            assertFalse(sentence.startsWith("/"), key);
+            assertFalse(sentence.contains("%"), key);
+            assertFalse(sentence.replaceAll("\\{[a-z]+\\}", "").contains("{"), key);
+            assertTrue(Phrases.acceptable(key, sentence), key);
         });
+        assertEquals(List.of("player", "blocks"), placeholdersOf("escort_creeper"));
     }
 
     @Test
-    @DisplayName("a sentence that does not exist complains instead of saying nothing")
-    void missingSentenceComplains() {
-        assertThrows(IllegalArgumentException.class,
-                () -> Phrases.in("es", "f", "there_is_no_such_thing"));
+    @DisplayName("the versions file is read as UTF-8 properties, only the known keys")
+    void readsTheFile() throws Exception {
+        Path f = Files.createTempFile("phrases", ".properties");
+        Files.writeString(f, "# written by the brain\n"
+                + "turning_back=Me devuelvo, ¡qué lástima!\n"
+                + "unknown=not a sentence\n"
+                + "_fingerprint=abc\n", StandardCharsets.UTF_8);
+        Map<String, String> read = Phrases.read(f);
+        assertEquals(Map.of("turning_back", "Me devuelvo, ¡qué lástima!"), read);
+        assertEquals(Map.of(), Phrases.read(f.resolveSibling("does-not-exist.properties")));
+        Files.delete(f);
     }
 
-    @Test
-    @DisplayName("the placeholders match between languages")
-    void placeholdersMatchBetweenLanguages() {
-        Map<String, String> english = Phrases.byLanguage().get("en");
-        Phrases.byLanguage().forEach((language, sentences) -> sentences.forEach((key, s) -> {
-            assertEquals(marks(english.get(key)), marks(s), language + "/" + key);
-            assertTrue(s.length() <= 250, language + "/" + key);
-        }));
-    }
-
-    /** "%s ... %d" -> "sd": what String.format will be asked to fill in. */
-    private static String marks(String pattern) {
-        StringBuilder found = new StringBuilder();
-        for (int i = 0; i + 1 < pattern.length(); i++) {
-            if (pattern.charAt(i) == '%') found.append(pattern.charAt(i + 1));
+    private static List<String> placeholdersOf(String key) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\{([a-z]+)\\}")
+                .matcher(Phrases.catalog().get(key));
+        java.util.List<String> out = new java.util.ArrayList<>();
+        while (m.find()) {
+            out.add(m.group(1));
         }
-        return found.toString();
+        return out;
     }
 }

@@ -7,7 +7,7 @@ what attacks them. Direct orders are handled instantly; anything ambiguous is
 interpreted by an AI model running through [Claude Code](https://claude.com/claude-code).
 
 It is made for people who want to **create their own bots**: give each one a
-name, a personality, a language and a job, link guards to a main bot, and let
+name, a personality (which says the language it speaks) and a job, link guards to a main bot, and let
 them play alongside you.
 
 > **The rule behind everything:** the bot must never be unsure whether it did
@@ -66,8 +66,9 @@ because fighting is measured in ticks and a model round trip takes seconds.
   strangers from reaching the brain at all; breaking blocks to move is limited
   to a whitelist; building and digging are expensive in the path finder so they
   only happen when there is no way on foot.
-- **Languages**: bots talk in English or Spanish (`language` file per bot);
-  the brain and tools always work in English.
+- **Languages**: a bot speaks the language its personality says, and so do the
+  few sentences it says without its brain, which the brain writes once in its
+  own voice; the mod, the tools and the brain's instructions are English.
 
 ## Tests
 

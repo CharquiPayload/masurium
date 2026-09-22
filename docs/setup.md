@@ -266,19 +266,18 @@ and says when the change counts; `doctor` names any value, edited by hand, that
 
 ```bash
 launcher/marionette.py set alice                      # every setting, its value, and where it comes from
-launcher/marionette.py set --bot alice language es    # for every instance of the bot
+launcher/marionette.py set --bot alice model sonnet   # for every instance of the bot
 launcher/marionette.py set alice model haiku low      # for this instance only
 launcher/marionette.py set alice heap --default       # out of the instance: the bot's, or the default
 ```
 
 The personality is a text file of its own, `bots/<bot>/personality.txt`: who
-the bot is, in second person; it goes at the start of its prompt.
+the bot is, in second person, **including the language it speaks** with
+players and how; it goes at the start of its prompt.
 
 | setting | layers | meaning |
 |---|---|---|
 | `account` | bot, instance | `online` (a logged-in Minecraft account) or `offline` (private servers only) |
-| `language` | bot, instance | `en` or `es`: the language it speaks in the chat |
-| `gender` | bot, instance | `m` or `f`, for languages with grammatical gender (default `f`) |
 | `owner` | bot, instance | the player the bot belongs to: it accepts their delicate orders, and they control it with `/marionette bot` on any server. It cannot be changed from inside the game |
 | `model` | bot, instance | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`) |
 | `heap` | bot, instance | the game's memory, e.g. `3g` (default `MARIONETTE_HEAP`, else `3g`) |
@@ -286,8 +285,24 @@ the bot is, in second person; it goes at the start of its prompt.
 | `port` | instance | the local port of the bot mod, chosen by the launcher |
 
 The launcher writes what the bridge reads into the instance's folder on every
-start and every change, one small file per setting (`language`, `model`...):
+start and every change, one small file per setting (`model`, `owner`...):
 those are an output, not a place to edit.
+
+**What it says without its brain.** A few sentences are said without asking
+the brain: the urgent ones of the body (a creeper next to the player it
+escorts, being cornered) and a few of the bridge's (shutting down, busy). They
+are plain English in the code. The first time its bridge starts, the brain
+writes its own version of each, in its voice and its language, into
+`gamedir/config/marionette-phrases.properties`, and those are said from then
+on. They are written again only on request, after changing the personality
+for instance:
+
+```bash
+launcher/marionette.py phrases alice
+```
+
+A version that lost a placeholder (the distance of the creeper, say) is not
+used: that sentence is said in English.
 
 **Main bots and guards.** A main bot takes orders and does jobs. A guard is an
 instance whose `escort` names a main bot on its server: it follows and protects it, sleeps

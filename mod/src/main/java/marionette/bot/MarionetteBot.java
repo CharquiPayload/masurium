@@ -258,6 +258,7 @@ public class MarionetteBot {
             http.createContext("/people", x -> attend(x, this::people));
             http.createContext("/eat", x -> attend(x, this::eat));
             http.createContext("/version", x -> attend(x, this::version));
+            http.createContext("/phrases", x -> attend(x, this::phrases));
             http.createContext("/food", x -> attend(x, this::food));
             http.createContext("/trash", x -> attend(x, this::trash));
             http.createContext("/dig", x -> attend(x, this::dig));
@@ -1058,6 +1059,25 @@ public class MarionetteBot {
         return String.format(
                 "{\"ok\":true,\"version\":\"%s\",\"screen\":\"%s\",\"loading\":%s,\"in_world\":%s}",
                 Request.escape(v), Request.escape(screen), mc.getOverlay() != null, mc.level != null);
+    }
+
+    /**
+     * The sentences the body says on its own, in English, and the file where the brain's
+     * own versions go (see Phrases): the bridge asks for both when it starts, has the
+     * brain write them, and writes them there. Its path is absolute because only the
+     * game knows which folder it runs in.
+     */
+    private String phrases(Map<String, String> q) {
+        StringBuilder catalog = new StringBuilder();
+        for (Map.Entry<String, String> e : marionette.common.Phrases.catalog().entrySet()) {
+            if (catalog.length() > 0) {
+                catalog.append(',');
+            }
+            catalog.append('"').append(Request.escape(e.getKey())).append("\":\"")
+                    .append(Request.escape(e.getValue())).append('"');
+        }
+        return String.format("{\"ok\":true,\"file\":\"%s\",\"catalog\":{%s}}",
+                Request.escape(marionette.common.Phrases.FILE.toAbsolutePath().toString()), catalog);
     }
 
     private String food(Map<String, String> q) throws Exception {

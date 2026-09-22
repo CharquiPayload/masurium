@@ -315,9 +315,10 @@ def tests_create():
     bot = WS.bot("alice")
     check("the bot is bots/alice/bot.json, with the name's capitals",
           bot.exists() and bot.data.get("name") == "Alice" and bot.name == "Alice")
-    check("the account and the language go in the bot", (bot.data.get("account"), bot.data.get("language"))
-          == ("offline", "en"))
-    check("a personality template is there", "You are Alice" in bot.personality.read_text())
+    check("the account goes in the bot, and nothing about language",
+          bot.data == {"name": "Alice", "account": "offline"}, bot.data)
+    check("a personality template is there, which says the language it speaks",
+          "You are Alice" in bot.personality.read_text() and "speak English" in bot.personality.read_text())
     check("the instance is instances/alice/instance.json: which bot, which server, its port",
           inst.dir == TMP / "instances" / "alice"
           and inst.data == {"bot": "alice", "server": "test", "port": FIRST_PORT})
@@ -444,13 +445,7 @@ def tests_launch_line():
     check("headless, and the instance's own port",
           "-Dmarionette.headless=true" in line and f"-Dmarionette.bot.port={FIRST_PORT}" in line)
     check("default heap", f"-Xmx{DEFAULT_HEAP}" in line)
-    check("the language, from the bot", "marionette.language=en" in line)
-    data = bot.data
-    data.update(language="es; rm -rf /", gender="f")
-    bot.save(data)
-    line = keeper.launch_line(inst, server)
-    check("language and gender reach the JVM cleaned",
-          "-Dmarionette.language=esrmrf " in line and "-Dmarionette.gender=f" in line)
+    check("no language nor gender: the personality says those", "language" not in line and "gender" not in line)
     WS.environ["MARIONETTE_HEAP"] = "1g"
     WS.environ["MARIONETTE_VERSION"] = "neoforge-21.1.999"
     line = keeper.launch_line(inst, server)
@@ -476,10 +471,6 @@ def tests_launch_line():
           f"-Xmx{DEFAULT_HEAP}" in line and "21.1.999" not in line)
     WS.environ.pop("HEAP")
     WS.environ.pop("VERSION")
-    data = bot.data
-    data["language"] = "en"
-    data.pop("gender")
-    bot.save(data)
 
 
 # --- the keeper -------------------------------------------------------------
@@ -1179,8 +1170,8 @@ def tests_settings():
     check("set in the instance, it wins over the bot's", settings.resolve(alice, "model") == ("haiku low", "instance"))
     settings.clear(alice, "model")
     settings.clear(bot, "model")
-    for target, key, value, why in ((bot, "language", "english", "language code"),
-                                    (bot, "gender", "x", "one of f, m"),
+    for target, key, value, why in ((bot, "language", "es", "no longer a setting: the personality"),
+                                    (bot, "gender", "f", "no longer a setting: the personality"),
                                     (bot, "account", "maybe", "one of online, offline"),
                                     (bot, "owner", "not a name!", "player name"),
                                     (bot, "model", "haiku lowest", "effort is one of"),
@@ -1197,15 +1188,15 @@ def tests_settings():
         check(f"{key} '{value}' on the {settings.layer_of(target)} is refused, saying what it takes",
               e is not None and why in told(e) and e.code == "bad_setting", told(e))
     check("an unknown setting is refused, listing the ones there are",
-          "language" in told(fails(settings.setting, "colour")))
+          "model" in told(fails(settings.setting, "colour")))
     check("a good value is written into the layer's JSON",
-          settings.set_value(bot, "language", "ES") == "es" and bot.data.get("language") == "es")
+          settings.set_value(bot, "account", "ONLINE") == "online" and bot.data.get("account") == "online")
+    settings.set_value(bot, "account", "offline")
     check("a model keeps its two words", settings.set_value(bot, "model", "haiku   low") == "haiku low")
     check("an escort keeps its capitals (the game shows names as they are)",
           settings.set_value(alice, "escort", "Bob") == "Bob")
     settings.clear(alice, "escort")
     settings.clear(bot, "model")
-    settings.set_value(bot, "language", "en")
     check("the port cannot be cleared: every instance needs one",
           "no default" in told(fails(settings.clear, alice, "port")))
     settings.set_value(bot, "account", "online")
@@ -1252,18 +1243,23 @@ def tests_settings():
           "choices:" in text and "when its bridge restarts" in text and "(bot)" in text, text)
     text, code = run_cli("set", "--bot", "alice", "model", "--default")
     check("`--default` takes it out of the layer", code == 0 and "model" not in bot.data, text)
-    text, code = run_cli("set", "alice", "gender", "x")
-    check("a bad value is a failure of the command, with the reason", code == 1 and "one of f, m" in text, text)
+    text, code = run_cli("set", "alice", "account", "maybe")
+    check("a bad value is a failure of the command, with the reason",
+          code == 1 and "one of online, offline" in text, text)
 
     data = bob.bot.data
-    data["language"] = "Klingon!"
+    data["model"] = "haiku lowest"
+    data["language"] = "es"
     bob.bot.save(data)
     checks = doctor.checks(WS)
     check("doctor names a JSON edited by hand into something `set` would refuse",
-          any(l == "bots/bob" and ok is False and "language" in d for l, ok, d in checks))
+          any(l == "bots/bob" and ok is False and "effort is one of" in d for l, ok, d in checks))
+    check("...and a setting there is no more, saying where it went",
+          any(l == "bots/bob" and "'language' is no longer a setting" in d for l, ok, d in checks))
     text, code = run_cli("set", "--bot", "bob")
-    check("...and so does `set`", "!! 'Klingon!' is not a valid language" in text, text)
-    data["language"] = "en"
+    check("...and so does `set`", "!! 'haiku lowest' is not a valid model" in text, text)
+    data.pop("model")
+    data.pop("language")
     bob.bot.save(data)
 
 
@@ -1372,6 +1368,34 @@ def tests_server_apis():
         layout()
 
 
+def tests_phrases():
+    print("\nPhrases: what the bot says without its brain is rewritten on request")
+    inst = WS.instance("alice")
+    f = ops.phrases_file(inst)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("turning_back=Me devuelvo.\n")
+    text, result = said(ops.rewrite_phrases, inst)
+    check("without a bridge running, the old ones go and the next start writes new ones",
+          result == "on the next start" and not f.exists() and "next starts" in text, text)
+    fake = TMP / "bridge.py"
+    fake.write_text("import time\ntime.sleep(30)\n")
+    bridge = subprocess.Popen([sys.executable, str(fake), "Alice"])
+    try:
+        inst.state.mkdir(parents=True, exist_ok=True)
+        inst.bridge_lock.write_text(f"{bridge.pid}\n")
+        text, result = said(ops.rewrite_phrases, inst)
+        mark = inst.state / "phrases_alice"
+        check("with its bridge running, it leaves the mark the bridge looks for",
+              result == "asked" and mark.exists() and "writing its sentences again" in text, text)
+        mark.unlink()
+    finally:
+        bridge.kill()
+        bridge.wait()
+        inst.bridge_lock.unlink()
+    text, code = run_cli("phrases", "alice")
+    check("`marionette.py phrases <instance>` is the command", code == 0 and "sentences" in text, text)
+
+
 # --- the layout from before instances -----------------------------------------
 
 def tests_migrate():
@@ -1422,9 +1446,11 @@ def tests_migrate():
     inst = WS.instance("old")
     bot = WS.bot("old")
     check("migrated: a bot and an instance", [i.key for i in made] == ["old"] and bot.exists(), text)
-    check("the bot keeps its name, account, language, model, owner and gender",
-          bot.data == {"name": "Old", "account": "offline", "language": "es", "model": "haiku low",
-                       "owner": "Someone", "gender": "f"}, bot.data)
+    check("the bot keeps its name, account, model and owner",
+          bot.data == {"name": "Old", "account": "offline", "model": "haiku low", "owner": "Someone"},
+          bot.data)
+    check("...and language and gender, no longer settings, are pointed at its personality",
+          "language es, gender f are no longer settings: say them in its personality.txt" in text, text)
     check("...and its personality, where it was", bot.personality.read_text() == "You are Old.\n")
     check("the instance keeps its server and its port", inst.data == {"bot": "old", "server": "test", "port": 8490})
     check("its game, HeadlessMC and logs were moved, not copied",
@@ -1483,6 +1509,7 @@ if __name__ == "__main__":
     tests_server_mod_missing()
     tests_settings()
     tests_server_apis()
+    tests_phrases()
     tests_migrate()
     tests_cli()
 

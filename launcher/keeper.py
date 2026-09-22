@@ -19,7 +19,6 @@ starting with "@", which are for the keeper itself:
 """
 import hmac
 import os
-import re
 import secrets
 import signal
 import socket
@@ -44,10 +43,9 @@ def launch_line(inst, server):
 
     -Dmarionette.name is what makes this client a bot at all.
     -Dmarionette.bot.port: without it every bot would fight over 8478 and
-    the second one would have no hands. What the body says on its own (a
-    creeper next to whoever it escorts) does not go through the brain, so the
-    mod gets the same language and gender the bridge uses; only clean values
-    reach the JVM."""
+    the second one would have no hands. What the body says on its own comes
+    from the sentences its brain wrote (see the bridge's write_phrases), not
+    from a language flag: the mod speaks plain English otherwise."""
     ws = inst.ws
     offline = " -offline" if settings.get(inst, "account") == "offline" else ""
     # A heap edited by hand is not trusted onto the JVM's command line:
@@ -57,12 +55,6 @@ def launch_line(inst, server):
         heap = ws.heap()
     jvm = [f"-Xmx{heap}", f"-Dmarionette.name={inst.name}",
            "-Dmarionette.headless=true", f"-Dmarionette.bot.port={inst.port}"]
-    language = re.sub(r"[^A-Za-z]", "", settings.get(inst, "language"))[:8]
-    gender = re.sub(r"[^A-Za-z]", "", settings.get(inst, "gender"))[:1]
-    if language:
-        jvm.append(f"-Dmarionette.language={language}")
-    if gender:
-        jvm.append(f"-Dmarionette.gender={gender}")
     return f"launch {ws.version_for(server)} -lwjgl{offline} -paulscode --jvm \"{' '.join(jvm)}\""
 
 

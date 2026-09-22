@@ -176,13 +176,6 @@ RESTART_WORDS = {"restart", "reboot",
 SHUTDOWN_WORDS = {"shutdown", "poweroff", "logoff",
                   "apagate", "apagues", "apagar", "apagado"}
 
-# The language the bot SPEAKS in chat (bots/<bot>/language, or the
-# environment). The brain and the tools always work in English; this only
-# decides what players hear.
-LANGUAGE_NAMES = {"en": "English", "es": "Spanish", "pt": "Portuguese",
-                  "fr": "French", "de": "German", "it": "Italian"}
-
-
 def blueprint(text):
     """Lowercase and without accents: players type 'reiníciate' and 'reiniciate'."""
     return "".join(c for c in unicodedata.normalize("NFD", text.lower())
@@ -236,51 +229,196 @@ def boss_of(name=None, base=None):
     return _bot_config(name or NAME, "escort", base)
 
 
-def gender_of(name=None, base=None):
-    """Grammatical gender of that bot (`bots/<bot>/gender`): 'm' or 'f'. It
-    matters for languages that inflect; English does not. Default 'f'."""
-    t = (_bot_config(name or NAME, "gender", base) or "").lower()
-    return "m" if t.startswith("m") else "f"
+# --- the sentences said without the brain --------------------------------------
+#
+# A few lines are said without asking the brain, because they come at a moment
+# it cannot be asked (it is busy, it failed, the bot is about to shut down), and
+# the body has its own for the moments where thinking would be too slow (a
+# creeper next to the person it escorts). The mod and the bridge carry them in
+# plain, neutral English. The brain writes its OWN version of each, once, in
+# its voice and in the language its personality speaks: the first time the
+# bridge starts without them, and again only when asked (`marionette.py
+# phrases <instance>`, which leaves a mark this bridge sees within a poll).
+# They go to one file in the game's config folder, which the body reads too.
 
-
-def language_of(name=None, base=None):
-    """The language that bot speaks in chat (`bots/<bot>/language`): an ISO
-    code such as 'en' or 'es'. Environment MARIONETTE_LANGUAGE next, then
-    English."""
-    return ((_bot_config(name or NAME, "language", base)
-             or os.environ.get("MARIONETTE_LANGUAGE") or "en").lower())
-
-
-GENDER = gender_of()
-LANGUAGE = language_of()
-LANGUAGE_NAME = LANGUAGE_NAMES.get(LANGUAGE, LANGUAGE)
-
-# The few fixed chat lines the bridge says by itself, per language. Anything
-# missing falls back to English.
-L10N = {
-    "en": {"stop": "Ok, stopping.",
-           "by_command": "That is not done through the chat: my owner or an admin "
-                         "runs /marionette bot {name} {what}.",
-           "shutdown": "Shutting down. See you.",
-           "restart": "Restarting, back in a moment.",
-           "logoff": "Logging off. See you.",
-           "no_restart": "I could not restart myself; it has to be done by hand.",
-           "busy": "I'm in the middle of something, I'll answer as soon as I'm done.",
-           "confused": "I lost my train of thought, could you say that again?"},
-    "es": {"stop": "Ok, paro.",
-           "by_command": "Eso no se hace por el chat: mi owner o un admin usa "
-                         "/marionette bot {name} {what}.",
-           "shutdown": "Me apago. Hasta luego.",
-           "restart": "Me reinicio, vuelvo en un momento.",
-           "logoff": "Me desconecto. Hasta luego.",
-           "no_restart": "No pude reiniciarme sola; hay que hacerlo a mano.",
-           "busy": "Estoy en algo, en cuanto acabe te contesto.",
-           "confused": "Se me enredo la cabeza, repitemelo?"},
+PHRASES = {
+    "stop": "Ok, stopping.",
+    "by_command": "That is not done through the chat: my owner or an admin runs "
+                  "/marionette bot {name} {what}.",
+    "shutdown": "Shutting down. See you.",
+    "restart": "Restarting, back in a moment.",
+    "logoff": "Logging off. See you.",
+    "no_restart": "I could not restart myself; it has to be done by hand.",
+    "busy": "I'm in the middle of something, I'll answer as soon as I'm done.",
+    "confused": "I lost my train of thought, could you say that again?",
 }
+PLACEHOLDER = re.compile(r"\{([a-z]+)\}")
+PHRASE_LIMIT = 240
+OWN_PHRASES = {"file": None, "stamp": None, "versions": {}}
+
+
+def placeholders(sentence):
+    return set(PLACEHOLDER.findall(sentence))
+
+
+def acceptable(english, version):
+    """Whether the brain's version can be said instead of the English one: the
+    same placeholders (a lost {blocks} would warn without the distance; an
+    invented one would reach the chat as it is), one line that fits in the
+    chat, and not a command."""
+    if not isinstance(version, str):
+        return False
+    v = version.strip()
+    return (bool(v) and len(v) <= PHRASE_LIMIT and "\n" not in v and not v.startswith("/")
+            and placeholders(v) == placeholders(english)
+            and "{" not in PLACEHOLDER.sub("", v) and "}" not in PLACEHOLDER.sub("", v))
+
+
+def phrases_file():
+    """Where the versions live: the body says (/phrases), since only the game
+    knows the folder it runs in. None while it cannot be asked, and it is not
+    asked again for a minute: a sentence said with the body down must not
+    wait on it."""
+    if OWN_PHRASES["file"] is None and time.time() - OWN_PHRASES.get("asked", 0) > 60:
+        OWN_PHRASES["asked"] = time.time()
+        try:
+            OWN_PHRASES["file"] = request_bot("/phrases").get("file") or None
+        except Exception:
+            return None
+    return OWN_PHRASES["file"]
+
+
+def read_phrases(path):
+    """key -> sentence from a versions file (Java properties, UTF-8, one line
+    each); empty when there is none."""
+    out = {}
+    try:
+        lines = pathlib.Path(path).read_text(encoding="utf-8").splitlines()
+    except (OSError, TypeError):
+        return out
+    for line in lines:
+        if not line or line[0] in "#!" or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        out[k.strip()] = v.replace("\\\\", "\\").strip()
+    return out
+
+
+def own_versions():
+    path = phrases_file()
+    if not path:
+        return {}
+    try:
+        stamp = pathlib.Path(path).stat().st_mtime
+    except OSError:
+        return {}
+    if stamp != OWN_PHRASES["stamp"]:
+        OWN_PHRASES["versions"] = read_phrases(path)
+        OWN_PHRASES["stamp"] = stamp
+    return OWN_PHRASES["versions"]
 
 
 def phrase(key, **kw):
-    return L10N.get(LANGUAGE, L10N["en"]).get(key, L10N["en"][key]).format(**kw)
+    """The sentence for that key, filled in: the bot's own if it wrote a good
+    one, the English one if not."""
+    english = PHRASES[key]
+    own = own_versions().get(key)
+    said = own if acceptable(english, own) else english
+    for k, v in kw.items():
+        said = said.replace("{" + k + "}", str(v))
+    return said
+
+
+def json_in(text):
+    """The JSON object in what the brain answered, fences or chatter around it
+    or not; None when there is none."""
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        data = json.loads(text[start:end + 1])
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def phrases_prompt(catalog):
+    return (
+        "Your body says a few sentences on its own, without asking you, when "
+        "there is no time to think (a creeper next to the person you escort) or "
+        "no way to (you are shutting down). Below they are in plain English. "
+        "Write each one AS YOU would say it, in the language you speak with "
+        "players and in your own voice, short (under 200 characters, one line).\n"
+        "Keep every {placeholder} exactly as it is, and do not add others: they "
+        "are filled in when the sentence is said (a name, a number, a place). "
+        "Never start a sentence with '/'.\n"
+        "Answer ONLY with a JSON object with the same keys and your sentences "
+        "as values, nothing else.\n\n" + json.dumps(catalog, ensure_ascii=False, indent=1))
+
+
+def ask_phrases(catalog):
+    """The brain's versions, as it answered them: one call, without tools and
+    without the session, with its personality. {} when it fails."""
+    system = (f"You are {NAME}, a player in a Minecraft server.\n" + personality())
+    args = ["claude", "-p", phrases_prompt(catalog), "--model", MODEL, "--effort", "low",
+            "--tools", "", "--system-prompt", system]
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=BRAIN_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        log(f"phrases: the brain could not be asked ({e})")
+        return {}
+    if r.returncode != 0:
+        log(f"phrases: the brain failed rc={r.returncode}: {r.stderr.strip()[:150]}")
+        return {}
+    return json_in(r.stdout) or {}
+
+
+def write_phrases(force=False, ask=None):
+    """The brain's versions of every sentence said without it, written once:
+    when there is no file yet, or when `force` (the launcher's `phrases`).
+    What it wrote wrong is left out, and said in English. Returns how many
+    were written, or None when nothing was done."""
+    try:
+        info = request_bot("/phrases")
+    except Exception as e:
+        log(f"phrases: the body does not say where they go ({e}); English it is")
+        return None
+    path = info.get("file")
+    catalog = dict(info.get("catalog") or {})
+    catalog.update(PHRASES)
+    if not path:
+        return None
+    OWN_PHRASES["file"] = path
+    if pathlib.Path(path).exists() and not force:
+        return None
+    answer = (ask or ask_phrases)(catalog)
+    good = {k: " ".join(str(v).split()) for k, v in answer.items()
+            if k in catalog and acceptable(catalog[k], " ".join(str(v).split()))}
+    left = sorted(set(catalog) - set(good))
+    lines = ["# What " + NAME + " says without asking its brain, written by its brain.",
+             "# Rewritten only on request: marionette.py phrases <instance>."]
+    lines += [f"{k}={v.replace(chr(92), chr(92) * 2)}" for k, v in sorted(good.items())]
+    target = pathlib.Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    tmp.replace(target)
+    OWN_PHRASES["stamp"] = None
+    log(f"phrases: {len(good)} written in its own voice"
+        + (f"; in English: {', '.join(left)}" if left else ""))
+    return len(good)
+
+
+def phrases_asked():
+    """The mark `marionette.py phrases` leaves for a running bridge; taken."""
+    mark = pathlib.Path(f"{STATE}/phrases_{NAME.lower()}")
+    if mark.exists():
+        try:
+            mark.unlink()
+        except OSError:
+            pass
+        return True
+    return False
 
 
 def guards_of(name=None, base=None):
@@ -577,10 +715,11 @@ BRAIN = (
     # And whom the bot really obeys, also in a file of its own (owner).
     + favorite() + "\n"
     + guard_block() + guards_block() +
-    f"LANGUAGE: everything you say to players — with `say` and in your final "
-    f"answer — is in {LANGUAGE_NAME}. The tools, their arguments and the ids "
-    "of blocks, items and creatures are ALWAYS in English (oak_log, coal_ore, "
-    "stone_pickaxe), whatever language people use with you.\n"
+    "LANGUAGE: you speak with players in the language your personality above "
+    "says (English if it says none), with `say` and in your final answer. The "
+    "tools, their arguments and the ids of blocks, items and creatures are "
+    "ALWAYS in English (oak_log, coal_ore, stone_pickaxe), whatever language "
+    "people use with you.\n"
     "GOLDEN RULE: answer in LESS THAN 200 CHARACTERS, one or two short "
     "sentences. Anything beyond that the game cuts mid-word and it is lost. No "
     "filler greetings, no summaries of what you are about to do, no offering "
@@ -1628,15 +1767,6 @@ def tab_state(thinking, failure, body, stuck=False, with_ai=False):
     return "idle"
 
 
-# TAB states by grammatical gender. English has none; kept for languages that
-# inflect (bots/<bot>/gender).
-MASCULINE = {}
-
-
-def with_gender(state, gender):
-    return MASCULINE.get(state, state) if gender == "m" else state
-
-
 # (key of the body state, flag) -> TAB state, by priority.
 FINE_STATES = (("farm", "working", "farming"), ("fill_job", "working", "building"),
                ("strip_mine", "mining", "mining"), ("staircase", "descending", "mining"),
@@ -2006,6 +2136,9 @@ def listen(since, inbox, control_since=None):
         body_since = 0
     while True:
         time.sleep(EVERY)
+        if phrases_asked():
+            log("phrases: asked to write them again")
+            threading.Thread(target=write_phrases, kwargs={"force": True}, daemon=True).start()
         # What the body needs enters through the SAME queue as the chat: it is
         # another reason to wake the brain, not another brain. It goes first
         # and in its own try, so a fallen bot does not silence the chat.
@@ -2028,9 +2161,8 @@ def listen(since, inbox, control_since=None):
             if body.get("ok"):
                 if recent_mark("crafting", 3):
                     body["crafting"] = True
-                send_tab(with_gender(tab_state(THINKING.is_set(), BRAIN_FAILED[0], body,
-                                               STUCK.look(body, time.time()),
-                                               talking_to_ai()), GENDER))
+                send_tab(tab_state(THINKING.is_set(), BRAIN_FAILED[0], body,
+                                   STUCK.look(body, time.time()), talking_to_ai()))
         except Exception:
             pass
         # The jobs a tool left "in progress" (fill, long trips): on seeing
@@ -2266,6 +2398,9 @@ def main():
     inbox = queue.Queue()
     threading.Thread(target=listen, args=(since, inbox, control_since),
                      daemon=True).start()
+    # The sentences said without the brain, in its own voice: written the first
+    # time, while the bot is already listening (English meanwhile).
+    threading.Thread(target=write_phrases, daemon=True).start()
 
     while True:
         who, text = inbox.get()

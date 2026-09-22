@@ -35,10 +35,12 @@ JOINED = "joined"
 ALREADY_IN = "already in"
 
 PERSONALITY_TEMPLATE = (
-    "You are {name}. Write here who you are: how you talk, what you care about, who\n"
-    "you trust, what makes you laugh. In second person and in a few lines: this\n"
-    "goes at the start of the prompt, before the body's instructions.\n\n"
-    "For now: you talk plainly, correct and direct, without flourishes.\n")
+    "You are {name}. Write here who you are: how you talk and in which language,\n"
+    "what you care about, who you trust, what makes you laugh. In second person and\n"
+    "in a few lines: this goes at the start of the prompt, before the body's\n"
+    "instructions.\n\n"
+    "For now: you speak English with players, plainly, correct and direct, without\n"
+    "flourishes.\n")
 
 
 # --- bots and instances -------------------------------------------------------
@@ -60,10 +62,10 @@ def create_bot(ws, name, key=None, account=None, on_event=None):
         bot.dir.mkdir(parents=True)
     except FileExistsError:
         raise Fail(f"{bot.dir} already exists.", code="exists")
-    # The language it speaks in the chat, en or es; and its character, in its
-    # own file from minute one. A template instead of an empty file, because
-    # a bot without a written character sounds like a manual.
-    bot.save({"name": name, "account": account, "language": "en"})
+    # Its character, in its own file from minute one, the language it speaks
+    # included. A template instead of an empty file, because a bot without a
+    # written character sounds like a manual.
+    bot.save({"name": name, "account": account})
     bot.personality.write_text(PERSONALITY_TEMPLATE.format(name=name), encoding="utf-8")
     report.step(f"bot {key} created (plays as {name}, {account} account)", stage="created")
     return bot
@@ -705,6 +707,32 @@ def configure(target, key, value=None, clear=False, on_event=None):
     return now
 
 
+# --- what it says without its brain ---------------------------------------------
+
+def phrases_file(inst):
+    """Where its brain's versions of the sentences said without it are (see the
+    bridge's write_phrases): in the game's config folder, which the body reads."""
+    return inst.gamedir / "config" / "marionette-phrases.properties"
+
+
+def rewrite_phrases(inst, on_event=None):
+    """Have the brain write again, in its own voice, the sentences said without
+    it: after the personality changed, say. With its bridge running, a mark it
+    sees within a poll; without, the old ones go and the next start writes
+    new ones. Returns "asked" or "on the next start"."""
+    report = report_to(on_event)
+    inst.require()
+    if bridge_pid(inst):
+        inst.state.mkdir(parents=True, exist_ok=True)
+        (inst.state / f"phrases_{inst.player}").write_text("", encoding="utf-8")
+        report.step(f"{inst.key}: its bridge is writing its sentences again", stage="phrases")
+        report.detail(f"it takes a brain turn; see {inst.bridge_log}")
+        return "asked"
+    unlink_quietly(phrases_file(inst))
+    report.step(f"{inst.key}: its sentences will be written when its bridge next starts", stage="phrases")
+    return "on the next start"
+
+
 # --- looking ------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -759,7 +787,9 @@ def survey(ws, key=None):
 # --- the layout before instances ------------------------------------------------
 
 # The files of a bot folder from before instances, and where each one goes.
-LEGACY_BOT = ("account", "language", "gender", "model", "owner", "heap")
+LEGACY_BOT = ("account", "model", "owner", "heap")
+# What was once a setting and is now the personality's to say.
+LEGACY_RETIRED = ("language", "gender")
 LEGACY_INSTANCE = ("escort",)
 
 
@@ -832,13 +862,18 @@ def migrate(ws, dry_run=False, on_event=None):
                 inst_data[k] = v
         write_json(ws.bots_dir / key / "bot.json", bot_data)
         inst.save(inst_data)
-        for k in LEGACY_BOT + LEGACY_INSTANCE + ("port", "server"):
+        retired = {k: _read(d / k) for k in LEGACY_RETIRED if _read(d / k)}
+        for k in LEGACY_BOT + LEGACY_INSTANCE + LEGACY_RETIRED + ("port", "server"):
             unlink_quietly(d / k)
         moved = _move_state(ws, name.lower(), slug) if slug else 0
         settings.render(inst)
         made.append(inst)
         report.detail(f"{key}: bot {key} (plays as {name}) + instance {inst_key} on {slug or '(no server!)'}"
                       + (f"; {moved} state file(s) moved to {ws.server_state(slug)}" if moved else ""))
+        if retired:
+            report.warning(f"{key}: " + ", ".join(f"{k} {v}" for k, v in retired.items())
+                           + " are no longer settings: say them in its personality.txt",
+                           [str(ws.bot(key).personality)])
     report.step("migrated. `marionette.py status` lists the instances.", stage="migrated")
     return made
 
