@@ -40,6 +40,9 @@ setting ignored it without a word.
 - One command, `launcher/marionette.py`, in Python with no dependencies and no
   shell: `servers`, `create`, `login`, `start`, `connect`, `bridge`, `stop`,
   `restart`, `status`, `deploy-mod`, `doctor`. It replaced eight bash scripts.
+- Behind the command, a core that never prints: it reports what it does as
+  events and fails with the reason and its evidence, so a window can sit on
+  the same functions the command line uses (`launcher/`, a package).
 - A keeper per bot holds the game's console open and takes lines for it on a
   localhost socket, only from whoever can read its token. It stops the game's
   whole process tree, because HeadlessMC starts the game as a child java, and

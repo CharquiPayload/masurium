@@ -333,11 +333,35 @@ command that starts or stops it): the kernel frees a lock however its holder
 ends, so it cannot go stale, and it is taken before looking, so two `start`s
 side by side cannot both find the bot stopped.
 
-**The launcher is one Python file with no dependencies**, like the bridge and
-the MCP server, and it uses no shell: sockets instead of `ss`, pid files
-instead of `pgrep`, `os.link` instead of `ln`, `urllib` instead of `curl`. It
-replaced eight bash scripts. The point was not taste but the port: every
-primitive has an equivalent on Windows, so the port is a test, not a rewrite.
+**The launcher is a Python package with no dependencies** (`launcher/`), like
+the bridge and the MCP server, and it uses no shell: sockets instead of `ss`,
+pid files instead of `pgrep`, `os.link` instead of `ln`, `urllib` instead of
+`curl`. It replaced eight bash scripts. The point was not taste but the port:
+every primitive has an equivalent on Windows, so the port is a test, not a
+rewrite.
+
+It has two layers. **The core never prints.** It takes a `Workspace` (where
+the folders are, and what the environment overrides), reports what it does
+as `Event`s to a callback, and fails by raising `Fail`, whose message is the
+story and whose lines are the evidence. **The faces show it**: the command
+line (`cli.py`, reached through `launcher/marionette.py` or
+`python3 -m launcher`) prints the events; a window will draw the same events
+from the same functions. That is why the folders are an object and not
+module globals resolved at import: a window can change them without a
+restart, and each test gets a workspace of its own.
+
+    workspace.py   the folders, server.env, the environment; the server registry
+    bots.py        a bot's folder and files; the lock that keeps two commands off it
+    packs.py       what a pack is made of, read from the jars
+    api.py         the server mod's HTTP API
+    keeper.py      the process that holds a game's console
+    processes.py   pids, process groups, ports
+    diagnosis.py   why a start failed, from the client's own logs
+    operations.py  create, start, connect, bridge, stop, restart, status, deploy-mod
+    doctor.py      the checks, in the order things break
+    events.py      Event and Fail
+    files.py       env files, locks, logs read as they grow
+    cli.py         the command line
 
 **Bots should not run as root.** They talk to a server with other people in it
 and load third-party mods.

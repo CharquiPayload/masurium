@@ -1202,7 +1202,7 @@ def say(text):
 def console(line):
     """A line to the client console, through the launcher's keeper: the
     process that holds the game's stdin and listens on a localhost port,
-    written in bots/<name>/run/keeper.port (see launcher/marionette.py)
+    written in bots/<name>/run/keeper.port (see launcher/keeper.py)
     with the token every line has to start with. It used to be a FIFO in
     /tmp; a FIFO does not exist on Windows."""
     port_f = pathlib.Path(BOTS_HOME) / NAME.lower() / "run" / "keeper.port"

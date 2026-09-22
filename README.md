@@ -28,7 +28,7 @@ build it, and how to get the first bot into the game.
 | **MCP server** | the catalog of tools the brain can call | `mcp/server.py` |
 | **Bridge** | reads the chat, wakes the brain when the bot is named, relays body notices | `mcp/bridge.py` |
 | **Claude Code** | thinking, only when needed | — |
-| **Launcher** | creates, starts, stops and watches bots; a keeper per bot holds the game's console | `launcher/marionette.py` |
+| **Launcher** | creates, starts, stops and watches bots; a keeper per bot holds the game's console | `launcher/` |
 | **Add-ons** | jars of their own, one per third-party mod the bot has to live with; the first keeps Veil off a GPU that a headless bot does not have | `addons/veil/` |
 
 The split is strict: **a question goes to the server, an action goes to the
