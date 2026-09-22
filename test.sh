@@ -27,6 +27,18 @@ echo "═══ the launcher (python): folders, names, ports, mods, the keeper �
 python3 launcher/tests.py || failures=$((failures + 1))
 
 echo
+echo "═══ the window (python, Qt drawn offscreen) ═══"
+# It needs PySide6, which the rest does not: a python that has it is used, the
+# one MARIONETTE_GUI_PYTHON names, and without one the suite is skipped, said.
+gui_python="${MARIONETTE_GUI_PYTHON:-python3}"
+if "$gui_python" -c "import PySide6" 2>/dev/null; then
+  QT_QPA_PLATFORM=offscreen "$gui_python" -m launcher.gui.tests 2>&1 | grep -vE 'propagateSizeHints'
+  [ "${PIPESTATUS[0]}" -eq 0 ] || failures=$((failures + 1))
+else
+  echo "  skipped: $gui_python has no PySide6 (MARIONETTE_GUI_PYTHON can name one that has it)"
+fi
+
+echo
 echo "═══ the mod (java): one jar, server and bot ═══"
 # `build` and not just `test`: the jar has to come out, and BotSideTest reads the
 # COMPILED classes to check that nothing the server loads names a client class.

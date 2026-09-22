@@ -342,6 +342,15 @@ def cmd_group(ws, args):
     return 0
 
 
+def cmd_gui(ws, args):
+    import importlib.util
+    if importlib.util.find_spec("PySide6") is None:
+        raise Fail("the window needs PySide6 (Qt for Python), which the command line does not:",
+                   lines=["pip install PySide6-Essentials", "then:  marionette.py gui"], code="no_pyside")
+    from .gui import main as gui_main
+    return gui_main(["marionette"], ws)
+
+
 def cmd_phrases(ws, args):
     operations.rewrite_phrases(ws.instance(args.name), print_event)
 
@@ -452,6 +461,7 @@ def build_parser():
     c.set_defaults(fn=cmd_set)
 
     sub.add_parser("groups", help="the groups, as a tree, and the instances in none").set_defaults(fn=cmd_groups)
+    sub.add_parser("gui", help="the window: the same launcher, with a face").set_defaults(fn=cmd_gui)
 
     c = sub.add_parser("group", help="create, fill, start, stop, clone or delete a group")
     c.add_argument("action", help="create, add, remove, delete, clone, start, stop; or a group's name to see it")

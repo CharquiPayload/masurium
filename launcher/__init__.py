@@ -30,6 +30,7 @@ tomorrow, both on the same functions.
     events.py      Event and Fail
     files.py       env files, locks, logs read as they grow
     cli.py         the command line
+    gui/           the window (PySide6), on the same operations
 
 A program uses it like this:
 

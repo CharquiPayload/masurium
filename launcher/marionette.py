@@ -13,6 +13,7 @@
     marionette.py set <name> [setting [value | --default]]
     marionette.py rules <instance> [change] | --bot <bot> | --server <slug> | --group <group> | --global
     marionette.py groups
+    marionette.py gui                 the window (needs PySide6)
     marionette.py group create|add|remove|delete|clone|start|stop <group> ...
     marionette.py phrases <instance>
     marionette.py account [add | remove <account>]

@@ -230,6 +230,23 @@ own HeadlessMC, made with `marionette.py login <instance>`.)
 
 Then say its name in the chat: `Alice, come here`.
 
+**The window.** The same launcher has a window, on the same code:
+
+```bash
+pip install PySide6-Essentials          # Qt for Python; the command line does not need it
+launcher/marionette.py gui
+```
+
+It shows every instance by group, how each is doing (in the server, loading,
+stopped, in the game with no bridge), and for the one selected what can be done
+with it: start (client and bridge), stop, restart, connect again, its rules,
+its settings, its personality, clone it, move it to a group, its folder and
+its logs; for a group, start or stop everything in it, add to it, its rules and
+settings, clone or delete it. Long operations run in the background and can be
+cancelled; what they report is listed under the instance. Bots, accounts
+(logged in from the window: HeadlessMC's questions and your answers), servers,
+the global settings and rules, and doctor are in the toolbar.
+
 The rest of the subcommands: `status` (every instance: client, hands, in the
 server, bridge), `bots`, `servers`, `start` (the client only), `connect`
 (rejoin after a log off), `bridge` (the bridge only), `stop` (client, bridge and

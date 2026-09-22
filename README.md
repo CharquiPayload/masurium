@@ -114,7 +114,8 @@ inline, a lambda, or a return type that no `import` would reveal.
   layers kept on the server and editable from the launcher and the game, live;
   groups, plain ones that start together and a leader with its guards, nested,
   with settings and rules that impose on what is inside them, and a global
-  config over all). To do: a graphical front end on the same code; and a run
+  config over all). A window on the same code (`marionette.py gui`, PySide6):
+  the instances by group, their actions, rules, settings and logs. To do: a run
   on Windows.
 - **Add-ons**: separate jars that teach the bots one mod each. The first one is
   there, `addons/veil` (compatibility: Veil without a GPU); the next ones teach
@@ -162,6 +163,10 @@ ideally with a whitelist.
   **[hmc-specifics](https://github.com/headlesshq/hmc-specifics)** by 3arthqu4ke and
   HeadlessHQ (MIT), which make it possible to run the bots as real clients without a
   screen. They are used as external tools and are not bundled.
+- **[Prism Launcher](https://prismlauncher.org/)** (GPL-3.0). Marionette began as a
+  client mod run from Prism, one instance per bot, and its launcher follows Prism's
+  lead: instances in groups, a panel of actions for the one selected, settings per
+  instance over shared defaults. Nothing of Prism's code is used.
 - [NeoForge](https://neoforged.net/) and the Minecraft modding community.
 - [Claude Code](https://claude.com/claude-code) by Anthropic, the brain.
 

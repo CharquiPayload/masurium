@@ -102,6 +102,15 @@ setting ignored it without a word.
   the global config. `groups` shows the tree; `group clone` copies a group
   with copies of every instance in it. The `escort` setting became the
   dependency group, and `migrate` turns one into the other.
+- A window, `marionette.py gui` (PySide6, which the command line does not
+  need), on the same operations: every instance by group with how it is
+  doing, and the actions for the one selected or for a group; the rules
+  editor (each toggle and each list with who decides it, imposed ones
+  locked, changes collected and sent with Apply), settings per instance,
+  bot, group or globally, new instances and groups, moving and cloning,
+  the personality, logs that follow, doctor, and accounts logged in through
+  HeadlessMC's own questions. Operations run in the background and can be
+  cancelled; it is tested drawn offscreen.
 - Each server can have its own `servers/<slug>/server.env` (address and token
   of its server mod, readable by its owner only). The launcher, the bridge and
   the MCP server then talk to the server each bot is on, not to the one the
