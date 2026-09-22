@@ -40,6 +40,16 @@ class ServerTest {
     }
 
     @Test
+    @DisplayName("/mods: sorted by id and escaped, so two servers' answers compare as text")
+    void modsAreListedSortedAndEscaped() {
+        String json = ModsJson.of(
+                Map.of("sable", "2.0.5", "create", "6.0.10", "odd\"id", "1"));
+        assertEquals("{\"ok\":true,\"mods\":[{\"id\":\"create\",\"version\":\"6.0.10\"},"
+                + "{\"id\":\"odd\\\"id\",\"version\":\"1\"},{\"id\":\"sable\",\"version\":\"2.0.5\"}]}",
+                json);
+    }
+
+    @Test
     @DisplayName("negative and decimal coordinates are truncated downwards")
     void negativeAndDecimalCoordinatesAreTruncatedDownwards() {
         // The model often sends decimals, and half the world has a negative X.

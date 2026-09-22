@@ -108,9 +108,9 @@ inline, a lambda, or a return type that no `import` would reveal.
 - **Launcher**: the command line is done (`launcher/marionette.py`: one place to
   create, start, stop and watch bots, choosing the server and its pack; a bot
   that is already running is shown as running instead of started a second
-  time). To do: groups of bots that share one configuration, a `/mods` route
-  on the server so the launcher can say which jar differs before joining, a
-  graphical front end on the same code, and a run on Windows.
+  time; it compares the pack with the server's `/mods` before joining). To do:
+  groups of bots that share one configuration, a graphical front end on the
+  same code, and a run on Windows.
 - **Add-ons**: separate jars that teach the bots one mod each. The first one is
   there, `addons/veil` (compatibility: Veil without a GPU); the next ones teach
   *abilities* (`marionette-create`, `marionette-watut`...). To do for those: the
@@ -118,10 +118,6 @@ inline, a lambda, or a return type that no `import` would reveal.
   ...` subcommands and their own per-bot settings, kept where the rest of the
   per-bot settings live and handed to the bridge in the same poll, so an add-on
   needs no server of its own.
-- **Asleep in a normal client** (to do): the bot half assumes the client it runs
-  in is always a bot, so dropping the jar into a client you play on makes it eat
-  your food and respawn you. It should stay asleep unless it finds a bot's
-  configuration, and only then open its port.
 - A documented way to **try a bot without HeadlessMC**, launching the client from
   a normal launcher, so the first bot does not require the whole setup.
 - Consecutive notices from the body sent in **one turn** instead of one per turn,

@@ -229,6 +229,24 @@ def tests_create():
 
 # --- the launch line --------------------------------------------------------
 
+def tests_prepare():
+    print("\nPrepare: what the gamedir gets before every start")
+    bot = m.Bot("Alice")
+    server = m.load_server("test")
+    options = bot.gamedir / "options.txt"
+    options.write_text("fov:0.5\nonboardAccessibility:true\nlang:en_us\n")
+    m.prepare_gamedir(bot, server)
+    text = options.read_text()
+    check("the accessibility prompt is turned off", "onboardAccessibility:false" in text)
+    check("...and every other option is kept", "fov:0.5" in text and "lang:en_us" in text
+          and "onboardAccessibility:true" not in text)
+    options.unlink()
+    m.prepare_gamedir(bot, server)
+    check("with no options.txt, one is written with just that", options.read_text() == "onboardAccessibility:false\n")
+    check("the server is noted in the gamedir for the mod",
+          (bot.gamedir / "config" / "marionette-server.txt").read_text().strip() == "test")
+
+
 def tests_launch_line():
     print("\nLaunch line: what HeadlessMC is told")
     bot = m.Bot("Alice")
@@ -311,6 +329,69 @@ def tests_stop_without_keeper():
     check("stopping a stopped bot returns 0", code == 0)
 
 
+# --- what a pack is made of -------------------------------------------------
+
+def write_mod_jar(path, mod_id, version, inner=(), placeholder=False):
+    """A jar with a mods.toml, and optionally other mod jars inside it the way
+    NeoForge's jar-in-jar does it (metadata.json + the nested jars)."""
+    import io
+    import zipfile
+
+    def toml(i, v):
+        return (f"modLoader=\"javafml\"\nloaderVersion=\"[4,)\"\n\n[[mods]]\nmodId=\"{i}\" # the id\n"
+                f"version=\"{v}\"\ndisplayName=\"{i}\"\n\n[[dependencies.{i}]]\nmodId=\"neoforge\"\n"
+                f"type=\"required\"\nversionRange=\"[21.1,)\"\n")
+
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("META-INF/MANIFEST.MF", f"Manifest-Version: 1.0\nImplementation-Version: {version}\n")
+        z.writestr(m.MODS_TOML, toml(mod_id, "${file.jarVersion}" if placeholder else version))
+        if inner:
+            entries = []
+            for i, v in inner:
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w") as nested:
+                    nested.writestr(m.MODS_TOML, toml(i, v))
+                nested_path = f"META-INF/jarjar/{i}-neoforge-1.21.1-{v}.jar"
+                z.writestr(nested_path, buf.getvalue())
+                entries.append({"identifier": {"group": "x", "artifact": i}, "path": nested_path})
+            z.writestr("META-INF/jarjar/metadata.json", json.dumps({"jars": entries}))
+
+
+def tests_packs():
+    print("\nPacks: what a bot joins with, read from the jars themselves")
+    layout()
+    mods_dir = TMP / "servers" / "test" / "mods"
+    for p in mods_dir.glob("*.jar"):
+        p.unlink()
+    write_mod_jar(mods_dir / "create-6.0.10.jar", "create", "6.0.10")
+    write_mod_jar(mods_dir / "sable-neoforge-1.21.1-2.0.3.jar", "sable", "2.0.3", inner=[("veil", "4.2.0")])
+    write_mod_jar(mods_dir / "xaeros-1.0.jar", "xaerominimap", "25.1", placeholder=True)
+    (mods_dir / "not-a-jar.jar").write_bytes(b"junk")
+    mine = m.pack_mods(TMP / "servers" / "test")
+    check("a plain mods.toml is read", mine.get("create") == "6.0.10")
+    check("a mod inside another (jar-in-jar) is read too", mine.get("veil") == "4.2.0" and mine.get("sable") == "2.0.3")
+    check("${file.jarVersion} comes from the manifest", mine.get("xaerominimap") == "25.1")
+    check("a broken jar is skipped, not fatal", "junk" not in str(mine))
+    check("shared/mods is part of the pack",
+          all(k in mine for k in ()) and len(mine) >= 4)   # the shared jars in layout() have no toml
+    theirs = {"create": "6.0.10", "sable": "2.0.5", "veil": "4.3.2", "neoforge": "21.1.248",
+              "createcobblestone": "1.5.0"}
+    diff = m.compare_packs(mine, theirs)
+    check("version mismatches are named, with both versions",
+          diff["mismatch"] == [("sable", "2.0.3", "2.0.5"), ("veil", "4.2.0", "4.3.2")], str(diff))
+    check("what only the server has is listed apart", diff["server_only"] == ["createcobblestone", "neoforge"])
+    check("what only the client has is listed apart", diff["client_only"] == ["xaerominimap"])
+    check("same versions: nothing to say", m.compare_packs({"a": "1"}, {"a": "1", "b": "2"})["mismatch"] == [])
+    check("toml: an inline comment does not become part of the value",
+          m.toml_mods('[[mods]]\nmodId = "x" # c\nversion = "1.0" #mandatory\n') == {"x": "1.0"})
+    check("toml: two [[mods]] blocks, both read",
+          m.toml_mods('[[mods]]\nmodId="a"\nversion="1"\n[[mods]]\nmodId="b"\nversion="2"\n[[mixins]]\nconfig="x"\n')
+          == {"a": "1", "b": "2"})
+    for p in mods_dir.glob("*"):
+        p.unlink()
+    layout()
+
+
 # --- deploy-mod -------------------------------------------------------------
 
 def tests_deploy():
@@ -382,12 +463,8 @@ def tests_doctor():
         p.unlink()
 
     # A mod that carries Veil inside it (jar-in-jar), the way Sable does.
-    import zipfile
     carrier = TMP / "servers" / "test" / "mods" / "sable-neoforge-1.21.1-2.0.5.jar"
-    with zipfile.ZipFile(carrier, "w") as z:
-        z.writestr("META-INF/jarjar/metadata.json", json.dumps({"jars": [
-            {"identifier": {"group": "foundry.veil", "artifact": "veil-neoforge"},
-             "path": "META-INF/jarjar/veil-neoforge-1.21.1-4.3.2.jar"}]}))
+    write_mod_jar(carrier, "sable", "2.0.5", inner=[("veil", "4.3.2")])
     check("pack_carries finds Veil inside Sable", m.pack_carries(TMP / "servers" / "test", "veil") == [carrier.name])
     check("...and nothing where there is nothing", m.pack_carries(TMP / "servers" / "test", "watut") == [])
     checks = m.doctor_checks()
@@ -413,9 +490,11 @@ if __name__ == "__main__":
     tests_ports()
     tests_mods()
     tests_create()
+    tests_prepare()
     tests_launch_line()
     tests_keeper()
     tests_stop_without_keeper()
+    tests_packs()
     tests_deploy()
     tests_doctor()
 

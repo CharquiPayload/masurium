@@ -31,6 +31,9 @@ setting ignored it without a word.
   and a hotbar notice for owners.
 - The server console says so, once, when a bot joins running a different version of
   the bot mod than the server's, and `/marionette bot <bot>` shows both.
+- `/mods`: every mod the server loaded, with its version, for a launcher to compare
+  a bot's pack against before joining. A mismatch used to show up three minutes
+  after the connect as "Incompatible client! Please use NeoForge ...".
 - Bots do not pick up again what they tossed themselves.
 
 ### Launcher
@@ -44,6 +47,14 @@ setting ignored it without a word.
   order in which things break; `status` says per bot whether the client is there,
   its port is open, the server lists it and its bridge is alive.
 - A crashed start quotes the crash report's cause instead of the mod list.
+- `start` compares the pack with the server's `/mods` and names the version
+  mismatches before connecting; `doctor` reports them per pack. Packs are read
+  from the jars themselves, including the mods that ship inside other mods.
+- `start` waits for the title screen before the first `connect`: sent while the
+  game was still loading, the command talked to nobody, and an attempt was lost
+  on every start.
+- The game's first-run accessibility prompt is turned off in each bot's `options.txt`:
+  it stood in front of the title screen at every start, waiting for a click.
 
 ### Add-ons
 - `addons/veil`: a jar of its own that keeps Veil (bundled in Sable and others)
@@ -61,6 +72,8 @@ setting ignored it without a word.
   jar-in-jar metadata.
 
 ### Bot half
+- `/version` also says which screen the client is on, whether it is still loading
+  and whether it is in a world, so a launcher knows when `connect` will be heard.
 - A* path finder with tick-based costs, partial routes, goal conditions, anti-
   dithering, doors, swimming, bridges, towers and optional tunnelling.
 - Long trips in segments, open-water swimming and travel between dimensions

@@ -137,6 +137,7 @@ public class MarionetteServer {
             http.createContext("/tab", x -> attend(x, this::tab));
             http.createContext("/control", x -> attend(x, this::control));
             http.createContext("/access", x -> attend(x, this::access));
+            http.createContext("/mods", x -> attend(x, this::mods));
             http.setExecutor(null);
             http.start();
             LOG.info("[marionette] listening on http://{}:{}  (token: {})",
@@ -265,6 +266,21 @@ public class MarionetteServer {
                     "{\"ok\":true,\"player\":\"%s\",\"state\":\"%s\",\"connected\":%s}",
                     Request.escape(player), Request.escape(state), p != null);
         });
+    }
+
+    /**
+     * /mods: every mod this server loaded, with its version. What a launcher needs to
+     * tell a bot's pack from the server's BEFORE joining: a mismatch shows up in the game
+     * as "Incompatible client! Please use NeoForge ...", which names the wrong thing,
+     * minutes after the connect. The list is fixed once the server is up, so this does
+     * not go through the server thread.
+     */
+    private String mods(Map<String, String> q) {
+        Map<String, String> versions = new java.util.TreeMap<>();
+        for (var info : net.neoforged.fml.ModList.get().getMods()) {
+            versions.put(info.getModId(), info.getVersion().toString());
+        }
+        return ModsJson.of(versions);
     }
 
     private String players(Map<String, String> q) throws Exception {

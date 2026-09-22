@@ -212,6 +212,124 @@ def is_inside(name, env=None):
     return f'"{name}"' in players_text(env)
 
 
+def server_mods(env=None):
+    """The mods the server loaded, {id: version}, from /mods. None when the
+    server mod is older than that route, or does not answer."""
+    try:
+        data = json.loads(mod_get("/mods", env))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("mods"), list):
+        return None
+    return {m["id"]: str(m.get("version", "")) for m in data["mods"] if isinstance(m, dict) and "id" in m}
+
+
+def bot_get(bot, route, timeout=5):
+    """One question to the bot mod itself, on its own port."""
+    with urllib.request.urlopen(f"http://127.0.0.1:{bot.port}{route}", timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+
+# --- what a pack is made of ---------------------------------------------------
+
+MODS_TOML = "META-INF/neoforge.mods.toml"
+
+
+def toml_mods(text, manifest_version=""):
+    """modId -> version from a mods.toml, without a TOML parser: the two keys
+    every [[mods]] block has, and the one placeholder that is common."""
+    mods = {}
+    current = None
+
+    def flush():
+        if current and "modId" in current:
+            mods[current["modId"]] = current.get("version", "")
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line == "[[mods]]":
+            flush()
+            current = {}
+            continue
+        if line.startswith("["):
+            flush()
+            current = None
+            continue
+        if current is None or line.startswith("#") or "=" not in line:
+            continue
+        key, value = (s.strip() for s in line.split("=", 1))
+        value = value.split("#", 1)[0].strip().strip("\"'")
+        if key in ("modId", "version"):
+            current[key] = value
+    flush()
+    for k, v in list(mods.items()):
+        if v == "${file.jarVersion}":
+            mods[k] = manifest_version
+    return mods
+
+
+def jar_mods(jar_path):
+    """modId -> version for one jar, and for the jars inside it: Veil, for
+    one, is never a jar of its own in a pack, it ships inside Sable and others,
+    listed in their META-INF/jarjar/metadata.json."""
+    import io
+    import zipfile
+    found = {}
+
+    def read(z):
+        names = set(z.namelist())
+        manifest_version = ""
+        if "META-INF/MANIFEST.MF" in names:
+            for l in z.read("META-INF/MANIFEST.MF").decode("utf-8", "replace").splitlines():
+                if l.startswith("Implementation-Version:"):
+                    manifest_version = l.split(":", 1)[1].strip()
+        if MODS_TOML in names:
+            found.update(toml_mods(z.read(MODS_TOML).decode("utf-8", "replace"), manifest_version))
+        if "META-INF/jarjar/metadata.json" in names:
+            try:
+                meta = json.loads(z.read("META-INF/jarjar/metadata.json").decode("utf-8", "replace"))
+            except ValueError:
+                meta = {}
+            for entry in meta.get("jars", []) if isinstance(meta, dict) else []:
+                path = str(entry.get("path", ""))
+                if path in names:
+                    try:
+                        with zipfile.ZipFile(io.BytesIO(z.read(path))) as inner:
+                            read(inner)
+                    except zipfile.BadZipFile:
+                        pass
+
+    try:
+        with zipfile.ZipFile(jar_path) as z:
+            read(z)
+    except (OSError, zipfile.BadZipFile):
+        pass
+    return found
+
+
+def pack_mods(pack):
+    """Every mod a bot joins with from this pack: shared/mods and the pack's own."""
+    mods = {}
+    for source in (COMMON_DIR / "mods", pathlib.Path(pack) / "mods"):
+        for jar in sorted(source.glob("*.jar")):
+            mods.update(jar_mods(jar))
+    return mods
+
+
+def compare_packs(client, server):
+    """What differs between a bot's pack and the server's mods. The version
+    mismatches are the strong signal: the server rejects those, and its
+    message names NeoForge instead. The other two lists are for reading: a
+    mod only on the server may be server-side, and a mod only on the client
+    (a renderer, a minimap) is the normal case."""
+    return {
+        "mismatch": sorted((i, client[i], server[i]) for i in client
+                           if i in server and client[i] != server[i]),
+        "server_only": sorted(i for i in server if i not in client),
+        "client_only": sorted(i for i in client if i not in server),
+    }
+
+
 # --- bots ---------------------------------------------------------------------
 
 NAME_RULE = re.compile(r"^[A-Za-z0-9_]{1,16}$")
@@ -880,6 +998,18 @@ def prepare_gamedir(bot, server):
             escort_f.unlink()
         except OSError:
             pass
+    # The game's first-run accessibility prompt sits in front of the title
+    # screen until somebody clicks, and nobody ever will: it is turned off in
+    # options.txt, which the game reads on start. Every other option is left
+    # as it is.
+    options = bot.gamedir / "options.txt"
+    try:
+        lines = options.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    kept = [l for l in lines if not l.startswith("onboardAccessibility:")]
+    if kept != lines or not lines or "onboardAccessibility:false" not in lines:
+        options.write_text("\n".join(kept + ["onboardAccessibility:false"]) + "\n", encoding="utf-8")
     n = sync_mods(bot.gamedir, server["pack"])
     bot.write("server", server["slug"])
     return n
@@ -997,6 +1127,16 @@ def cmd_start(args):
 
     say(f"==> preparing the mods of {slug}")
     say(f"    {prepare_gamedir(bot, server)} mods")
+    # Said now, from /mods, instead of by the server three minutes from now
+    # with a message that names NeoForge. Not refused: some mods take a
+    # version they were not built with, and whoever runs this may know.
+    theirs = server_mods(env)
+    if theirs is not None:
+        diff = compare_packs(pack_mods(server["pack"]), theirs)
+        if diff["mismatch"]:
+            say("==> the server runs other versions than this pack; expect a rejection:")
+            for mod_id, mine, its in diff["mismatch"]:
+                say(f"    {mod_id}: pack {mine}, server {its}")
 
     if is_inside(bot.name, env):
         say(f"{bot.name} is already in. Nothing to do.")
@@ -1065,7 +1205,31 @@ def cmd_start(args):
                 say("    " + l)
         return 1
 
-    if join(bot, server, env, attempts=5):
+    # `connect` sent while the game is still loading talks to nobody, and an
+    # attempt was lost on every start. The mod says which screen it is on and
+    # whether the loading overlay is still up; a mod older than that says
+    # nothing, and then the old way, straight in, is all there is.
+    def readiness():
+        try:
+            return bot_get(bot, "/version")
+        except (OSError, ValueError):
+            return {}
+
+    if "screen" in readiness():
+        say("==> waiting for the title screen")
+
+        def at_title():
+            v = readiness()
+            # The title screen itself, and not the first-run prompt that can
+            # stand in front of it (prepare_gamedir turns that one off).
+            return "Title" in str(v.get("screen", "")) and not v.get("loading") and not v.get("in_world")
+
+        if wait_for(at_title, 180, every=3):
+            say(f"    {readiness().get('screen')}")
+        else:
+            say(f"    (no title screen after 3 minutes, on {readiness().get('screen')!r}; trying anyway)")
+
+    if join(bot, server, env, attempts=3):
         say(players_text(env))
         return 0
     say("==> it did NOT join. Last complaints of the client:")
@@ -1320,30 +1484,9 @@ ADDON_FOR = {"veil": "marionette-veil"}
 
 
 def pack_carries(pack, mod_id):
-    """The jars of a pack that are, or carry inside them (jar-in-jar), the mod
-    with this id. Veil, for one, is never a jar of its own in a pack: it ships
-    inside Sable and others, listed in their META-INF/jarjar/metadata.json."""
-    import zipfile
-    found = []
-    for jar in sorted((pathlib.Path(pack) / "mods").glob("*.jar")):
-        if jar.name.lower().startswith(mod_id.lower() + "-"):
-            found.append(jar.name)
-            continue
-        try:
-            with zipfile.ZipFile(jar) as z:
-                if "META-INF/jarjar/metadata.json" not in z.namelist():
-                    continue
-                meta = json.loads(z.read("META-INF/jarjar/metadata.json").decode("utf-8", "replace"))
-        except (OSError, zipfile.BadZipFile, ValueError):
-            continue
-        for entry in meta.get("jars", []):
-            ident = entry.get("identifier", {})
-            path = str(entry.get("path", ""))
-            if ident.get("artifact", "").lower().startswith(mod_id.lower()) \
-                    or pathlib.Path(path).name.lower().startswith(mod_id.lower() + "-"):
-                found.append(jar.name)
-                break
-    return found
+    """The jars of a pack that are, or carry inside them, the mod with this id."""
+    return [jar.name for jar in sorted((pathlib.Path(pack) / "mods").glob("*.jar"))
+            if mod_id in jar_mods(jar)]
 
 
 def run_quiet(args, timeout=20):
@@ -1418,6 +1561,7 @@ def doctor_checks():
 
     f = env_file()
     env = None
+    theirs = None
     if f.is_file():
         values = read_env_file(f)
         missing = [k for k in ("MARIONETTE_HOST", "MARIONETTE_PORT", "MARIONETTE_TOKEN")
@@ -1430,6 +1574,9 @@ def doctor_checks():
             try:
                 text = mod_get("/players", env)
                 add("server mod answers", True, f"{env['host']}:{env['port']} -> {text.strip()[:60]}")
+                theirs = server_mods(env)
+                add("server mod lists its mods", True if theirs else None,
+                    f"{len(theirs)} mods" if theirs else "no /mods route: a server mod older than 1.0.0")
             except urllib.error.HTTPError as e:
                 add("server mod answers", False, f"{env['host']}:{env['port']} said HTTP {e.code}"
                     + (" (wrong token?)" if e.code in (401, 403) else ""))
@@ -1473,6 +1620,19 @@ def doctor_checks():
             continue
         n = len(list((s["pack"] / "mods").glob("*.jar")))
         add(f"servers/{slug}", True, f"{address_of(s)} {s['version']} {n} client mods")
+        # Against the server that answers /mods (one at a time answers, and it
+        # may not be this slug's: only mismatches are reported, and a pack
+        # that shares nothing with it has none).
+        if theirs:
+            diff = compare_packs(pack_mods(s["pack"]), theirs)
+            if diff["mismatch"]:
+                add(f"servers/{slug}: versions", False,
+                    "; ".join(f"{i}: pack {a}, server {b}" for i, a, b in diff["mismatch"][:6])
+                    + (" ..." if len(diff["mismatch"]) > 6 else ""))
+            else:
+                shared_ids = len([i for i in pack_mods(s["pack"]) if i in theirs])
+                add(f"servers/{slug}: versions", True,
+                    f"{shared_ids} mods in common with the server that answers, same versions")
         # A mod that needs an add-on on a headless bot, with the add-on missing:
         # the client would crash at startup, before the mod handshake.
         for mod_id, addon in ADDON_FOR.items():

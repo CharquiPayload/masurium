@@ -1047,7 +1047,16 @@ public class MarionetteBot {
             // nothing, which beats failing the poll over a cosmetic field.
             Logbook.note("version", "could not read my own version: " + e.getMessage());
         }
-        return String.format("{\"ok\":true,\"version\":\"%s\"}", Request.escape(v));
+        // The screen it is on, and whether the loading overlay is still up, for whoever
+        // has to know WHEN to say `connect`: sent while the game is still loading, the
+        // command talks to nobody, and the launcher lost an attempt on every start. A
+        // bare field read, off the game thread: a stale name is harmless, and a crash
+        // for a question is not.
+        Minecraft mc = Minecraft.getInstance();
+        String screen = mc.screen == null ? "" : mc.screen.getClass().getSimpleName();
+        return String.format(
+                "{\"ok\":true,\"version\":\"%s\",\"screen\":\"%s\",\"loading\":%s,\"in_world\":%s}",
+                Request.escape(v), Request.escape(screen), mc.getOverlay() != null, mc.level != null);
     }
 
     private String food(Map<String, String> q) throws Exception {
