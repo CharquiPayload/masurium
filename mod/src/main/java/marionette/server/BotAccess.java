@@ -1,10 +1,15 @@
 package marionette.server;
 
+import marionette.common.Json;
 import marionette.common.Request;
+import marionette.common.Settings;
+import marionette.server.Rules.Family;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
@@ -18,9 +23,9 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
- * Who owns each bot, who administers it, who it listens to, and the orders given to it by
- * command. Plain logic and a properties file, without Minecraft, so it is tested in
- * milliseconds.
+ * Who owns each bot, who administers it, who it listens to, its rules, and the orders
+ * given to it by command. Plain logic and a JSON file, without Minecraft, so it is tested
+ * in milliseconds.
  *
  * <p><b>Why the server decides.</b> Shutting a bot down used to be a chat order, checked
  * against a list inside the bot. But the name of whoever asked reached that lock through
@@ -46,15 +51,16 @@ import java.util.regex.Pattern;
  * what anyone else says never reaches the brain, so it spends no tokens and injects
  * nothing.
  *
- * <p><b>Settings.</b> The behaviour toggles, the food ban and the break whitelist were
+ * <p><b>Rules.</b> The behaviour toggles, the food ban and the break whitelist were
  * changed by asking the bot, and the tools that did it said "only on the owner's order" —
- * a sentence in a prompt, not a rule. Nothing enforced it. Now they are commands too, and
- * the brain has no tool that writes them; the change travels as an order in the same poll
- * that already carries shutdown. Only what a command decided is stored here: anything
- * untouched keeps the body's own default, so the two never hold rival copies of the same
- * value. What the bot writes about the WORLD — places, chests, its diary, what it learned
- * about people, and the trash list, which only governs its own backpack — stays its own.
- * It may write down what it finds; it may not change its own rules.
+ * a sentence in a prompt, not a rule. Nothing enforced it. Now they are held here, in
+ * three layers ({@link Rules}): the bot's config and the imposed rules come from the
+ * launcher, and its own layer is what {@code /marionette bot} and the launcher edit. The
+ * brain has no tool that writes any of them. What they come to rides in every answer to
+ * the bridge's poll, and the bridge makes the body hold exactly that. What the bot writes
+ * about the WORLD — places, chests, its diary, what it learned about people, and the trash
+ * list, which only governs its own backpack — stays its own. It may write down what it
+ * finds; it may not change its own rules.
  *
  * <p>Written from the server thread (commands) and read from the HTTP one (the bridge's
  * poll), so everything is synchronized on this instance.
@@ -73,11 +79,6 @@ final class BotAccess {
 
     /** Valid Minecraft names. What is not one is refused before touching any list. */
     private static final Pattern NAME = Pattern.compile("[A-Za-z0-9_]{1,16}");
-    /**
-     * Valid item and block ids. Bare, without a namespace: that is what the body's
-     * endpoints expect, and they are the ones that resolve it against the registry.
-     */
-    private static final Pattern ID = Pattern.compile("[a-z0-9_]{1,64}");
     /** An order not picked up in this time is dropped: its bridge was gone. */
     static final long ORDER_TTL_MS = 60_000;
     /** A bridge that has not polled for this long is taken as not running. */
@@ -96,18 +97,8 @@ final class BotAccess {
         /** The mismatch already warned about, so the console is told once, not every poll. */
         String warned = "";
 
-        /**
-         * The settings decided here, and ONLY those. What was never touched by a command
-         * is not stored: the body keeps its own defaults for it, so this file never has
-         * to know them and they cannot drift apart.
-         */
-        final TreeMap<String, Boolean> prefs = new TreeMap<>();
-        /** Food banned and food explicitly allowed, on top of the body's factory list. */
-        final Set<String> foodBan = new TreeSet<>();
-        final Set<String> foodAllow = new TreeSet<>();
-        /** Blocks it may break on its own, and ones taken off the body's seed list. */
-        final Set<String> breakAllow = new TreeSet<>();
-        final Set<String> breakForbid = new TreeSet<>();
+        /** Its toggles and lists, in their three layers. */
+        Rules rules = new Rules();
 
         Bot(String name) {
             this.name = name;
@@ -118,9 +109,13 @@ final class BotAccess {
      * An order for a bridge. {@code argument} carries what the action needs and is empty
      * for the ones that need nothing: {@code pref} takes {@code key=true}, {@code food}
      * takes {@code ban:rotten_flesh} and {@code break} takes {@code allow:dirt}.
+     *
+     * <p>Those three are for bridges older than the rules: a bridge that gets
+     * {@code rules} in its answer makes the body hold them whole and skips these.
      */
     record Order(long id, String bot, String action, String argument, String by, long at) {}
 
+    /** marionette_bots.json. */
     private final Path file;
     /** Lowercase name -> bot. */
     private final Map<String, Bot> bots = new TreeMap<>();
@@ -129,8 +124,23 @@ final class BotAccess {
     /** This server mod's own version, told once at startup. */
     private String mine = "";
 
+    /**
+     * Where it tells what happened to its file: the server's log. Handed in rather than
+     * fetched, because the tests run without the logging library the game brings.
+     */
+    interface Log {
+        void say(boolean bad, String text, Throwable cause);
+    }
+
+    private final Log log;
+
     BotAccess(Path file) {
+        this(file, (bad, text, cause) -> System.err.println(text + (cause == null ? "" : ": " + cause)));
+    }
+
+    BotAccess(Path file, Log log) {
         this.file = file;
+        this.log = log;
         load();
     }
 
@@ -264,8 +274,8 @@ final class BotAccess {
     }
 
     /**
-     * What the bridge gets back: owner, admins, who it hears and, if {@code since} is
-     * given, the orders given after it that are still fresh.
+     * What the bridge gets back: owner, admins, who it hears, its rules and, if
+     * {@code since} is given, the orders given after it that are still fresh.
      */
     synchronized String controlJson(String bot, Long since, long now) {
         prune(now);
@@ -294,38 +304,52 @@ final class BotAccess {
     }
 
     private String accessFields(String bot) {
+        Bot b = find(bot);
         return String.format(
                 "\"bot\":\"%s\",\"owner\":\"%s\",\"admins\":%s,"
-                + "\"hear\":{\"mode\":\"%s\",\"players\":%s},\"settings\":%s",
+                + "\"hear\":{\"mode\":\"%s\",\"players\":%s},\"rules\":%s,\"settings\":%s",
                 Request.escape(display(bot)), Request.escape(owner(bot)),
                 jsonList(admins(bot)), onlyList(bot) ? "list" : "everyone",
-                jsonList(hearList(bot)), settingsJson(bot));
+                jsonList(hearList(bot)),
+                b == null ? "{}" : Json.write(b.rules.effective().toJson()),
+                settingsJson(b));
     }
 
     /**
-     * Everything this server decided for that bot, in EVERY answer rather than as
-     * orders. A bridge applies it when it starts, so a body that came back with its own
-     * files ends up as the commands left it.
+     * What this server decided for that bot, in EVERY answer rather than as orders: the
+     * {@code rules}, whole (every toggle, each list entire), which a bridge makes the body
+     * hold as they are, on start and whenever they change. So a body that came back with
+     * its own files, or a change made while it was away, ends up as decided here.
      *
      * <p>It was orders at first, queued when a bridge reported after a silence. That
      * cannot work: the report happens in the same request that answers "start from id
      * N", and N was already past the orders just queued, so the bridge asked for what
      * came after them and never saw one. Carrying the state has no such race, and it
      * self-heals if an order is ever missed.
+     *
+     * <p>{@code settings} is the same, as the changes from what a bot starts with: the
+     * shape a bridge older than the rules applies, one change at a time.
      */
-    private String settingsJson(String bot) {
-        Bot b = find(bot);
+    private static String settingsJson(Bot b) {
         if (b == null) return "{}";
+        Rules.Effective e = b.rules.effective();
+        Rules.Layer named = b.rules.merged();
         List<String> prefs = new ArrayList<>();
-        b.prefs.forEach((k, v) -> prefs.add("\"" + k + "\":" + v));
+        named.prefs.keySet().forEach(k -> prefs.add("\"" + k + "\":" + e.prefs().get(k)));
         return String.format(
                 "{\"prefs\":{%s},\"food\":{\"ban\":%s,\"allow\":%s},"
                 + "\"break\":{\"allow\":%s,\"forbid\":%s}}",
                 String.join(",", prefs),
-                jsonList(new ArrayList<>(b.foodBan)),
-                jsonList(new ArrayList<>(b.foodAllow)),
-                jsonList(new ArrayList<>(b.breakAllow)),
-                jsonList(new ArrayList<>(b.breakForbid)));
+                jsonList(minus(e.food(), Family.FOOD.start)),
+                jsonList(minus(Family.FOOD.start, e.food())),
+                jsonList(minus(e.breaking(), Family.BREAK.start)),
+                jsonList(minus(Family.BREAK.start, e.breaking())));
+    }
+
+    private static List<String> minus(Collection<String> a, Collection<String> b) {
+        List<String> r = new ArrayList<>(new TreeSet<>(a));
+        r.removeAll(b);
+        return r;
     }
 
     private static String jsonList(List<String> names) {
@@ -408,92 +432,206 @@ final class BotAccess {
         return null;
     }
 
-    // --------------------------------------------------------------- settings
+    // ------------------------------------------------------------------ rules
 
     /**
-     * Switches a behaviour toggle. The key is checked against {@link
-     * marionette.common.Settings}, shared with the body, so a typo is refused here
-     * instead of travelling to a bot that will silently ignore it.
+     * Switches a behaviour toggle in the bot's own layer, or, with {@code value} null,
+     * takes it out of it: back to what its config says, or the default. The key is
+     * checked against {@link Settings}, shared with the body, so a typo is refused here
+     * instead of travelling to a bot that would silently ignore it. Refused, saying who,
+     * when the imposed layer decides it.
      *
      * @return null if it was set, or why not
      */
-    synchronized String pref(String bot, String key, boolean value, String by, long now) {
+    synchronized String pref(String bot, String key, Boolean value, String by, long now) {
         Bot b = find(bot);
         if (b == null) return "unknown bot";
         String k = key == null ? "" : key.strip().toLowerCase();
-        if (!marionette.common.Settings.known(k)) {
+        if (!Settings.known(k)) {
             return "there is no setting '" + k + "'";
         }
-        b.prefs.put(k, value);
+        Rules.Source imposed = b.rules.imposedOn(null, k);
+        if (imposed != null) {
+            return k + " is " + imposed.say() + ": it is changed there, not here";
+        }
+        TreeMap<String, Boolean> own = b.rules.layer(Rules.OWN).prefs;
+        if (value == null) {
+            if (own.remove(k) == null) return k + " was not set here";
+        } else {
+            own.put(k, value);
+        }
         save();
-        queue(b.name, Action.PREF, k + "=" + value, by, now);
+        queue(b.name, Action.PREF, k + "=" + b.rules.effective().prefs().get(k), by, now);
         return null;
     }
 
-    /** What this server has set for that bot, without the untouched ones. */
+    /** The toggles set in the bot's own layer here. */
     synchronized Map<String, Boolean> prefs(String bot) {
         Bot b = find(bot);
-        return b == null ? Map.of() : new TreeMap<>(b.prefs);
+        return b == null ? Map.of() : new TreeMap<>(b.rules.layer(Rules.OWN).prefs);
     }
 
     /**
-     * Bans a food, or allows it again. Banned means it does not eat it ON ITS OWN;
-     * handed to it by name it still eats, which is what the ban is for.
+     * Bans a food ({@code ban} true), allows it ({@code false}), or takes it out of the
+     * bot's own layer ({@code null}). Banned means it does not eat it ON ITS OWN; handed
+     * to it by name it still eats, which is what the ban is for.
      *
      * @return null if it changed, or why not
      */
-    synchronized String food(String bot, String id, boolean ban, String by, long now) {
-        return listChange(bot, id, ban, by, now, Action.FOOD,
-                b -> b.foodBan, b -> b.foodAllow);
+    synchronized String food(String bot, String id, Boolean ban, String by, long now) {
+        return listChange(bot, id, ban, by, now, Family.FOOD, Action.FOOD);
     }
 
-    /** What it may break on its own, and what was taken off its seed list. */
-    synchronized String breaking(String bot, String id, boolean allow, String by,
-                                 long now) {
-        return listChange(bot, id, allow, by, now, Action.BREAK,
-                b -> b.breakAllow, b -> b.breakForbid);
+    /** What it may break on its own: allow, forbid, or back to what is under ({@code null}). */
+    synchronized String breaking(String bot, String id, Boolean allow, String by, long now) {
+        return listChange(bot, id, allow, by, now, Family.BREAK, Action.BREAK);
     }
 
     /**
-     * The two sides of one list. An id lives in one set or the other, never in both: the
-     * second decision replaces the first instead of piling on top of it.
+     * One id of one list, in the bot's own layer. It is on one side or the other, never
+     * both: the second decision replaces the first instead of piling on top of it.
      */
-    private String listChange(String bot, String id, boolean first, String by, long now,
-                              Action action,
-                              java.util.function.Function<Bot, Set<String>> yes,
-                              java.util.function.Function<Bot, Set<String>> no) {
+    private String listChange(String bot, String id, Boolean on, String by, long now,
+                              Family family, Action action) {
         Bot b = find(bot);
         if (b == null) return "unknown bot";
-        String what = id == null ? "" : id.strip().toLowerCase();
-        if (!ID.matcher(what).matches()) {
-            return "'" + what + "' is not an id; they go in English and without a "
-                    + "namespace, like rotten_flesh or dirt";
+        String what = Rules.id(id);
+        if (what == null) {
+            return "'" + (id == null ? "" : id.strip()) + "' is not an id; they go in English "
+                    + "and without a namespace, like rotten_flesh or dirt";
         }
-        Set<String> into = first ? yes.apply(b) : no.apply(b);
-        Set<String> outOf = first ? no.apply(b) : yes.apply(b);
-        outOf.remove(what);
-        if (!into.add(what)) {
+        Rules.Source imposed = b.rules.imposedOn(family, what);
+        if (imposed != null) {
+            return (b.rules.layer(Rules.IMPOSED).replace.contains(family)
+                    ? "its whole " + family.id + " list is " : what + " is ")
+                    + imposed.say() + ": it is changed there, not here";
+        }
+        TreeMap<String, Boolean> own = b.rules.layer(Rules.OWN).list(family);
+        if (on == null) {
+            if (own.remove(what) == null) return "'" + what + "' was not set here";
+        } else if (on.equals(own.put(what, on))) {
             return "'" + what + "' was already like that";
         }
         save();
-        String verb = action == Action.FOOD ? (first ? "ban" : "allow")
-                                            : (first ? "allow" : "forbid");
-        queue(b.name, action, verb + ":" + what, by, now);
+        boolean listed = b.rules.effective().list(family).contains(what);
+        queue(b.name, action, (listed ? family.on : family.off) + ":" + what, by, now);
         return null;
     }
 
-    /** Food this server banned, and food it allowed back. */
+    /** Food banned, or allowed, in the bot's own layer here. */
     synchronized List<String> foodList(String bot, boolean banned) {
-        Bot b = find(bot);
-        if (b == null) return List.of();
-        return new ArrayList<>(banned ? b.foodBan : b.foodAllow);
+        return ownList(bot, Family.FOOD, banned);
     }
 
-    /** Blocks this server allowed breaking, and ones it forbade. */
+    /** Blocks allowed, or forbidden, in the bot's own layer here. */
     synchronized List<String> breakList(String bot, boolean allowed) {
+        return ownList(bot, Family.BREAK, allowed);
+    }
+
+    private List<String> ownList(String bot, Family family, boolean on) {
         Bot b = find(bot);
         if (b == null) return List.of();
-        return new ArrayList<>(allowed ? b.breakAllow : b.breakForbid);
+        List<String> r = new ArrayList<>();
+        b.rules.layer(Rules.OWN).list(family).forEach((id, yes) -> {
+            if (yes == on) r.add(id);
+        });
+        return r;
+    }
+
+    /** A copy of the bot's rules, to show them; null for an unknown bot. */
+    synchronized Rules rules(String bot) {
+        Bot b = find(bot);
+        return b == null ? null : b.rules.copy();
+    }
+
+    /**
+     * The bot's rules for the launcher: the three layers and what they come to.
+     */
+    synchronized String rulesJson(String bot) {
+        Bot b = find(bot);
+        if (b == null) {
+            return "{\"ok\":false,\"error\":\"this server does not know that bot yet\"}";
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("ok", true);
+        m.put("bot", b.name);
+        m.putAll(b.rules.toJson());
+        m.put("effective", b.rules.effective().toJson());
+        return Json.write(m);
+    }
+
+    /**
+     * Replaces one layer whole, as the launcher sends it: the bot's config (base) and
+     * the imposed rules on every start and every change, and the own layer when it is
+     * cloned or reset. A bot this server has not seen yet is known from now on: the
+     * launcher sends its rules before the bot joins.
+     *
+     * @return null if it was set, or why not
+     */
+    synchronized String setLayer(String bot, String layer, String json) {
+        if (!validName(bot)) return "bot missing or not a valid name";
+        Rules.Layer l;
+        try {
+            l = Rules.Layer.fromJson(Json.parse(json), true);
+            new Rules().layer(layer);
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
+        }
+        Bot b = bots.computeIfAbsent(bot.toLowerCase(), k -> new Bot(bot));
+        if (b.rules.layer(layer).equals(l)) return null;
+        b.rules.set(layer, l);
+        save();
+        return null;
+    }
+
+    /**
+     * One change to the bot's own layer, from the launcher, the way a command makes it:
+     * a toggle ({@code pref}, value on, off or default), an id of a list ({@code food}:
+     * ban, allow, default; {@code break}: allow, forbid, default), or a list's replace
+     * switch ({@code key} *, value replace or add).
+     *
+     * @return null if it changed, or why not
+     */
+    synchronized String editOwn(String bot, String kind, String key, String value, String by,
+                                long now) {
+        Bot b = find(bot);
+        if (b == null) return "this server does not know " + bot + " yet";
+        String v = value == null ? "" : value.strip().toLowerCase();
+        if ("pref".equals(kind)) {
+            Boolean to = switch (v) {
+                case "on", "true" -> Boolean.TRUE;
+                case "off", "false" -> Boolean.FALSE;
+                case "default" -> null;
+                default -> throw new IllegalArgumentException("a toggle is on, off or default");
+            };
+            return pref(bot, key, to, by, now);
+        }
+        Family f = Family.of(kind);
+        if (f == null) return "kind is pref, food or break";
+        if ("*".equals(key)) {
+            if (!v.equals("replace") && !v.equals("add")) {
+                return "the whole list either replaces what is under it or adds to it: replace or add";
+            }
+            Rules.Source imposed = b.rules.layer(Rules.IMPOSED).replace.contains(f)
+                    ? b.rules.imposedOn(f, "*") : null;
+            if (imposed != null) return "its whole " + f.id + " list is " + imposed.say();
+            boolean changed = v.equals("replace")
+                    ? b.rules.layer(Rules.OWN).replace.add(f)
+                    : b.rules.layer(Rules.OWN).replace.remove(f);
+            if (changed) save();
+            return null;
+        }
+        Boolean on;
+        if (v.equals(f.on)) {
+            on = Boolean.TRUE;
+        } else if (v.equals(f.off)) {
+            on = Boolean.FALSE;
+        } else if (v.equals("default")) {
+            on = null;
+        } else {
+            return f.id + " is " + f.on + ", " + f.off + " or default";
+        }
+        return listChange(bot, key, on, by, now, f, f == Family.FOOD ? Action.FOOD : Action.BREAK);
     }
 
     // ---------------------------------------------------------------- orders
@@ -520,16 +658,86 @@ final class BotAccess {
 
     // ----------------------------------------------------------- persistence
 
+    /** The file before the rules had layers: read once, then left aside. */
+    private Path legacyFile() {
+        String name = file.getFileName().toString();
+        String stem = name.endsWith(".json") ? name.substring(0, name.length() - 5) : name;
+        return file.resolveSibling(stem + ".properties");
+    }
+
     private void load() {
-        if (!Files.exists(file)) return;
+        if (Files.exists(file)) {
+            loadJson();
+            return;
+        }
+        Path legacy = legacyFile();
+        if (!Files.exists(legacy)) return;
+        // What commands decided before there were layers is this bot's own layer: it
+        // is exactly what /marionette bot edits.
+        loadProperties(legacy);
+        save();
+        try {
+            Files.move(legacy, legacy.resolveSibling(legacy.getFileName() + ".migrated"),
+                    StandardCopyOption.REPLACE_EXISTING);
+            log.say(false, "[marionette] " + legacy + " moved into " + file, null);
+        } catch (IOException e) {
+            log.say(true, "[marionette] could not set " + legacy + " aside after moving it into " + file, e);
+        }
+    }
+
+    private void loadJson() {
+        Map<String, Object> all;
+        try {
+            all = Json.object(Files.readString(file, StandardCharsets.UTF_8));
+        } catch (IOException | IllegalArgumentException e) {
+            // Unreadable = no admins and everyone heard until someone fixes the file. It
+            // is copied aside first: the next change would write over it, and a hand
+            // edit with a missing comma must not cost every bot's rules.
+            Path aside = file.resolveSibling(file.getFileName() + ".broken-" + System.currentTimeMillis());
+            try {
+                Files.copy(file, aside);
+            } catch (IOException ignored) {
+                // Nothing more to do: the log below says which file it was.
+            }
+            log.say(true, "[marionette] could not read " + file + " (a copy is in " + aside + ")", e);
+            return;
+        }
+        if (!(all.get("bots") instanceof Map<?, ?> each)) return;
+        for (Object o : each.values()) {
+            if (!(o instanceof Map<?, ?> m)) continue;
+            String name = text(m.get("name"));
+            if (!validName(name)) continue;
+            Bot b = new Bot(name);
+            String owner = text(m.get("owner"));
+            b.owner = validName(owner) ? owner : "";
+            names(m.get("admins"), b.admins);
+            if (m.get("hear") instanceof Map<?, ?> hear) {
+                b.onlyList = "list".equalsIgnoreCase(text(hear.get("mode")));
+                names(hear.get("players"), b.hear);
+            }
+            b.rules = Rules.fromJson(m.get("rules"));
+            bots.put(name.toLowerCase(), b);
+        }
+    }
+
+    private static String text(Object o) {
+        return o instanceof String s ? s.strip() : "";
+    }
+
+    private static void names(Object list, Set<String> into) {
+        if (!(list instanceof List<?> l)) return;
+        for (Object o : l) {
+            String n = text(o);
+            if (validName(n)) into.add(n);
+        }
+    }
+
+    private void loadProperties(Path legacy) {
         Properties p = new Properties();
-        try (var in = Files.newInputStream(file)) {
+        try (var in = Files.newInputStream(legacy)) {
             p.load(in);
         } catch (IOException e) {
-            // Unreadable = no admins and everyone heard until someone fixes the file. The
-            // owners come back on their own with the next poll of each bridge.
-            org.slf4j.LoggerFactory.getLogger(BotAccess.class)
-                    .error("[marionette] could not read {}", file, e);
+            log.say(true, "[marionette] could not read " + legacy, e);
             return;
         }
         for (String key : p.stringPropertyNames()) {
@@ -540,67 +748,68 @@ final class BotAccess {
             Bot b = new Bot(name);
             String owner = p.getProperty(k + ".owner", "").strip();
             b.owner = validName(owner) ? owner : "";
-            names(p.getProperty(k + ".admins", ""), b.admins);
+            names(List.of(p.getProperty(k + ".admins", "").split(",")), b.admins);
             b.onlyList = "list".equalsIgnoreCase(p.getProperty(k + ".hear.mode", "").strip());
-            names(p.getProperty(k + ".hear.players", ""), b.hear);
-            ids(p.getProperty(k + ".food.ban", ""), b.foodBan);
-            ids(p.getProperty(k + ".food.allow", ""), b.foodAllow);
-            ids(p.getProperty(k + ".break.allow", ""), b.breakAllow);
-            ids(p.getProperty(k + ".break.forbid", ""), b.breakForbid);
-            // Settings are one property each, so the file stays readable and a hand
-            // edit of one cannot take the others with it.
+            names(List.of(p.getProperty(k + ".hear.players", "").split(",")), b.hear);
+            Rules.Layer own = b.rules.layer(Rules.OWN);
+            ids(p.getProperty(k + ".food.ban", ""), own.list(Family.FOOD), true);
+            ids(p.getProperty(k + ".food.allow", ""), own.list(Family.FOOD), false);
+            ids(p.getProperty(k + ".break.allow", ""), own.list(Family.BREAK), true);
+            ids(p.getProperty(k + ".break.forbid", ""), own.list(Family.BREAK), false);
             String prefix = k + ".pref.";
             for (String row : p.stringPropertyNames()) {
                 if (!row.startsWith(prefix)) continue;
                 String setting = row.substring(prefix.length());
                 // A setting that no longer exists in the code is dropped on load: it
                 // would be a ghost that reads as saved and governs nothing.
-                if (marionette.common.Settings.known(setting)) {
-                    b.prefs.put(setting,
-                            Boolean.parseBoolean(p.getProperty(row, "").strip()));
+                if (Settings.known(setting)) {
+                    own.prefs.put(setting, Boolean.parseBoolean(p.getProperty(row, "").strip()));
                 }
             }
             bots.put(name.toLowerCase(), b);
         }
     }
 
-    private static void names(String list, Set<String> into) {
+    private static void ids(String list, Map<String, Boolean> into, boolean on) {
         for (String n : list.split(",")) {
-            n = n.strip();
-            if (validName(n)) into.add(n);
-        }
-    }
-
-    private static void ids(String list, Set<String> into) {
-        for (String n : list.split(",")) {
-            n = n.strip().toLowerCase();
-            if (ID.matcher(n).matches()) into.add(n);
+            String id = Rules.id(n);
+            if (id != null) into.put(id, on);
         }
     }
 
     private void save() {
-        Properties p = new Properties();
+        Map<String, Object> each = new TreeMap<>();
         for (Bot b : bots.values()) {
-            String k = b.name.toLowerCase();
-            p.setProperty(k + ".name", b.name);
-            p.setProperty(k + ".owner", b.owner);
-            p.setProperty(k + ".admins", String.join(",", b.admins));
-            p.setProperty(k + ".hear.mode", b.onlyList ? "list" : "everyone");
-            p.setProperty(k + ".hear.players", String.join(",", b.hear));
-            p.setProperty(k + ".food.ban", String.join(",", b.foodBan));
-            p.setProperty(k + ".food.allow", String.join(",", b.foodAllow));
-            p.setProperty(k + ".break.allow", String.join(",", b.breakAllow));
-            p.setProperty(k + ".break.forbid", String.join(",", b.breakForbid));
-            b.prefs.forEach((key, v) -> p.setProperty(k + ".pref." + key, String.valueOf(v)));
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("name", b.name);
+            m.put("owner", b.owner);
+            m.put("admins", new ArrayList<>(b.admins));
+            Map<String, Object> hear = new LinkedHashMap<>();
+            hear.put("mode", b.onlyList ? "list" : "everyone");
+            hear.put("players", new ArrayList<>(b.hear));
+            m.put("hear", hear);
+            m.put("rules", b.rules.toJson());
+            each.put(b.name.toLowerCase(), m);
         }
-        try (var out = Files.newOutputStream(file)) {
-            p.store(out, "Marionette: who owns, administers and is heard by each bot. "
-                    + "Written by the mod and by /marionette bot; the owner comes from "
-                    + "each bot's own config.");
+        Map<String, Object> all = new LinkedHashMap<>();
+        all.put("about", "Marionette: who owns, administers and is heard by each bot, and its "
+                + "rules. Written by the mod, by /marionette bot and by the launcher; the "
+                + "owner comes from each bot's own config.");
+        all.put("bots", each);
+        // Written aside and moved over: a crash halfway leaves the old file, not half
+        // of a new one.
+        Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+        try {
+            Files.writeString(tmp, Json.pretty(all), StandardCharsets.UTF_8);
+            try {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException atomicFailed) {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+            }
         } catch (IOException e) {
             // Not fatal: the change holds until the server stops, and the log says it.
-            org.slf4j.LoggerFactory.getLogger(BotAccess.class)
-                    .error("[marionette] could not write {}", file, e);
+            log.say(true, "[marionette] could not write " + file, e);
         }
     }
 }

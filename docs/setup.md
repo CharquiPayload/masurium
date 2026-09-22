@@ -297,6 +297,7 @@ players and how; it goes at the start of its prompt.
 | `heap` | bot, instance | the game's memory, e.g. `3g` (default `MARIONETTE_HEAP`, else `3g`) |
 | `escort` | instance | the player name of another bot on its server: this one becomes that bot's **guard** |
 | `port` | instance | the local port of the bot mod, chosen by the launcher |
+| `ignore_global` | instance | `yes`: the global rules (below) leave this instance alone |
 
 The launcher writes what the bridge reads into the instance's folder on every
 start and every change, one small file per setting (`model`, `owner`...):
@@ -324,11 +325,56 @@ when it sleeps, shares its break whitelist, steps aside when it is in the way,
 and is stopped together with it. Guards mostly react, so a smaller model
 (`haiku low`) works well for them.
 
-Most behaviour is changed by talking to the bot: preferences such as
-`build_while_following`, `hunt_players` or `defend_from_players`, which blocks it
-may break to get through, which food it must not eat, and standing orders
-("if you run out of fuel, take it from the wooden chest"). These are stored per
-server in the client's `config/` folder.
+Standing orders ("if you run out of fuel, take it from the wooden chest") are
+still given by talking to the bot, and kept per server in the client's
+`config/` folder. What it is *allowed* to do is not: that is its rules.
+
+### Rules
+
+A bot's **rules** are its behaviour toggles (`hunt_players`,
+`build_while_following`, `defend_from_players`...), the food it does not eat
+on its own, and the blocks it may break on its own to make its way. The
+**server** enforces them: its mod keeps them for each bot, and the bridge makes
+the body hold what they come to, at start and within a second of any change.
+They come in three layers, the stronger one winning where two name the same
+thing:
+
+| layer | where it is kept | who changes it |
+|---|---|---|
+| **base** | the bot's `bot.json` (`"rules"`), with its server's `servers/<slug>/rules.json` on top | the launcher: `rules --bot`, `rules --server` |
+| **own** | on the server, per player | the launcher (`rules <instance> ...`) **and** `/marionette bot` in the game: one copy, the server's |
+| **imposed** | the launcher's `launcher.json` (`"rules"`), next to `server.env` | the launcher only: `rules --global`. The game refuses to change it, and says who imposes it |
+
+Each layer names only what it decides; otherwise lists **add up** (the bot's
+config banning beef and the instance banning salmon ban both). A layer can
+instead **replace** a list (`food replace`): its entries are then the whole
+list, and what is under it, the golden apples every bot starts with included,
+no longer counts.
+
+```bash
+launcher/marionette.py rules alice                          # every toggle and both lists, and who decides each
+launcher/marionette.py rules alice food ban rotten_flesh    # its own, like /marionette bot alice food ban ...
+launcher/marionette.py rules alice pref hunt_players default   # back to what is under
+launcher/marionette.py rules --bot alice break allow oak_log    # the bot's config, for all its instances
+launcher/marionette.py rules --server create food ban beef       # every bot on that server
+launcher/marionette.py rules --global pref hunt_players off      # imposed on every instance
+launcher/marionette.py rules --global food replace               # ...the whole food list, not just additions
+```
+
+In a file, a layer reads:
+
+```json
+{"prefs": {"hunt_players": false},
+ "food":  {"ban": ["rotten_flesh"], "allow": ["golden_apple"]},
+ "break": {"allow": ["oak_log"], "forbid": ["dirt"], "replace": false}}
+```
+
+The bot's config, its server's and the global rules are sent on every start,
+and to the running instances as soon as they change. A change to an
+instance's own rules while its server is away waits in the instance's folder
+(`rules-pending.json`) and goes on its next start; `doctor` counts what waits.
+A clone on another server takes a copy of its own rules; one that is the same
+player on the same server shares them, since the server keeps them per player.
 
 ## Server commands
 
@@ -342,13 +388,13 @@ server in the client's `config/` folder.
 | `/marionette bot <bot> hear add\|remove <player>` | owner, admins | edit the hear list |
 | `/marionette bot <bot> hear list` | anyone | the hear list and whether it is on |
 | `/marionette bot <bot> admins add\|remove <player>` | owner | edit the admins |
-| `/marionette bot <bot> pref` | anyone | every behaviour setting with its value |
+| `/marionette bot <bot> pref` | anyone | every behaviour setting with its value, and who decides it |
 | `/marionette bot <bot> pref <key>` | anyone | what one setting does, and how it stands |
-| `/marionette bot <bot> pref <key> on\|off` | owner, admins | switch a setting |
+| `/marionette bot <bot> pref <key> on\|off\|default` | owner, admins | switch a setting, or take it back to what its config says |
 | `/marionette bot <bot> food` | anyone | what it will not eat on its own |
-| `/marionette bot <bot> food ban\|allow <item>` | owner, admins | edit the food ban |
+| `/marionette bot <bot> food ban\|allow\|default <item>` | owner, admins | edit the food ban |
 | `/marionette bot <bot> break` | anyone | what it may break by itself to make its way |
-| `/marionette bot <bot> break allow\|forbid <block>` | owner, admins | edit that whitelist |
+| `/marionette bot <bot> break allow\|forbid\|default <block>` | owner, admins | edit that whitelist |
 | `/marionette owners` | anyone | every bot with its owner |
 | `/marionette status` | anyone | what each bot is doing, with health and position |
 | `/marionette hud on\|off` | players | your bots' state icons above your hotbar |
@@ -369,8 +415,10 @@ settings, the food ban and the break whitelist. They used to be changed by
 asking the bot, and the brain's tools for it said "only on the owner's order" —
 which was a sentence in a prompt with nothing enforcing it. The brain now has
 tools that only *read* them, so it still knows its own rules and can tell you
-what they are; changing them is `pref`, `food` and `break` above. A setting
-decided while the bot is off is kept and applied when it comes back.
+what they are; changing them is `pref`, `food` and `break` above. They edit
+the bot's **own** rules (see [Rules](#rules)); what the launcher imposes is
+refused, saying who imposes it. A change made while the bot is off is kept and
+applied when it comes back.
 
 What the bot writes about the **world** stays its own: the places it
 remembers, the chests it annotates, its diary, what it learns about people, and

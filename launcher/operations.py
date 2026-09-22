@@ -18,7 +18,7 @@ import time
 import urllib.error
 from dataclasses import dataclass
 
-from . import accounts, settings
+from . import accounts, rules, settings
 from .api import UNREACHABLE
 from .bots import Instance, check_key, check_name, operating, write_json
 from .diagnosis import complaints, crash_report, explain_crash
@@ -178,6 +178,7 @@ def clone_instance(ws, key, new_key=None, slug=None, on_event=None):
     settings.render(dst)
     report.step(f"instance {new_key} cloned from {src.key}: {dst.name} on {slug}, port {dst.port}",
                 stage="created")
+    _copy_own_rules(src, dst, report)
     if settings.get(dst, "account") == "online":
         report.detail(f"online account: log it in once:  marionette.py login {new_key}")
     return dst
@@ -428,6 +429,21 @@ def _start_steps(inst, report, cancel, launched):
                    lines=["Is Marionette in that server's mods folder, and is the server up?",
                           "(and are that address and port the ones in server.env?)"],
                    code="server_mod_down")
+    # Its rules, before the game: what the bot is and what is imposed, and
+    # changes to its own that waited. A rule written wrong stops the start
+    # here: a bot running under rules other than the ones meant is what they
+    # exist to prevent.
+    try:
+        _, sent, refused = rules.push(inst, api)
+        for line in sent:
+            report.detail(f"rules that waited for the server, sent: {line}")
+        if refused:
+            report.warning("the server refused rule changes that were waiting:", refused)
+    except rules.OldServerMod as e:
+        report.warning(f"{e}; its config and the global rules do not reach it")
+    except UNREACHABLE as e:
+        raise Fail(f"the server mod of {inst.slug} stopped answering at {api.address}: "
+                   f"{getattr(e, 'reason', e)}.", code="server_mod_down")
 
     settings.render(inst)
     report.step(f"preparing the mods of {inst.slug}", stage="preparing")
@@ -740,6 +756,8 @@ def configure(target, key, value=None, clear=False, on_event=None):
         settings.set_value(target, key, value)
     for inst in affected:
         settings.render(inst)
+    if key == "ignore_global":
+        _push_running(affected, report)
     now, layer = settings.resolve(target, key)
     who = target.key if isinstance(target, Instance) else f"bot {target.key}"
     report.step(f"{who}: {key} = {now or '(nothing)'}" + ("" if layer == settings.layer_of(target)
@@ -811,6 +829,192 @@ def rewrite_phrases(inst, on_event=None):
     unlink_quietly(phrases_file(inst))
     report.step(f"{inst.key}: its sentences will be written when its bridge next starts", stage="phrases")
     return "on the next start"
+
+
+# --- rules ----------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class RulesView:
+    """What `rules` shows of an instance: every toggle and both lists as they
+    come out, each with who decides it ("set here", "its config", "imposed
+    by global", or "" for what every bot starts with)."""
+    title: str
+    note: str
+    toggles: tuple        # (key, on, who)
+    lists: tuple          # (family, [(id, who)] on the list, [(id, who)] taken off, who replaces it or "")
+    waiting: tuple        # own-layer changes that wait for the server
+
+
+def _view(title, note, base, own, imposed, waiting):
+    everything = rules.merge(rules.merge(base, own), imposed)
+    held = rules.effective(base, own, imposed)
+
+    def who(family, key):
+        return rules.say_source(*rules.source(base, own, imposed, family, key))
+
+    toggles = tuple((k, held["prefs"][k], who("prefs", k)) for k in rules.TOGGLES)
+    lists = []
+    for family in rules.FAMILIES:
+        on = held["food_banned" if family == "food" else "break_allowed"]
+        off = sorted(i for i, v in everything[family].items() if not v)
+        lists.append((family, [(i, who(family, i)) for i in on], [(i, who(family, i)) for i in off],
+                      who(family, "*") if family in everything["replace"] else ""))
+    return RulesView(title, note, toggles, tuple(lists), tuple(waiting))
+
+
+def _api_of(inst):
+    return inst.ws.api_for(inst.ws.server(inst.slug))
+
+
+def show_rules(inst):
+    """An instance's rules as they come out: its own layer from its server,
+    the rest as this launcher holds it. Changes that waited for the server
+    go first, if it answers now."""
+    inst.require()
+    base, imposed = rules.base_of(inst), rules.imposed_of(inst)
+    title = f"{inst.key}: {inst.name} on {inst.slug}"
+    own, note = rules.empty(), ""
+    try:
+        api = _api_of(inst)
+        answer = rules.ask(api, inst.name)
+        if rules.pending(inst):
+            rules.send_pending(api, inst)
+            answer = rules.ask(api, inst.name)
+        server_base, own, server_imposed = rules.layers_in(answer)
+        if rules.dump(server_base) != rules.dump(base) or rules.dump(server_imposed) != rules.dump(imposed):
+            note = "its server still holds an older config or global rules for it: they go on its next start"
+    except rules.NotKnownYet:
+        note = "its server has not seen it yet: this is what it gets on its first start"
+    except rules.OldServerMod as e:
+        note = f"{e}; without its own layer"
+    except UNREACHABLE:
+        note = "its server does not answer: shown without its own layer, which lives there"
+    waiting = [" ".join(rules.pretty_change(i.get("kind"), i.get("key"), i.get("value")))
+               if "set" not in i else "its own rules, copied from another instance"
+               for i in rules.pending(inst)]
+    return _view(title, note, base, own, imposed, waiting)
+
+
+def _refuse_imposed(inst, change):
+    kind, key, _ = change
+    imposed = rules.imposed_of(inst)
+    family = "prefs" if kind == "pref" else kind
+    layer, label = rules.source(rules.empty(), rules.empty(), imposed, family, key)
+    if layer == "imposed":
+        what = f"its whole {kind} list" if key == "*" or family in imposed["replace"] else key
+        raise Fail(f"{what} is {rules.say_source(layer, label)}: it is changed there, not here",
+                   lines=["the global rules:  marionette.py rules --global ...",
+                          f"or this instance ignores them:  marionette.py set {inst.key} ignore_global yes"],
+                   code="imposed")
+
+
+def edit_rules(inst, words, on_event=None):
+    """One change to an instance's own rules (see rules.edit for the words).
+    They live on its server, so the change goes there; when the server does
+    not answer it waits in the instance's folder for its next start. Refused
+    here, as in the game, when the global rules decide it."""
+    report = report_to(on_event)
+    inst.require()
+    _, change = rules.edit(rules.empty(), words)
+    _refuse_imposed(inst, change)
+    kind, key, value = change
+    said = " ".join(rules.pretty_change(kind, key, value))
+    api = _api_of(inst)
+    try:
+        try:
+            rules.ask(api, inst.name)
+            sent, refused = rules.send_pending(api, inst)
+        except rules.NotKnownYet:
+            # Never started there: its server learns of it from its config
+            # first, and takes what waited after that.
+            _, sent, refused = rules.push(inst, api)
+        if rules.pending(inst):
+            raise OSError("changes before this one still wait")
+        rules.ask(api, inst.name, layer="own", kind=kind, key=key, value=value)
+    except UNREACHABLE:
+        rules.keep_pending(inst, rules.pending(inst) + [{"kind": kind, "key": key, "value": value}])
+        report.step(f"{inst.key}: {said}", stage="rules")
+        report.detail(f"{inst.slug}'s server mod does not answer: it goes on its next start")
+        return "waiting"
+    for line in sent:
+        report.detail(f"sent, it was waiting: {line}")
+    if refused:
+        report.warning("the server refused changes that were waiting:", refused)
+    report.step(f"{inst.key}: {said}", stage="rules")
+    report.detail("it applies now" if client_running(inst) else "it applies when it starts")
+    return "sent"
+
+
+def _push_running(instances, report):
+    """The launcher's rules to the running ones among these, now; the others
+    get them on their next start."""
+    running = [i for i in instances if client_running(i)]
+    for inst in running:
+        try:
+            rules.push(inst, _api_of(inst))
+            report.detail(f"{inst.key}: sent, it applies now")
+        except UNREACHABLE:
+            report.warning(f"{inst.key}: its server mod does not answer; it goes on its next start")
+        except Fail as e:
+            report.warning(f"{inst.key}: {e}")
+    rest = len(instances) - len(running)
+    if rest:
+        report.detail(f"{rest} not running: on their next start")
+
+
+def edit_layer(ws, words, bot=None, slug=None, on_event=None):
+    """One change to the rules this launcher holds: a bot's (bot.json), a
+    server's (servers/<slug>/rules.json), or, with neither, the global ones
+    (launcher.json), which are imposed. The running instances they concern
+    get them at once."""
+    report = report_to(on_event)
+    if bot is not None:
+        bot.require()
+        layer, where, concerned = rules.of_bot(bot), f"bot {bot.key}", bot.instances()
+    elif slug is not None:
+        ws.server(slug)
+        layer, where, concerned = rules.of_server(ws, slug), f"server {slug}", ws.instances(slug)
+    else:
+        layer, where = rules.of_global(ws), "global"
+        concerned = [i for i in ws.instances() if settings.get(i, "ignore_global") != "yes"]
+    layer, change = rules.edit(layer, words)
+    if bot is not None:
+        rules.save_bot(bot, layer)
+    elif slug is not None:
+        rules.save_server(ws, slug, layer)
+    else:
+        rules.save_global(ws, layer)
+    report.step(f"{where}: {' '.join(rules.pretty_change(*change))}", stage="rules")
+    _push_running(concerned, report)
+    return layer
+
+
+def layer_lines(ws, bot=None, slug=None):
+    """(where it is kept, the layer in a few lines)."""
+    if bot is not None:
+        bot.require()
+        return str(bot.json), rules.describe(rules.of_bot(bot))
+    if slug is not None:
+        ws.server(slug)
+        return str(ws.servers_dir / slug / "rules.json"), rules.describe(rules.of_server(ws, slug))
+    return str(ws.config_file), rules.describe(rules.of_global(ws))
+
+
+def _copy_own_rules(src, dst, report):
+    """An instance's own rules live on its server, per player. A clone that
+    is the same player on the same server shares them; one elsewhere gets a
+    copy, sent on its first start."""
+    if dst.slug == src.slug and dst.player == src.player:
+        report.detail(f"it shares its own rules with {src.key}: the same player on the same server")
+        return
+    try:
+        own = rules.layers_in(rules.ask(_api_of(src), src.name))[1]
+    except UNREACHABLE + (Fail,):
+        report.detail(f"its own rules stayed with {src.key}: {src.slug}'s server mod did not give them")
+        return
+    if not rules.is_empty(own):
+        rules.keep_pending(dst, [{"set": rules.dump(own)}])
+        report.detail("its own rules go with it, on its first start")
 
 
 # --- looking ------------------------------------------------------------------

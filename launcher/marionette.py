@@ -11,6 +11,7 @@
     marionette.py restart <name> [server]
     marionette.py status [name]
     marionette.py set <name> [setting [value | --default]]
+    marionette.py rules <instance> [change] | --bot <bot> | --server <slug> | --global
     marionette.py phrases <instance>
     marionette.py account [add | remove <account>]
     marionette.py deploy-mod [jar]

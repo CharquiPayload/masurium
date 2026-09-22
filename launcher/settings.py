@@ -125,13 +125,15 @@ SETTINGS = {s.key: s for s in [
             ("opus medium", "sonnet", "sonnet low", "haiku low"), applies="bridge"),
     Setting("owner", "the player it belongs to: their delicate orders, /marionette bot anywhere",
             _owner_default, applies="now"),
+    Setting("ignore_global", "whether the global rules (launcher.json) leave this instance alone",
+            "no", ("no", "yes"), applies="now", layers=(INSTANCE,)),
 ]}
 
 CHECKS = {"account": _check_account, "port": _check_port, "owner": _check_owner,
           "model": _check_model, "escort": _check_escort, "heap": _check_heap}
 # Case matters in names (a player, a bot as the game shows it); in codes and
 # sizes it does not.
-LOWERCASE = ("account", "heap")
+LOWERCASE = ("account", "heap", "ignore_global")
 # Settings there were once, and where what they said goes now.
 RETIRED = {
     "language": "the personality says which language the bot speaks",

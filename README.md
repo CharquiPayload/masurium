@@ -111,11 +111,11 @@ inline, a lambda, or a return type that no `import` would reveal.
   stopped and watched; settings in layers, bot < instance; each server with its
   own server mod; it compares the pack with the server's `/mods` before
   joining, and refuses to run one player twice; accounts logged in once and
-  shared by a bot's instances). To do: groups (plain ones that
-  start together, and a leader with its guards) with settings that impose on
-  their instances, a global layer on top; the food, break and toggle lists
-  editable from the launcher and live, as one JSON on the server; a graphical
-  front end on the same code; and a run on Windows.
+  shared by a bot's instances; a bot's rules — toggles, food, blocks — in three
+  layers kept on the server and editable from the launcher and the game, live).
+  To do: groups (plain ones that start together, and a leader with its guards)
+  with settings and rules that impose on their instances; a graphical front end
+  on the same code; and a run on Windows.
 - **Add-ons**: separate jars that teach the bots one mod each. The first one is
   there, `addons/veil` (compatibility: Veil without a GPU); the next ones teach
   *abilities* (`marionette-create`, `marionette-watut`...). To do for those: the

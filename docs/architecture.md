@@ -103,7 +103,7 @@ a **server command**:
   never fires later.
 - The **owner** lives in the bot's own `owner` file: it follows the bot to any
   server and cannot be changed from the game. **Admins** and the **hear list**
-  are per server, kept in `marionette_bots.properties`. Operators get nothing
+  are per server, kept in `marionette_bots.json`. Operators get nothing
   by default, because a bot belongs to its owner and not to the server.
   Permission nodes (`marionette.bot.*`) let a permissions mod grant more.
 - The brain has **no tool** that writes any of it. It keeps the ones that
@@ -128,15 +128,35 @@ Two kinds of writing looked alike and are not:
 bounds the damage: talk the brain into something strange and the worst it can do
 is mislabel a chest.
 
-The settings the server decided are kept in `marionette_bots.properties` and
-travel as orders in the same `/control` poll that carries shutdown — with an
-argument, `pref hunt_players=true` or `food ban:rotten_flesh`. Only what a command
-touched is stored: anything else keeps the body's own default, from
-`common/Settings.java`, which **both sides read** so a key cannot exist on one
-and not the other. When a bridge reports after a silence it is taken as a new
-one, and everything the server holds is queued again — a bot that restarts comes
-back as the commands left it, and a setting decided while it was off is not
-lost.
+### Rules, in three layers
+
+The toggles, the food ban and the break whitelist are a bot's **rules**, kept by
+the server in `marionette_bots.json` in three layers (`server/Rules.java`):
+
+- **base**, what the bot is: its config and its server's, sent by the launcher;
+- **own**, edited by `/marionette bot` and by the launcher — one copy, the
+  server's, so the launcher sends *changes* to it and never a copy that would
+  undo what was changed in the game;
+- **imposed**, from the launcher's global config (and groups, later). A command
+  that tries to change something imposed is refused and says who imposes it.
+
+A layer names only what it decides, the stronger one wins where two name the
+same thing, and lists add up unless a layer *replaces* one. What no layer names
+keeps what every bot starts with, from `common/Settings.java`, which **both
+sides read** so a key cannot exist on one and not the other. The launcher works
+the layers out the same way (`launcher/rules.py`), and both are held to one set
+of cases (`mod/src/test/resources/marionette/rules-cases.json`).
+
+The body is not told the layers, nor changes: every `/control` answer carries
+what the rules **come to**, whole — every toggle, each list entire — and the
+bridge hands it to the body (`/rules`) the first time and whenever it changes.
+The body then holds exactly that, whatever its own files said. So a change in
+the launcher reaches a running bot within a poll, a bot that restarts comes back
+as decided, and one that drifted comes back in line within minutes (the bridge
+sends them again every ten, changed or not). (It was orders once, queued
+when a bridge reported after a silence; the report happens in the same request
+that says where the orders start, so the bridge never saw them. Carrying the
+state has no such race.)
 
 The only lock left that depends on who spoke is eating banned food, and there
 the name comes from the bridge (`MARIONETTE_SPEAKER`), never from the brain.

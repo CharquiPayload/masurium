@@ -40,7 +40,7 @@ FAKE_JAVA.chmod(FAKE_JAVA.stat().st_mode | stat.S_IEXEC)
 
 sys.path.insert(0, str(REPO))
 from launcher import cli, doctor, operations as ops, settings  # noqa: E402
-from launcher import bots, files, keeper, packs, processes  # noqa: E402
+from launcher import bots, files, keeper, packs, processes, rules  # noqa: E402
 from launcher.events import Fail  # noqa: E402
 from launcher.workspace import DEFAULT_HEAP, DEFAULT_VERSION, FIRST_PORT, Workspace  # noqa: E402
 
@@ -149,11 +149,12 @@ def quick_server_env():
                                     "MARIONETTE_TOKEN=t\n")
 
 
-def serve_a_server_mod(players=(), token="t"):
+def serve_a_server_mod(players=(), token="t", store=None):
     """server.env pointed at a fake server mod that answers, with `players`
-    connected: what `start` needs to get past its first question. Returns the
-    HTTP server, to shut down."""
-    httpd, port = fake_server_mod(token, list(players))
+    connected: what `start` needs to get past its first question. With a
+    `store`, it keeps rules in it too (see fake_server_mod). Returns the HTTP
+    server, to shut down."""
+    httpd, port = fake_server_mod(token, list(players), store)
     (TMP / "server.env").write_text(f"MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT={port}\n"
                                     "MARIONETTE_TOKEN=t\n")
     return httpd
@@ -1266,17 +1267,49 @@ def tests_settings():
 
 # --- one server mod per server ------------------------------------------------
 
-def fake_server_mod(token, players):
+def fake_server_mod(token, players, store=None):
     """A server mod that answers /players and /mods, with a token, on a port
-    of its own; returns (the HTTP server, its port)."""
+    of its own; returns (the HTTP server, its port). With a `store` (a dict)
+    it also keeps bots' rules there, as the real one does: player -> its three
+    layers, plus "_asked", every /rules query in order."""
     import http.server
     import threading
+    import urllib.parse
+
+    def rules_answer(query):
+        q = {k: v[0] for k, v in urllib.parse.parse_qs(query).items()}
+        store.setdefault("_asked", []).append(q)
+        bot = q.get("bot", "").lower()
+        if "layer" in q and "set" not in q and bot not in store:
+            return 400, {"ok": False, "error": f"this server does not know {bot} yet"}
+        if "layer" in q:
+            held = store.setdefault(bot, {n: {} for n in rules.LAYERS})
+            if "set" in q:
+                held[q["layer"]] = json.loads(q["set"])
+            else:
+                try:
+                    own, _ = rules.edit(rules.parse(held["own"]),
+                                        rules.pretty_change(q["kind"], q["key"], q["value"]))
+                except Fail as e:
+                    return 400, {"ok": False, "error": str(e)}
+                held["own"] = rules.dump(own)
+        if bot not in store:
+            return 200, {"ok": False, "error": "this server does not know that bot yet"}
+        held = store[bot]
+        layers = [rules.parse(held[n]) for n in rules.LAYERS]
+        return 200, {"ok": True, "bot": bot, **held, "effective": rules.effective(*layers)}
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             if self.headers.get("X-Marionette-Token") != token:
                 self.send_response(401)
                 self.end_headers()
+                return
+            if self.path.startswith("/rules?") and store is not None:
+                code, answer = rules_answer(self.path.split("?", 1)[1])
+                self.send_response(code)
+                self.end_headers()
+                self.wfile.write(json.dumps(answer).encode())
                 return
             if self.path == "/players":
                 body = json.dumps({"players": players})
@@ -1395,6 +1428,196 @@ def tests_phrases():
         inst.bridge_lock.unlink()
     text, code = run_cli("phrases", "alice")
     check("`marionette.py phrases <instance>` is the command", code == 0 and "sentences" in text, text)
+
+
+# --- rules ------------------------------------------------------------------
+
+def tests_rules_model():
+    print("\nRules: three layers, worked out as the server mod works them out")
+    cases = json.loads((REPO / "mod/src/test/resources/marionette/rules-cases.json").read_text())
+    for case in cases["cases"]:
+        layers = [rules.parse(case[n]) for n in rules.LAYERS]
+        held = rules.effective(*layers)
+        good = (all(held["prefs"][k] == v for k, v in case["prefs"].items())
+                and held["food_banned"] == case["food_banned"]
+                and held["break_allowed"] == case["break_allowed"]
+                and all(rules.source(*layers, fam, key)[0] == who for fam, key, who in case["sources"]))
+        check(f"the shared case: {case['name']}", good, f"{held}")
+
+    java = (REPO / "mod/src/main/java/marionette/common/Settings.java").read_text()
+    import re
+    theirs = {k: v == "true" for k, v in re.findall(r'toggle\("([a-z_]+)", (true|false),', java)}
+    check("the toggles and their defaults are the server mod's", theirs == rules.TOGGLES,
+          f"{sorted(set(theirs.items()) ^ set(rules.TOGGLES.items()))}")
+    for family, constant in (("food", "FOOD_FACTORY"), ("break", "BREAK_SEED")):
+        m = re.search(constant + r" =\s*List\.of\(([^)]*)\)", java)
+        ids = tuple(re.findall(r'"([a-z_]+)"', m.group(1))) if m else ()
+        check(f"what the {family} list starts with is the server mod's", ids == rules.FAMILIES[family][2], ids)
+
+    for bad in ({"prefz": {}}, {"prefs": {"hunt_playerz": True}}, {"prefs": {"hunt_players": "yes"}},
+                {"food": {"veto": ["beef"]}}, {"food": {"ban": ["create:gear"]}},
+                {"food": {"ban": ["beef"], "allow": ["beef"]}}, {"break": {"replace": 1}}, []):
+        check(f"refused: {json.dumps(bad)}", fails(rules.parse, bad) is not None)
+    layer = rules.parse({"food": {"ban": ["minecraft:Beef"]}, "prefs": {"Hunt_Players": True}})
+    check("ids lose minecraft: and case; toggles their case",
+          rules.dump(layer) == {"prefs": {"hunt_players": True}, "food": {"ban": ["beef"]}}, rules.dump(layer))
+
+    layer, change = rules.edit(rules.empty(), ["pref", "hunt_players", "on"])
+    check("pref <toggle> on", layer["prefs"] == {"hunt_players": True} and change == ("pref", "hunt_players", "on"))
+    layer, change = rules.edit(layer, ["pref", "hunt_players", "default"])
+    check("...and default takes it out", layer["prefs"] == {} and change[2] == "default")
+    layer, change = rules.edit(layer, ["food", "ban", "Rotten_Flesh"])
+    check("food ban <item>", layer["food"] == {"rotten_flesh": True} and change == ("food", "rotten_flesh", "ban"))
+    layer, _ = rules.edit(layer, ["food", "allow", "rotten_flesh"])
+    check("...allow on the same item replaces the ban", layer["food"] == {"rotten_flesh": False})
+    layer, change = rules.edit(layer, ["break", "replace"])
+    check("break replace", "break" in layer["replace"] and change == ("break", "*", "replace"))
+    layer, _ = rules.edit(layer, ["break", "add"])
+    check("...and add undoes it", "break" not in layer["replace"])
+    for words in (["pref", "hunt_playerz", "on"], ["pref", "hunt_players", "maybe"], ["food", "forbid", "x"],
+                  ["food", "ban", "not an id"], ["mood", "on"], []):
+        check(f"refused words: {' '.join(words) or '(none)'}", fails(rules.edit, rules.empty(), words) is not None)
+    check("a change reads as it is said",
+          rules.pretty_change("food", "beef", "ban") == ["food", "ban", "beef"]
+          and rules.pretty_change("pref", "hunt_players", "on") == ["pref", "hunt_players", "on"]
+          and rules.pretty_change("break", "*", "replace") == ["break", "replace"])
+
+
+def tests_rules():
+    print("\nRules in the launcher: the bot's, the server's and the global ones, sent to the server")
+    ops.create(WS, "Rulesy", "test", account="offline")
+    inst, bot = WS.instance("rulesy"), WS.bot("rulesy")
+    store = {}
+    httpd = serve_a_server_mod(store=store)
+    try:
+        text, result = said(ops.edit_layer, WS, ["food", "ban", "beef"], bot=bot)
+        check("--bot: the change goes to bot.json",
+              bot.data.get("rules") == {"food": {"ban": ["beef"]}} and "bot rulesy: food ban beef" in text, text)
+        check("...and the instances not running get it when they start", "on their next start" in text, text)
+        said(ops.edit_layer, WS, ["pref", "tame_wolves", "off"], slug="test")
+        check("--server: the change goes to servers/<slug>/rules.json",
+              json.loads((TMP / "servers/test/rules.json").read_text()) == {"prefs": {"tame_wolves": False}})
+        said(ops.edit_layer, WS, ["pref", "hunt_players", "off"])
+        check("--global: the change goes to launcher.json",
+              WS.config().get("rules") == {"prefs": {"hunt_players": False}}, WS.config())
+        base = rules.base_of(inst)
+        check("the base is the bot's with its server's on top",
+              base["food"] == {"beef": True} and base["prefs"] == {"tame_wolves": False})
+        imposed = rules.imposed_of(inst)
+        check("the global rules are imposed, and say they come from the global config",
+              imposed["prefs"] == {"hunt_players": False}
+              and imposed["from"] == {"prefs.hunt_players": "global"}, imposed)
+
+        view = ops.show_rules(inst)
+        check("before its first start its server has not seen it, and says so",
+              "has not seen it yet" in view.note, view.note)
+        text, result = said(ops.edit_rules, inst, ["pref", "hunt_players", "on"])
+        check("a change imposed by the global rules is refused, saying who, before asking the server",
+              isinstance(result, Fail) and result.code == "imposed" and "imposed by global" in text
+              and "rulesy" not in store, text)
+        text, result = said(ops.edit_rules, inst, ["food", "ban", "salmon"])
+        check("a change to its own rules goes to its server, which learns of it from its config first",
+              result == "sent" and store["rulesy"]["own"] == {"food": {"ban": ["salmon"]}}
+              and store["rulesy"]["base"] == rules.dump(base)
+              and store["rulesy"]["imposed"] == rules.dump(imposed), f"{text} {store.get('rulesy')}")
+        check("...said as it is typed, and when it applies",
+              "rulesy: food ban salmon" in text and "when it starts" in text, text)
+
+        view = ops.show_rules(inst)
+        toggles = {k: (on, who) for k, on, who in view.toggles}
+        food = dict(view.lists[0][1])
+        check("shown: each toggle with who decides it",
+              toggles["hunt_players"] == (False, "imposed by global")
+              and toggles["tame_wolves"] == (False, "its config") and toggles["sleep_alone"] == (True, ""),
+              toggles)
+        check("shown: each list whole, each id with who put it there",
+              food == {"beef": "its config", "salmon": "set here", "golden_apple": "",
+                       "enchanted_golden_apple": ""}, food)
+        check("shown: nothing to say when the server holds what the launcher does", view.note == "", view.note)
+        said(ops.edit_layer, WS, ["food", "ban", "cod"], bot=bot)
+        check("...and a note when it holds an older config, which goes on the next start",
+              "older config" in ops.show_rules(inst).note)
+
+        text, code = run_cli("rules", "rulesy")
+        check("`marionette.py rules <instance>` shows it",
+              code == 0 and "hunt_players" in text and "salmon (set here)" in text
+              and "imposed by global" in text, text)
+        text, code = run_cli("rules", "rulesy", "break", "forbid", "dirt")
+        check("`marionette.py rules <instance> <change>` changes its own",
+              code == 0 and store["rulesy"]["own"].get("break") == {"forbid": ["dirt"]}, text)
+        text, code = run_cli("rules", "--bot", "rulesy")
+        check("`rules --bot <bot>` shows the bot's layer", code == 0 and "food ban beef, cod" in text, text)
+        text, code = run_cli("rules", "--global", "pref", "hunt_players", "default")
+        check("`rules --global <change>` changes the global ones", code == 0 and WS.config() == {}, WS.config())
+    finally:
+        httpd.shutdown()
+
+    # Its server away: the change waits, and goes on the next start.
+    quick_server_env()
+    text, result = said(ops.edit_rules, inst, ["pref", "sleep_alone", "off"])
+    check("with its server away, a change to its own waits in the instance's folder",
+          result == "waiting" and rules.pending(inst) == [{"kind": "pref", "key": "sleep_alone", "value": "off"}]
+          and "next start" in text, text)
+    said(ops.edit_rules, inst, ["food", "default", "salmon"])
+    check("...and the next one waits behind it, in order", len(rules.pending(inst)) == 2)
+    view = ops.show_rules(inst)
+    check("shown without its own layer, saying why, with what waits",
+          "does not answer" in view.note and view.waiting == ("pref sleep_alone off", "food default salmon"),
+          view)
+    check("doctor counts what waits", any("2 rule change(s) waiting" in c.detail
+                                          for c in doctor.checks(WS) if c.label == "instances/rulesy"))
+
+    store.clear()
+    httpd = serve_a_server_mod(store=store)
+    WS.environ["MARIONETTE_JAVA"] = str(TMP / "no-such-java")
+    try:
+        text, result = said(ops.start, inst)
+        check("start sends its config, the global rules and what waited, before the game",
+              store["rulesy"]["base"] == rules.dump(rules.base_of(inst))
+              and store["rulesy"]["own"] == {"prefs": {"sleep_alone": False}}
+              and not rules.pending(inst) and "could not run" in text, f"{text} {store.get('rulesy')}")
+        check("...saying what waited", "sent: pref sleep_alone off" in text, text)
+        bot.save({**bot.data, "rules": {"prefs": {"fly": True}}})
+        text, result = said(ops.start, inst)
+        check("a rule written wrong stops the start, saying where",
+              isinstance(result, Fail) and result.code == "bad_rules" and "bot.json" in text
+              and "fly" in text and "could not run" not in text, text)
+        check("...and doctor says it too", any(c.label == "bots/rulesy" and c.ok is False and "fly" in c.detail
+                                                for c in doctor.checks(WS)))
+        rules.save_bot(bot, rules.empty())
+
+        # A clone elsewhere carries a copy of its own rules; one that is the
+        # same player on the same server shares them.
+        second_server("elsewhere")
+        text, clone = said(ops.clone_instance, WS, "rulesy", slug="elsewhere")
+        check("a clone on another server takes a copy of its own rules, sent on its first start",
+              rules.pending(clone) == [{"set": {"prefs": {"sleep_alone": False}}}]
+              and "go with it" in text, text)
+        text, twin = said(ops.clone_instance, WS, "rulesy")
+        check("...one on the same server, the same player, shares them",
+              "shares its own rules" in text and not rules.pending(twin), text)
+    finally:
+        WS.environ["MARIONETTE_JAVA"] = str(FAKE_JAVA)
+        httpd.shutdown()
+
+    old = serve_a_server_mod()
+    try:
+        text, result = said(ops.edit_rules, inst, ["pref", "sleep_alone", "on"])
+        check("a server mod older than the rules says so",
+              isinstance(result, Fail) and result.code == "old_server_mod" and "deploy-mod" in text, text)
+    finally:
+        old.shutdown()
+    set_text, _ = said(ops.configure, inst, "ignore_global", "yes")
+    WS.save_config({"rules": {"prefs": {"hunt_players": True}}})
+    check("an instance that ignores the global rules has nothing imposed",
+          rules.is_empty(rules.imposed_of(inst)) and "ignore_global = yes" in set_text, set_text)
+    WS.config_file.unlink()
+    for key in (clone.key, twin.key, "rulesy"):
+        remove_tree(WS.instance(key).dir)
+    remove_tree(bot.dir)
+    (TMP / "servers/test/rules.json").unlink(missing_ok=True)
+    remove_tree(TMP / "servers" / "elsewhere")
+    layout()
 
 
 # --- accounts ---------------------------------------------------------------
@@ -1642,6 +1865,8 @@ if __name__ == "__main__":
     tests_server_apis()
     tests_phrases()
     tests_accounts()
+    tests_rules_model()
+    tests_rules()
     tests_migrate()
     tests_cli()
 

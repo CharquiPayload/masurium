@@ -281,6 +281,7 @@ public class MarionetteBot {
             http.createContext("/step_aside", x -> attend(x, this::stepAsideNow));
             http.createContext("/preferences",
                     x -> attend(x, this::preferences));
+            http.createContext("/rules", x -> attend(x, this::rules));
             http.createContext("/furnace", x -> attend(x, this::furnace));
             http.createContext("/places", x -> attend(x, this::places));
             http.createContext("/chest", x -> attend(x, this::chest));
@@ -3252,6 +3253,67 @@ public class MarionetteBot {
     }
 
     /**
+     * The rules the server holds for this bot, whole: every toggle, the food it does not
+     * eat on its own and the blocks it may break on its own. The bridge sends them when
+     * it starts and whenever they change, and this body then holds exactly that, whatever
+     * its own files said: they are decided on the server (BotAccess and Rules there), by
+     * the launcher and by {@code /marionette bot}. Without {@code set}, what it holds.
+     *
+     * <p>An id this game does not have is left out and said, not kept: it would read as
+     * a rule and govern nothing.
+     */
+    private String rules(Map<String, String> q) {
+        List<String> changed = new ArrayList<>();
+        List<String> unknown = new ArrayList<>();
+        String set = q.get("set");
+        if (set != null) {
+            Map<String, Object> r = marionette.common.Json.object(set);
+            if (r.get("prefs") instanceof Map<?, ?> prefs) {
+                Map<String, Boolean> values = new java.util.TreeMap<>();
+                prefs.forEach((k, v) -> {
+                    if (v instanceof Boolean b) values.put(String.valueOf(k), b);
+                });
+                changed.addAll(Preferences.hold(values));
+            }
+            if (r.get("food_banned") instanceof List<?> food) {
+                FoodBlacklist.hold(known(food, BuiltInRegistries.ITEM, unknown))
+                        .forEach(c -> changed.add(c + " food"));
+            }
+            if (r.get("break_allowed") instanceof List<?> blocks) {
+                BreakPermissions.hold(known(blocks, BuiltInRegistries.BLOCK, unknown))
+                        .forEach(c -> changed.add(c + " break"));
+            }
+            if (!changed.isEmpty()) {
+                Logbook.note("rules", "my rules changed: " + String.join(", ", changed));
+            }
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("ok", true);
+        out.put("changed", changed);
+        out.put("unknown", unknown);
+        out.put("prefs", Preferences.allItems());
+        out.put("food_banned", FoodBlacklist.list());
+        out.put("break_allowed", BreakPermissions.own());
+        return marionette.common.Json.write(out);
+    }
+
+    /** The ids of that registry among these; the rest go to {@code unknown}. */
+    private static List<String> known(List<?> ids, net.minecraft.core.Registry<?> registry,
+                                      List<String> unknown) {
+        List<String> out = new ArrayList<>();
+        for (Object o : ids) {
+            String id = String.valueOf(o).strip().toLowerCase();
+            var rl = net.minecraft.resources.ResourceLocation.tryParse("minecraft:" + id);
+            if (rl != null && registry.containsKey(rl)) {
+                out.add(id);
+            } else {
+                unknown.add(id);
+            }
+        }
+        return out;
+    }
+
+    /**
      * Uses a furnace: {@code mode} = load, take out or look. Loading puts in ALL the
      * stacks it carries of the requested item (and of the fuel, if given); the game's
      * menu routes them by itself. The immediate answer is "on it" (the menu takes a round
@@ -3752,7 +3814,7 @@ public class MarionetteBot {
      */
     private static final List<String> LOOK_ONLY = List.of(
             "/state", "/logbook", "/needs", "/inventory", "/light",
-            "/places", "/permissions", "/preferences", "/orders", "/diary",
+            "/places", "/permissions", "/preferences", "/rules", "/orders", "/diary",
             "/people", "/selection", "/look", "/version");
 
     private void attend(HttpExchange x, RouteHandler m) throws IOException {

@@ -17,9 +17,11 @@ import java.util.TreeMap;
  * the command has to be able to say what it is about to switch. Whoever adds a key writes
  * its line here.
  *
- * <p>What is NOT here: the food list, the break whitelist and the trash list. Those are
- * lists of item ids, not toggles, and two of them are governed by the server while the
- * trash one stays with the bot — see {@code docs/architecture.md}.
+ * <p>The food list and the break whitelist are lists of ids, not toggles, but what they
+ * start with is here too, for the same reason: the body starts from them and the server
+ * works out, from them and a bot's rules, the whole list the body must hold. The trash
+ * list is not: it only governs the bot's own backpack and stays with the bot — see
+ * {@code docs/architecture.md}.
  */
 public final class Settings {
 
@@ -108,6 +110,20 @@ public final class Settings {
         Toggle t = TOGGLES.get(key);
         return t != null && t.byDefault();
     }
+
+    /**
+     * The food a bot does not eat on its own before anyone says anything: what is
+     * expensive to replace and almost always meant for something else.
+     */
+    public static final List<String> FOOD_FACTORY =
+            List.of("enchanted_golden_apple", "golden_apple");
+
+    /**
+     * The blocks a bot may break on its own before anyone says anything: the common
+     * ground that is in the way everywhere and worth nothing.
+     */
+    public static final List<String> BREAK_SEED =
+            List.of("cobblestone", "dirt", "grass_block", "stone");
 
     /** Every toggle with its default: what a bot behaves like out of the box. */
     public static Map<String, Boolean> defaults() {

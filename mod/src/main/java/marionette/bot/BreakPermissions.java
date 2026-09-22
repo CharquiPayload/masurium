@@ -15,8 +15,10 @@ import java.util.TreeSet;
  * things may be touched, the build opt-in says WHEN, and this list says WHAT. The spatial
  * limit alone does not protect against digging what must not be dug INSIDE the box.
  *
- * <p>The AI manages the list itself through the chat ("you may break dirt"), but the LOCK
- * is here, in the mod. It only rules where the bot breaks WITHOUT being asked: the Walker
+ * <p>The list is decided on the server — the bot's rules, from the launcher and from
+ * {@code /marionette bot <bot> break allow|forbid <block>} — and arrives through the
+ * bridge, whole ({@link #hold}). The LOCK is here, in the mod. It only rules where the bot
+ * breaks WITHOUT being asked: the Walker
  * when going through a plug and {@link ClientWorld#breakable} when planning the route.
  * What it is TOLD to dig, gather, mine or clear is broken without looking at the list:
  * the order already is the permission ({@link Miner#begin} does not check it).
@@ -36,9 +38,8 @@ final class BreakPermissions {
         return ServerIdentity.file("permissions");
     }
 
-    /** The seed if the file does not exist. */
-    private static final List<String> SEED = List.of(
-            "stone", "cobblestone", "grass_block", "dirt");
+    /** The seed if the file does not exist (the server starts from the same one). */
+    private static final List<String> SEED = marionette.common.Settings.BREAK_SEED;
 
     /** Sorted so the list always reads the same. */
     private static TreeSet<String> list;
@@ -71,8 +72,8 @@ final class BreakPermissions {
         try {
             Files.createDirectories(file().getParent());
             List<String> lines = new ArrayList<>();
-            lines.add("# Blocks the bot is allowed to break.");
-            lines.add("# Managed by the AI through the chat; the lock is in Miner.");
+            lines.add("# Blocks the bot is allowed to break on its own.");
+            lines.add("# Written from the server's rules for this bot; edits here are replaced.");
             lines.addAll(list);
             Files.write(file(), lines);
         } catch (IOException e) {
@@ -170,6 +171,29 @@ final class BreakPermissions {
         boolean was = load().remove(id);
         if (was) save();
         return was;
+    }
+
+    /**
+     * Holds exactly this list: what the server's rules come to.
+     *
+     * @return what changed, as {@code +id} (allowed now) and {@code -id} (not any more)
+     */
+    static synchronized List<String> hold(java.util.Collection<String> ids) {
+        TreeSet<String> want = new TreeSet<>();
+        for (String id : ids) want.add(id.strip().toLowerCase());
+        TreeSet<String> have = load();
+        List<String> changed = new ArrayList<>();
+        for (String id : want) {
+            if (!have.contains(id)) changed.add("+" + id);
+        }
+        for (String id : have) {
+            if (!want.contains(id)) changed.add("-" + id);
+        }
+        if (!changed.isEmpty()) {
+            list = want;
+            save();
+        }
+        return changed;
     }
 
     static synchronized List<String> own() {

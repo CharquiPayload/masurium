@@ -1,0 +1,69 @@
+{
+  "about": "How a bot's three layers of rules (base < own < imposed) come to what its body holds. Read by the server mod's tests (RulesTest) and the launcher's (launcher/tests.py): both work it out, and they must agree. prefs lists only the toggles a case looks at; the lists are whole. sources: [family, key, layer that decides it], family 'prefs' for a toggle.",
+  "cases": [
+    {
+      "name": "nothing set: what every bot starts with",
+      "base": {}, "own": {}, "imposed": {},
+      "prefs": {"hunt_players": false, "tame_wolves": true},
+      "food_banned": ["enchanted_golden_apple", "golden_apple"],
+      "break_allowed": ["cobblestone", "dirt", "grass_block", "stone"],
+      "sources": [["prefs", "hunt_players", "start"], ["food", "golden_apple", "start"]]
+    },
+    {
+      "name": "lists add up across layers",
+      "base": {"food": {"ban": ["beef"]}},
+      "own": {"food": {"ban": ["salmon"]}, "break": {"allow": ["oak_log"]}},
+      "imposed": {"break": {"allow": ["birch_log"]}},
+      "prefs": {},
+      "food_banned": ["beef", "enchanted_golden_apple", "golden_apple", "salmon"],
+      "break_allowed": ["birch_log", "cobblestone", "dirt", "grass_block", "oak_log", "stone"],
+      "sources": [["food", "beef", "base"], ["food", "salmon", "own"], ["break", "birch_log", "imposed"]]
+    },
+    {
+      "name": "on the same thing, the stronger layer wins",
+      "base": {"prefs": {"hunt_players": true, "tame_wolves": false}, "food": {"ban": ["beef"]}},
+      "own": {"prefs": {"hunt_players": false}, "food": {"allow": ["beef"]}, "break": {"forbid": ["dirt"]}},
+      "imposed": {"prefs": {"tame_wolves": true}, "break": {"allow": ["dirt"]}, "from": {"prefs.tame_wolves": "global"}},
+      "prefs": {"hunt_players": false, "tame_wolves": true},
+      "food_banned": ["enchanted_golden_apple", "golden_apple"],
+      "break_allowed": ["cobblestone", "dirt", "grass_block", "stone"],
+      "sources": [["prefs", "hunt_players", "own"], ["prefs", "tame_wolves", "imposed"], ["food", "beef", "own"], ["break", "dirt", "imposed"]]
+    },
+    {
+      "name": "what every bot starts with can be taken off",
+      "base": {}, "own": {"food": {"allow": ["golden_apple"]}, "break": {"forbid": ["grass_block"]}}, "imposed": {},
+      "prefs": {},
+      "food_banned": ["enchanted_golden_apple"],
+      "break_allowed": ["cobblestone", "dirt", "stone"],
+      "sources": [["food", "golden_apple", "own"], ["food", "enchanted_golden_apple", "start"]]
+    },
+    {
+      "name": "a replacing layer drops everything under it, the starting list included",
+      "base": {"food": {"ban": ["beef"]}},
+      "own": {"food": {"ban": ["cod"]}},
+      "imposed": {"food": {"ban": ["salmon"], "replace": true}, "from": {"food.*": "group team"}},
+      "prefs": {},
+      "food_banned": ["salmon"],
+      "break_allowed": ["cobblestone", "dirt", "grass_block", "stone"],
+      "sources": [["food", "beef", "imposed"], ["food", "golden_apple", "imposed"], ["food", "salmon", "imposed"]]
+    },
+    {
+      "name": "the layers above a replacing one still add to it",
+      "base": {"break": {"allow": ["spruce_log"]}},
+      "own": {"break": {"allow": ["oak_log"], "replace": true}},
+      "imposed": {"break": {"allow": ["birch_log"]}},
+      "prefs": {},
+      "food_banned": ["enchanted_golden_apple", "golden_apple"],
+      "break_allowed": ["birch_log", "oak_log"],
+      "sources": [["break", "stone", "own"], ["break", "spruce_log", "own"], ["break", "birch_log", "imposed"]]
+    },
+    {
+      "name": "replacing with nothing leaves the list empty",
+      "base": {}, "own": {}, "imposed": {"food": {"replace": true}},
+      "prefs": {},
+      "food_banned": [],
+      "break_allowed": ["cobblestone", "dirt", "grass_block", "stone"],
+      "sources": [["food", "golden_apple", "imposed"]]
+    }
+  ]
+}

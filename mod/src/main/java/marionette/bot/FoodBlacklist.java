@@ -20,10 +20,11 @@ import java.util.Set;
  * own, by hand yes.
  *
  * <p>It is born with the two golden apples inside, which is what nobody wants to see
- * disappear in a hunger dip. The rest is decided on the server, with
- * {@code /marionette bot <bot> food ban|allow <item>}, and arrives as an order through the
- * bridge: the brain has no tool that writes this list. Asking the bot to ban something
- * used to be enough, and "only the owner may" was a sentence in its prompt.
+ * disappear in a hunger dip. The rest is decided on the server — the bot's rules, from the
+ * launcher and from {@code /marionette bot <bot> food ban|allow <item>} — and arrives
+ * through the bridge, whole ({@link #hold}): the brain has no tool that writes this list.
+ * Asking the bot to ban something used to be enough, and "only the owner may" was a
+ * sentence in its prompt.
  *
  * <p>Per server, like permissions and preferences: fish is an errand in one world and a
  * snack in another.
@@ -32,12 +33,8 @@ final class FoodBlacklist {
 
     private FoodBlacklist() {}
 
-    /**
-     * What the list is born with. What is expensive to replace and almost always meant
-     * for something else.
-     */
-    private static final List<String> FACTORY =
-            List.of("golden_apple", "enchanted_golden_apple");
+    /** What the list is born with (the server starts from the same one). */
+    private static final List<String> FACTORY = marionette.common.Settings.FOOD_FACTORY;
 
     private static Path file() {
         return ServerIdentity.file("vetoed-food");
@@ -99,6 +96,29 @@ final class FoodBlacklist {
         boolean was = load().remove(id.strip().toLowerCase());
         if (was) save();
         return was;
+    }
+
+    /**
+     * Holds exactly this list: what the server's rules come to.
+     *
+     * @return what changed, as {@code +id} (banned now) and {@code -id} (not any more)
+     */
+    static synchronized List<String> hold(java.util.Collection<String> ids) {
+        Set<String> want = new LinkedHashSet<>();
+        for (String id : ids) want.add(id.strip().toLowerCase());
+        Set<String> have = load();
+        List<String> changed = new ArrayList<>();
+        for (String id : want) {
+            if (!have.contains(id)) changed.add("+" + id);
+        }
+        for (String id : have) {
+            if (!want.contains(id)) changed.add("-" + id);
+        }
+        if (!changed.isEmpty()) {
+            bannedOnes = want;
+            save();
+        }
+        return changed;
     }
 
     static synchronized List<String> list() {

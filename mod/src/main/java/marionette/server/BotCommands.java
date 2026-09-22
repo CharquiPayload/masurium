@@ -44,16 +44,21 @@ import marionette.server.BotAccess.Action;
  *       {@code on} = only its list, {@code off} = everyone.
  *   <li>{@code hear list}: the list and whether it is on. Anyone may look.
  *   <li>{@code admins add <player> | remove <player>}: the owner only.
- *   <li>{@code pref}: every behaviour toggle with its value. Anyone may look.
- *       {@code pref <key>} explains one; {@code pref <key> on|off} switches it, owner or
- *       admin. The keys are offered by tab completion and come from {@link
+ *   <li>{@code pref}: every behaviour toggle with its value and where it comes from.
+ *       Anyone may look. {@code pref <key>} explains one; {@code pref <key> on|off}
+ *       switches it and {@code pref <key> default} takes it back to what its config says,
+ *       owner or admin. The keys are offered by tab completion and come from {@link
  *       marionette.common.Settings}, the same table the body reads.
- *   <li>{@code food}: what it will not eat on its own. {@code food ban <item>} and
- *       {@code food allow <item>}, owner or admin.
- *   <li>{@code break}: what it may break by itself to make its way. {@code break allow
- *       <block>} and {@code break forbid <block>}, owner or admin. What it is TOLD to dig
- *       never needed permission.
+ *   <li>{@code food}: what it will not eat on its own. {@code food ban|allow|default
+ *       <item>}, owner or admin.
+ *   <li>{@code break}: what it may break by itself to make its way. {@code break
+ *       allow|forbid|default <block>}, owner or admin. What it is TOLD to dig never needed
+ *       permission.
  * </ul>
+ *
+ * <p>These three edit the bot's OWN layer of rules (see {@link Rules}). Its config and
+ * what a group or the launcher imposes come from the launcher; what is imposed cannot be
+ * changed from here, and the command says who imposes it.
  *
  * <p>The three settings families used to be changed by asking the bot in the chat. They
  * moved here for the same reason shutdown did: the brain's tools said "only on the owner's
@@ -127,9 +132,13 @@ final class BotCommands {
                         BuiltInRegistries.BLOCK.keySet(), b);
 
         SuggestionProvider<CommandSourceStack> banned =
-                (c, b) -> SharedSuggestionProvider.suggest(access.foodList(bot(c), true), b);
+                (c, b) -> SharedSuggestionProvider.suggest(onTheList(bot(c), Rules.Family.FOOD), b);
         SuggestionProvider<CommandSourceStack> allowed =
-                (c, b) -> SharedSuggestionProvider.suggest(access.breakList(bot(c), true), b);
+                (c, b) -> SharedSuggestionProvider.suggest(onTheList(bot(c), Rules.Family.BREAK), b);
+        SuggestionProvider<CommandSourceStack> ownFood =
+                (c, b) -> SharedSuggestionProvider.suggest(setHere(bot(c), Rules.Family.FOOD), b);
+        SuggestionProvider<CommandSourceStack> ownBreak =
+                (c, b) -> SharedSuggestionProvider.suggest(setHere(bot(c), Rules.Family.BREAK), b);
         SuggestionProvider<CommandSourceStack> none = (c, b) -> b.buildFuture();
 
         event.getDispatcher().register(Commands.literal("marionette")
@@ -168,19 +177,25 @@ final class BotCommands {
                                                 .then(Commands.literal("on")
                                                         .executes(c -> pref(c, true)))
                                                 .then(Commands.literal("off")
-                                                        .executes(c -> pref(c, false)))))
+                                                        .executes(c -> pref(c, false)))
+                                                .then(Commands.literal("default")
+                                                        .executes(c -> pref(c, null)))))
                                 .then(Commands.literal("food")
                                         .executes(this::foodList)
                                         .then(Commands.literal("ban").then(id(anyFood)
                                                 .executes(c -> food(c, true))))
                                         .then(Commands.literal("allow").then(id(banned)
-                                                .executes(c -> food(c, false)))))
+                                                .executes(c -> food(c, false))))
+                                        .then(Commands.literal("default").then(id(ownFood)
+                                                .executes(c -> food(c, null)))))
                                 .then(Commands.literal("break")
                                         .executes(this::breakList)
                                         .then(Commands.literal("allow").then(id(anyBlock)
                                                 .executes(c -> breaking(c, true))))
                                         .then(Commands.literal("forbid").then(id(allowed)
-                                                .executes(c -> breaking(c, false))))))));
+                                                .executes(c -> breaking(c, false))))
+                                        .then(Commands.literal("default").then(id(ownBreak)
+                                                .executes(c -> breaking(c, null))))))));
         LOG.info("[marionette] /marionette bot command registered");
     }
 
@@ -406,23 +421,41 @@ final class BotCommands {
                 : " (its bridge is not answering; it will be applied when it comes back)";
     }
 
+    /** What is on a list now, whatever put it there: what undoing can take off. */
+    private List<String> onTheList(String bot, Rules.Family family) {
+        Rules r = access.rules(bot);
+        return r == null ? List.of() : List.copyOf(r.effective().list(family));
+    }
+
+    /** What the bot's own layer names on a list: what {@code default} can take out. */
+    private List<String> setHere(String bot, Rules.Family family) {
+        Rules r = access.rules(bot);
+        return r == null ? List.of() : List.copyOf(r.layer(Rules.OWN).list(family).keySet());
+    }
+
+    /** " (set here)", " (imposed by global)"...; nothing for what every bot starts with. */
+    private static String why(Rules r, Rules.Family family, String key) {
+        String said = r.source(family, key).say();
+        return said.isEmpty() ? "" : " (" + said + ")";
+    }
+
     private int prefList(CommandContext<CommandSourceStack> c) {
         String bot = bot(c);
         CommandSourceStack s = c.getSource();
         if (!known(s, bot)) return 0;
-        Map<String, Boolean> set = access.prefs(bot);
+        Rules r = access.rules(bot);
+        Map<String, Boolean> now = r.effective().prefs();
         MutableComponent m = Component.literal("settings of " + access.display(bot))
                 .withStyle(ChatFormatting.AQUA);
+        int named = 0;
         for (String key : marionette.common.Settings.keys()) {
-            boolean value = set.containsKey(key)
-                    ? set.get(key) : marionette.common.Settings.byDefault(key);
-            boolean changed = set.containsKey(key);
-            m.append(Component.literal("\n  " + key + ": " + (value ? "on" : "off")
-                    + (changed ? " (set here)" : ""))
-                    .withStyle(changed ? ChatFormatting.WHITE : ChatFormatting.GRAY));
+            String why = why(r, null, key);
+            if (!why.isEmpty()) named++;
+            m.append(Component.literal("\n  " + key + ": " + (now.get(key) ? "on" : "off") + why)
+                    .withStyle(why.isEmpty() ? ChatFormatting.GRAY : ChatFormatting.WHITE));
         }
         s.sendSuccess(() -> m, false);
-        return set.size();
+        return named;
     }
 
     private int prefOne(CommandContext<CommandSourceStack> c) {
@@ -436,51 +469,69 @@ final class BotCommands {
                     + String.join(", ", marionette.common.Settings.keys()));
             return 0;
         }
-        Map<String, Boolean> set = access.prefs(bot);
-        boolean value = set.containsKey(key)
-                ? set.get(key) : marionette.common.Settings.byDefault(key);
-        String line = key + ": " + (value ? "on" : "off")
-                + (set.containsKey(key) ? " (set here)" : " (its default)")
+        Rules r = access.rules(bot);
+        String why = why(r, null, key);
+        String line = key + ": " + (r.effective().prefs().get(key) ? "on" : "off")
+                + (why.isEmpty() ? " (its default)" : why)
                 + "\n  " + does;
         s.sendSuccess(() -> Component.literal(line).withStyle(ChatFormatting.AQUA), false);
         return 1;
     }
 
-    private int pref(CommandContext<CommandSourceStack> c, boolean value) {
+    private int pref(CommandContext<CommandSourceStack> c, Boolean value) {
         String bot = bot(c);
         if (!allowed(c, bot, Action.PREF)) return 0;
         String key = StringArgumentType.getString(c, "key").toLowerCase();
         CommandSourceStack s = c.getSource();
         String bad = access.pref(bot, key, value, runner(s), System.currentTimeMillis());
         if (bad != null) {
-            fail(s, bad + ". There are: "
+            fail(s, marionette.common.Settings.known(key) ? bad : bad + ". There are: "
                     + String.join(", ", marionette.common.Settings.keys()));
             return 0;
         }
+        Rules r = access.rules(bot);
+        boolean now = r.effective().prefs().get(key);
         LOG.info("[marionette] {} of {} set to {} by {}", key, access.display(bot),
-                value, runner(s));
-        done(s, access.display(bot) + ": " + key + " is now " + (value ? "on" : "off")
-                + whenItApplies(bot));
+                value == null ? "default" : value, runner(s));
+        String why = why(r, null, key);
+        done(s, access.display(bot) + ": " + key + (value == null
+                ? " is back to " + (now ? "on" : "off") + (why.isEmpty() ? " (its default)" : why)
+                : " is now " + (now ? "on" : "off")) + whenItApplies(bot));
         return 1;
+    }
+
+    /** A list as it is now, each id with where it comes from. */
+    private static String listed(Rules r, Rules.Family family) {
+        List<String> out = new java.util.ArrayList<>();
+        for (String id : r.effective().list(family)) {
+            out.add(id + why(r, family, id));
+        }
+        return out.isEmpty() ? "nothing" : String.join(", ", out);
+    }
+
+    /** What the bot's own layer takes OFF a list: it does not show in the list itself. */
+    private static String takenOff(Rules r, Rules.Family family, String says) {
+        List<String> off = new java.util.ArrayList<>();
+        Rules.Layer merged = r.merged();
+        merged.list(family).forEach((id, on) -> {
+            if (!on) off.add(id + why(r, family, id));
+        });
+        return off.isEmpty() ? "" : "\n  " + says + ": " + String.join(", ", off);
     }
 
     private int foodList(CommandContext<CommandSourceStack> c) {
         String bot = bot(c);
         CommandSourceStack s = c.getSource();
         if (!known(s, bot)) return 0;
-        List<String> ban = access.foodList(bot, true);
-        List<String> back = access.foodList(bot, false);
+        Rules r = access.rules(bot);
         String line = access.display(bot) + " does not eat on its own: "
-                + (ban.isEmpty() ? "nothing banned from here" : String.join(", ", ban))
-                + (back.isEmpty() ? "" : "\n  allowed again from here: "
-                   + String.join(", ", back))
-                + "\n  it also has its own factory list (the golden apples); ask the bot "
-                + "for the whole one";
+                + listed(r, Rules.Family.FOOD)
+                + takenOff(r, Rules.Family.FOOD, "allowed on purpose");
         s.sendSuccess(() -> Component.literal(line).withStyle(ChatFormatting.AQUA), false);
-        return ban.size();
+        return r.effective().food().size();
     }
 
-    private int food(CommandContext<CommandSourceStack> c, boolean ban) {
+    private int food(CommandContext<CommandSourceStack> c, Boolean ban) {
         String bot = bot(c);
         if (!allowed(c, bot, Action.FOOD)) return 0;
         String what = StringArgumentType.getString(c, "id").toLowerCase();
@@ -490,12 +541,12 @@ final class BotCommands {
             fail(s, bad);
             return 0;
         }
-        LOG.info("[marionette] food {} {} for {} by {}", ban ? "ban" : "allow", what,
-                access.display(bot), runner(s));
-        done(s, access.display(bot) + (ban
-                ? " will not eat " + what + " on its own any more (handed to it by name, "
-                  + "it still will)"
-                : " may eat " + what + " on its own again") + whenItApplies(bot));
+        boolean banned = access.rules(bot).effective().food().contains(what);
+        LOG.info("[marionette] food {} {} for {} by {}", ban == null ? "default" : ban ? "ban" : "allow",
+                what, access.display(bot), runner(s));
+        done(s, access.display(bot) + (banned
+                ? " will not eat " + what + " on its own (handed to it by name, it still will)"
+                : " may eat " + what + " on its own") + whenItApplies(bot));
         return 1;
     }
 
@@ -503,18 +554,16 @@ final class BotCommands {
         String bot = bot(c);
         CommandSourceStack s = c.getSource();
         if (!known(s, bot)) return 0;
-        List<String> yes = access.breakList(bot, true);
-        List<String> no = access.breakList(bot, false);
+        Rules r = access.rules(bot);
         String line = access.display(bot) + " may break on its own, to make its way: "
-                + (yes.isEmpty() ? "nothing allowed from here" : String.join(", ", yes))
-                + (no.isEmpty() ? "" : "\n  forbidden from here: " + String.join(", ", no))
-                + "\n  it also has its own seed list (stone, cobblestone, grass_block, "
-                + "dirt). What it is TOLD to dig never needed permission.";
+                + listed(r, Rules.Family.BREAK)
+                + takenOff(r, Rules.Family.BREAK, "forbidden on purpose")
+                + "\n  What it is TOLD to dig never needed permission.";
         s.sendSuccess(() -> Component.literal(line).withStyle(ChatFormatting.AQUA), false);
-        return yes.size();
+        return r.effective().breaking().size();
     }
 
-    private int breaking(CommandContext<CommandSourceStack> c, boolean allow) {
+    private int breaking(CommandContext<CommandSourceStack> c, Boolean allow) {
         String bot = bot(c);
         if (!allowed(c, bot, Action.BREAK)) return 0;
         String what = StringArgumentType.getString(c, "id").toLowerCase();
@@ -524,11 +573,12 @@ final class BotCommands {
             fail(s, bad);
             return 0;
         }
-        LOG.info("[marionette] break {} {} for {} by {}", allow ? "allow" : "forbid",
-                what, access.display(bot), runner(s));
-        done(s, access.display(bot) + (allow
-                ? " may now break " + what + " on its own"
-                : " may no longer break " + what + " on its own") + whenItApplies(bot));
+        boolean may = access.rules(bot).effective().breaking().contains(what);
+        LOG.info("[marionette] break {} {} for {} by {}",
+                allow == null ? "default" : allow ? "allow" : "forbid", what, access.display(bot), runner(s));
+        done(s, access.display(bot) + (may
+                ? " may break " + what + " on its own"
+                : " may not break " + what + " on its own") + whenItApplies(bot));
         return 1;
     }
 

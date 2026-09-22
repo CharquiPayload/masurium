@@ -31,6 +31,16 @@ setting ignored it without a word.
   and a hotbar notice for owners.
 - The server console says so, once, when a bot joins running a different version of
   the bot mod than the server's, and `/marionette bot <bot>` shows both.
+- A bot's rules (its behaviour toggles, the food it does not eat on its own, the
+  blocks it may break on its own) in three layers, kept in
+  `marionette_bots.json`: its config and what is imposed come from the
+  launcher, and its own layer is what `/marionette bot` edits. What is imposed
+  cannot be changed from the game, and the command says who imposes it; `pref`,
+  `food` and `break` take `default` to go back to what is under, and show who
+  decides each thing. The body is handed what the rules come to, whole, and
+  holds exactly that. A `marionette_bots.properties` from before is read once
+  into the bots' own layer.
+- `/rules`: a bot's three layers and what they come to, for the launcher.
 - `/mods`: every mod the server loaded, with its version, for a launcher to compare
   a bot's pack against before joining. A mismatch used to show up three minutes
   after the connect as "Incompatible client! Please use NeoForge ...".
@@ -73,6 +83,13 @@ setting ignored it without a word.
   One account plays in one game at a time and its instances start one after
   another. `account` lists them (logged in or not, who uses them), `account
   remove` takes an unused one out, and doctor says when a login is gone.
+- `rules`: a bot's rules from the launcher. `rules <instance>` shows every
+  toggle and both lists, each with who decides it; with a change it edits the
+  instance's own, on its server (waiting for its next start if the server is
+  away). `--bot` and `--server` edit the config under it, `--global` what is
+  imposed on every instance (`launcher.json`; `ignore_global` exempts one).
+  They are sent on every start and to running instances when they change; a
+  rule written wrong stops the start and `doctor` names it.
 - Each server can have its own `servers/<slug>/server.env` (address and token
   of its server mod, readable by its owner only). The launcher, the bridge and
   the MCP server then talk to the server each bot is on, not to the one the

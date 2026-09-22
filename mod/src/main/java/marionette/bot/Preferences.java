@@ -12,10 +12,10 @@ import java.util.TreeMap;
  *
  * <p><b>It no longer changes them by itself.</b> They used to be toggled by asking the AI,
  * and the tool that did it said "only on the owner's order" — a sentence in a prompt, with
- * nothing enforcing it. Now they are switched with
- * {@code /marionette bot <bot> pref <key> on|off} and arrive here as an order through the
- * bridge; the brain keeps a tool that only READS them. This file is what the body reads
- * every tick and what a bot falls back on when no command ever touched a key.
+ * nothing enforcing it. Now they are the server's rules for this bot (from the launcher,
+ * and {@code /marionette bot <bot> pref <key> on|off}) and arrive here whole through the
+ * bridge ({@link #hold}); the brain keeps a tool that only READS them. This file is what
+ * the body reads every tick, and what it holds while no bridge has told it anything.
  *
  * <p>It is a file SEPARATE from the permissions on purpose: the whitelist is SAFETY (what
  * it may touch) and this is TASTE (how it behaves). Mixing them would invite a "change
@@ -76,8 +76,8 @@ final class Preferences {
         try {
             Files.createDirectories(file().getParent());
             List<String> lines = new ArrayList<>();
-            lines.add("# Behaviour preferences. Switched with /marionette bot "
-                    + "<bot> pref <key> on|off, on the server.");
+            lines.add("# Behaviour preferences, written from the server's rules for this "
+                    + "bot: /marionette bot <bot> pref, or the launcher.");
             for (var e : valueList.entrySet()) {
                 lines.add(e.getKey() + "=" + e.getValue());
             }
@@ -101,6 +101,29 @@ final class Preferences {
         load().put(key, value);
         save();
         return null;
+    }
+
+    /**
+     * Holds exactly these values: what the server's rules come to. A key this body does
+     * not know is left out (a newer server); one not given goes back to its default.
+     *
+     * @return what changed, as {@code key=value}
+     */
+    static synchronized List<String> hold(java.util.Map<String, Boolean> values) {
+        TreeMap<String, Boolean> want = new TreeMap<>(DEFAULTS);
+        values.forEach((k, v) -> {
+            if (DEFAULTS.containsKey(k) && v != null) want.put(k, v);
+        });
+        TreeMap<String, Boolean> have = load();
+        List<String> changed = new ArrayList<>();
+        want.forEach((k, v) -> {
+            if (!v.equals(have.get(k))) changed.add(k + "=" + v);
+        });
+        if (!want.equals(have)) {
+            valueList = want;
+            save();
+        }
+        return changed;
     }
 
     static synchronized TreeMap<String, Boolean> allItems() {

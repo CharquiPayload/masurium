@@ -16,13 +16,14 @@ tomorrow, both on the same functions.
                    that keeps two commands off an instance
     settings.py    settings in layers (bot < instance), what each accepts, when it counts,
                    and what is rendered for the bridge
+    rules.py       a bot's rules (toggles, food, blocks) in three layers, kept on its server
     packs.py       what a pack is made of, read from the jars; the pack owns gamedir/mods
     api.py         the server mod's HTTP API
     keeper.py      the process that holds a game's console
     processes.py   pids, process groups, ports
     diagnosis.py   why a start failed, from the client's own logs
     operations.py  create, clone, start, connect, bridge, stop, restart, status, set,
-                   deploy-mod, migrate
+                   rules, deploy-mod, migrate
     doctor.py      the checks, in the order things break
     events.py      Event and Fail
     files.py       env files, locks, logs read as they grow

@@ -223,6 +223,51 @@ def cmd_account(ws, args):
     return 0
 
 
+def cmd_rules(ws, args):
+    """marionette.py rules alice                        its rules as they come out, and who decides each
+    marionette.py rules alice food ban rotten_flesh    a change to its own (the same as /marionette bot)
+    marionette.py rules alice pref hunt_players on     ... on, off or default
+    marionette.py rules --bot alice break allow oak_log   the bot's config, for all its instances
+    marionette.py rules --server create food ban beef     a server's, for every bot on it
+    marionette.py rules --global food replace             imposed on every instance"""
+    layered = args.bot or args.server or args.global_
+    words = ([args.name] if args.name and layered else []) + list(args.words)
+    if layered:
+        bot = ws.bot(args.bot) if args.bot else None
+        if not words:
+            where, lines = operations.layer_lines(ws, bot=bot, slug=args.server)
+            say(f"{where}:")
+            for line in lines or ["(nothing: it decides nothing)"]:
+                say(f"  {line}")
+            return 0
+        operations.edit_layer(ws, words, bot=bot, slug=args.server, on_event=print_event)
+        return 0
+    if not args.name:
+        raise Fail("say whose:  marionette.py rules <instance>, or --bot <bot>, --server <slug>, --global",
+                   code="bad_rules")
+    inst = ws.instance(args.name)
+    if words:
+        operations.edit_rules(inst, words, on_event=print_event)
+        return 0
+    view = operations.show_rules(inst)
+    say(view.title)
+    if view.note:
+        say(f"  ({view.note})")
+    say("  toggles")
+    for key, on, who in view.toggles:
+        say(f"    {key:<24} {'on' if on else 'off':<4} {who}")
+    heads = {"food": "food it does not eat on its own", "break": "blocks it may break on its own"}
+    offs = {"food": "allowed on purpose", "break": "forbidden on purpose"}
+    for family, listed, off, replaced in view.lists:
+        say(f"  {heads[family]}" + (f"  (the whole list: {replaced})" if replaced else ""))
+        say("    " + (", ".join(i + (f" ({who})" if who else "") for i, who in listed) or "nothing"))
+        if off:
+            say(f"    {offs[family]}: " + ", ".join(i + (f" ({who})" if who else "") for i, who in off))
+    if view.waiting:
+        say("  waiting for the server: " + "; ".join(view.waiting))
+    return 0
+
+
 def cmd_phrases(ws, args):
     operations.rewrite_phrases(ws.instance(args.name), print_event)
 
@@ -332,6 +377,18 @@ def build_parser():
     c.add_argument("key", nargs="?", metavar="account", help="for remove: which")
     c.add_argument("--as", dest="as_", metavar="ACCOUNT", help="for add: its name here (default: the player's)")
     c.set_defaults(fn=cmd_account)
+
+    c = sub.add_parser("rules", help="see or change a bot's rules: toggles, food it will not eat, "
+                                     "blocks it may break")
+    c.add_argument("name", nargs="?", metavar="instance", help="an instance (or none, with --bot, "
+                   "--server or --global)")
+    c.add_argument("words", nargs="*", help="a change: pref <toggle> on|off|default, food ban|allow|default "
+                   "<item>, break allow|forbid|default <block>, food|break replace|add")
+    c.add_argument("--bot", metavar="BOT", help="the bot's config, under every instance of it")
+    c.add_argument("--server", metavar="SLUG", help="a server's, over the config of every bot on it")
+    c.add_argument("--global", dest="global_", action="store_true",
+                   help="imposed on every instance (launcher.json)")
+    c.set_defaults(fn=cmd_rules)
 
     c = sub.add_parser("phrases", help="have the brain write again what the bot says without it")
     c.add_argument("name", metavar="instance")

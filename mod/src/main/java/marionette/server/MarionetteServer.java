@@ -86,10 +86,15 @@ public class MarionetteServer {
     /** The state icon of each bot in the TAB list (see {@link Tab}). */
     private final Tab tab = new Tab();
     /**
-     * Who owns, administers and is heard by each bot, and the orders given by command
-     * (see {@link BotAccess}).
+     * Who owns, administers and is heard by each bot, its rules, and the orders given by
+     * command (see {@link BotAccess}). A marionette_bots.properties from before the rules
+     * had layers is read once into it.
      */
-    private final BotAccess access = new BotAccess(Path.of("marionette_bots.properties"));
+    private final BotAccess access = new BotAccess(Path.of("marionette_bots.json"),
+            (bad, text, cause) -> {
+                if (bad) LOG.error(text, cause);
+                else LOG.info(text);
+            });
     private final BotCommands botCommands = new BotCommands(access);
     /** The owners as players see them, and the hotbar notice (see {@link Owners}). */
     private final Owners owners = new Owners(tab, access);
@@ -137,6 +142,7 @@ public class MarionetteServer {
             http.createContext("/tab", x -> attend(x, this::tab));
             http.createContext("/control", x -> attend(x, this::control));
             http.createContext("/access", x -> attend(x, this::access));
+            http.createContext("/rules", x -> attend(x, this::rules));
             http.createContext("/mods", x -> attend(x, this::mods));
             http.setExecutor(null);
             http.start();
@@ -218,6 +224,38 @@ public class MarionetteServer {
     /** /access?bot=Alice: owner, admins and who it hears, read only. */
     private String access(Map<String, String> q) {
         return access.accessJson(q.getOrDefault("bot", "").trim());
+    }
+
+    /**
+     * A bot's rules, for the launcher (see {@link Rules}).
+     * <ul>
+     *   <li>{@code /rules?bot=Alice}: its three layers and what they come to.
+     *   <li>{@code &layer=base|own|imposed&set=<json>}: that layer, whole.
+     *   <li>{@code &layer=own&kind=pref|food|break&key=<key or id>&value=<...>}: one change
+     *       to its own layer, as {@code /marionette bot} makes it; {@code key=*} with
+     *       {@code value=replace|add} is a list's replace switch.
+     * </ul>
+     * Behind the token like everything else here: whoever holds it is the launcher.
+     */
+    private String rules(Map<String, String> q) {
+        String bot = q.getOrDefault("bot", "").trim();
+        String layer = q.get("layer");
+        if (layer != null) {
+            String bad;
+            if (q.containsKey("set")) {
+                bad = access.setLayer(bot, layer.trim(), q.get("set"));
+            } else if (Rules.OWN.equals(layer.trim())) {
+                bad = access.editOwn(bot, q.getOrDefault("kind", "").trim(), q.getOrDefault("key", "").trim(),
+                        q.get("value"), "the launcher", System.currentTimeMillis());
+            } else {
+                bad = "only the own layer is edited a change at a time; the others go whole, with set=";
+            }
+            if (bad != null) throw new IllegalArgumentException(bad);
+            LOG.info("[marionette] rules of {}: {} {} from the launcher", access.display(bot), layer,
+                    q.containsKey("set") ? "replaced" : q.getOrDefault("kind", "") + " "
+                            + q.getOrDefault("key", "") + " " + q.getOrDefault("value", ""));
+        }
+        return access.rulesJson(bot);
     }
 
     // --- the part that really matters ------------------------------------------

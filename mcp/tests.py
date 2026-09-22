@@ -168,6 +168,101 @@ def tests_speaker():
         finally:
             bridge.log = real_log
         check("nothing set: it stays quiet instead of logging a zero", not lines, lines)
+
+        # A server with rules sends them WHOLE, and the body is made to hold
+        # them in one call, the first time and whenever they change.
+        import urllib.error
+        import urllib.parse
+        bridge.RULES_HELD.clear()
+        asked.clear()
+        lines.clear()
+        body = {"ok": True, "changed": ["hunt_players=true", "+beef food"], "unknown": ["cooked_beaf"]}
+        bridge.request_bot = lambda route: (asked.append(route), body)[1]
+        bridge.log = lambda text: lines.append(text)
+        rules = {"prefs": {"hunt_players": True}, "food_banned": ["beef"], "break_allowed": ["dirt"]}
+        older = {"prefs": {"bunny_hop": True}, "food": {"ban": ["salmon"]}}
+        try:
+            had = bridge.sync_rules({"rules": rules, "settings": older}, first=True)
+            check("rules: an answer with rules says so", had)
+            check("rules: they go to the body whole, in one call, not a change at a time",
+                  len(asked) == 1 and asked[0].startswith("/rules?set="), asked)
+            sent = json.loads(urllib.parse.parse_qs(asked[0].split("?", 1)[1])["set"][0])
+            check("rules: what the body is handed is what the server sent", sent == rules, sent)
+            said = " ".join(lines)
+            check("rules: the log says what changed, and what this game does not have",
+                  "hunt_players=true" in said and "cooked_beaf" in said, said)
+            bridge.sync_rules({"rules": dict(rules)})
+            check("rules: the same rules on the next poll are not sent again", len(asked) == 1, asked)
+            rules2 = dict(rules, food_banned=[])
+            bridge.sync_rules({"rules": rules2})
+            check("rules: changed rules are sent again", len(asked) == 2, asked)
+            lines.clear()
+            body = {"ok": True, "changed": [], "unknown": []}
+            bridge.sync_rules({"rules": rules})
+            check("rules: a body that already held them logs nothing", not lines, lines)
+            bridge.RULES_HELD["at"] -= bridge.RULES_REFRESH + 1
+            before = len(asked)
+            bridge.sync_rules({"rules": rules})
+            check("rules: unchanged, they still go again every few minutes, for a body that drifted",
+                  len(asked) == before + 1, asked)
+
+            # A body down: tried again later, not on every one-second poll.
+            bridge.RULES_HELD.clear()
+            asked.clear()
+
+            def down(route):
+                asked.append(route)
+                raise OSError("body down")
+            bridge.request_bot = down
+            bridge.sync_rules({"rules": rules})
+            bridge.sync_rules({"rules": rules})
+            check("rules: a body that did not take them is not asked on every poll",
+                  len(asked) == 1, asked)
+            bridge.RULES_HELD["retry_at"] = 0
+            bridge.request_bot = lambda route: (asked.append(route), {"ok": True})[1]
+            bridge.sync_rules({"rules": rules})
+            check("rules: and it is asked again once the wait is over", len(asked) == 2, asked)
+
+            # A body older than /rules gets the older shape, a change at a time.
+            bridge.RULES_HELD.clear()
+            asked.clear()
+
+            def old_body(route):
+                asked.append(route)
+                if route.startswith("/rules"):
+                    raise urllib.error.HTTPError(route, 404, "Not Found", {}, None)
+                return {"ok": True}
+            bridge.request_bot = old_body
+            bridge.sync_rules({"rules": rules, "settings": older})
+            check("rules: a body without /rules gets the settings a change at a time",
+                  any(r.startswith("/preferences?place=bunny_hop") for r in asked)
+                  and any("ban=salmon" in r for r in asked), asked)
+            asked.clear()
+            bridge.sync_rules({"rules": rules, "settings": older})
+            check("rules: and /rules is not asked of it again", not asked, asked)
+
+            # A server older than the rules: its settings at start, as before.
+            bridge.RULES_HELD.clear()
+            asked.clear()
+            bridge.request_bot = lambda route: (asked.append(route), {"ok": True})[1]
+            check("rules: an answer without rules says so",
+                  not bridge.sync_rules({"settings": older}, first=True))
+            check("rules: an older server's settings are applied at start",
+                  any("ban=salmon" in r for r in asked), asked)
+            asked.clear()
+            bridge.sync_rules({"settings": older})
+            check("rules: and not again on every poll", not asked, asked)
+
+            # With the rules in the answer, an order for a toggle is in them already.
+            asked.clear()
+            bridge.carry_out({"action": "pref", "argument": "hunt_players=true", "by": "Owner"}, True)
+            check("rules: an order for a toggle is not applied twice", not asked, asked)
+            bridge.carry_out({"action": "pref", "argument": "hunt_players=true", "by": "Owner"})
+            check("rules: without them it is applied, as before",
+                  any(r.startswith("/preferences?place=hunt_players") for r in asked), asked)
+        finally:
+            bridge.log = real_log
+            bridge.RULES_HELD.clear()
     finally:
         bridge.request_bot = real_request_bot
     out = server.t_who_commands({})

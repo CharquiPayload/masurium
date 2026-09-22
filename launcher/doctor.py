@@ -7,7 +7,7 @@ import sys
 import urllib.error
 from collections import namedtuple
 
-from . import settings
+from . import rules, settings
 from .api import UNREACHABLE
 from .accounts import players_in
 from .bots import check_name
@@ -144,6 +144,12 @@ def checks(ws):
             add(f"servers/{slug}", False, str(e))
             continue
         add(f"servers/{slug}", True, f"{s.address} {s.version} {s.mod_count()} client mods")
+        if (ws.servers_dir / slug / "rules.json").is_file():
+            try:
+                layer = rules.of_server(ws, slug)
+                add(f"servers/{slug}: rules", True, "; ".join(rules.describe(layer)) or "nothing")
+            except Fail as e:
+                add(f"servers/{slug}: rules", False, str(e))
         # Against the server that answers the global server.env's API (it may
         # not be this slug's: only mismatches are reported, and a pack that
         # shares nothing with it has none)... unless the server has its own
@@ -195,6 +201,13 @@ def checks(ws):
         add("layout", False, f"bots in the layout from before instances: {', '.join(legacy)} "
             "(marionette.py migrate)")
 
+    if ws.config_file.is_file():
+        try:
+            add("launcher.json", True, "global rules: " + ("; ".join(rules.describe(rules.of_global(ws)))
+                                                           or "none"))
+        except Fail as e:
+            add("launcher.json", False, str(e))
+
     for key in ws.account_keys():
         account = ws.account(key)
         bots_, insts_ = account.users()
@@ -210,6 +223,10 @@ def checks(ws):
         problems = [why for _, why in settings.problems(bot)]
         try:
             check_name(bot.name)
+        except Fail as e:
+            problems.append(str(e))
+        try:
+            rules.of_bot(bot)
         except Fail as e:
             problems.append(str(e))
         add(f"bots/{key}", not problems, "; ".join(problems) or f"plays as {bot.name}, "
@@ -247,8 +264,10 @@ def checks(ws):
             problems.append("escorts itself")
         problems += [why for k, why in settings.problems(inst) if k != "port"]
         players.setdefault((inst.slug, inst.player), []).append(inst.key)
+        waiting = len(rules.pending(inst))
         add(f"instances/{inst.key}", not problems,
-            "; ".join(problems) or f"{inst.name} on {inst.slug}, port {port}")
+            "; ".join(problems) or f"{inst.name} on {inst.slug}, port {port}"
+            + (f"; {waiting} rule change(s) waiting for its server" if waiting else ""))
     for (slug, player), keys_ in sorted(players.items()):
         if len(keys_) > 1:
             add(f"{player} on {slug}", None, f"{len(keys_)} instances ({', '.join(keys_)}); "

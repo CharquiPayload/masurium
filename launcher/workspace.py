@@ -144,6 +144,22 @@ class Workspace:
     def env_values(self):
         return read_env_file(self.env_file)
 
+    # --- the launcher's own config ----------------------------------------------
+
+    @property
+    def config_file(self):
+        """launcher.json, next to server.env: what applies to every instance
+        (for now, the global rules; see rules.py)."""
+        return self.env_file.parent / "launcher.json"
+
+    def config(self):
+        from .bots import read_json
+        return read_json(self.config_file)
+
+    def save_config(self, data):
+        from .bots import write_json
+        write_json(self.config_file, data)
+
     def api(self):
         """The connection to the server mod (MARIONETTE_HOST, MARIONETTE_PORT,
         MARIONETTE_TOKEN, optionally MARIONETTE_OWNER). Without them nothing can

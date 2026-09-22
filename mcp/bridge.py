@@ -1988,11 +1988,82 @@ def control_route(since=None):
     return "/control?" + urllib.parse.urlencode(q)
 
 
+# The rules the body holds, as the server last sent them and when, so they go
+# to the body again when they change, and now and then anyway; whether the body
+# is older than /rules; and when to try again after the body did not take them.
+RULES_HELD = {}
+RULES_RETRY = 30
+RULES_REFRESH = 600
+
+
+def sync_rules(answer, first=False):
+    """The server's rules for this bot, from a /control answer, made the body's.
+
+    A server with rules sends them WHOLE in every answer (every toggle, the
+    food it does not eat on its own, the blocks it may break on its own): they
+    go to the body the first time and whenever they change, and the body then
+    holds exactly that, whatever its own files said. That is how a change made
+    in the launcher or with /marionette bot reaches a running bot. They go
+    again every few minutes even unchanged, so a body that drifted (a file
+    edited by hand, a local request) comes back in line.
+
+    A server older than the rules sends only `settings`, applied a change at a
+    time once, at start, as before; a body older than /rules gets them that way
+    too. Returns whether the answer had rules: the orders for toggles and lists
+    that come with it are then in them already."""
+    rules = answer.get("rules") if isinstance(answer, dict) else None
+    if not isinstance(rules, dict) or not rules:
+        if first:
+            apply_settings((answer or {}).get("settings"))
+        return False
+    if rules == RULES_HELD.get("rules") and time.time() - RULES_HELD.get("at", 0) < RULES_REFRESH:
+        return True
+    if RULES_HELD.get("older_body"):
+        if rules == RULES_HELD.get("rules"):
+            return True
+        apply_settings(answer.get("settings"))
+        RULES_HELD["rules"] = rules
+        return True
+    if time.time() < RULES_HELD.get("retry_at", 0):
+        return True
+    try:
+        r = request_bot("/rules?" + urllib.parse.urlencode(
+            {"set": json.dumps(rules, separators=(",", ":"))}))
+        if not r.get("ok"):
+            raise RuntimeError(r.get("error") or "it said no")
+    except urllib.error.HTTPError as e:
+        if e.code != 404:
+            RULES_HELD["retry_at"] = time.time() + RULES_RETRY
+            log(f"[control] the body did not take its rules ({e}); again in {RULES_RETRY} s")
+            return True
+        RULES_HELD["older_body"] = True
+        log("[control] the body is older than /rules: its rules go a change at a time")
+        apply_settings(answer.get("settings"))
+        RULES_HELD["rules"] = rules
+        return True
+    except Exception as e:
+        RULES_HELD["retry_at"] = time.time() + RULES_RETRY
+        log(f"[control] could not hand the body its rules ({e}); again in {RULES_RETRY} s")
+        return True
+    RULES_HELD["rules"] = rules
+    RULES_HELD["at"] = time.time()
+    RULES_HELD.pop("retry_at", None)
+    # Only what CHANGED is said: most of the time the body already held them,
+    # and a line that reads like activity when there was none sends someone
+    # hunting for a change that never happened.
+    if r.get("changed"):
+        log("[control] rules from the server, changed in the body: " + ", ".join(r["changed"]))
+    if r.get("unknown"):
+        log("[control] ids this game does not have, left out: " + ", ".join(r["unknown"]))
+    return True
+
+
 def apply_settings(settings):
-    """Everything the server decided for this bot, applied to the body at
-    start. It comes in EVERY /control answer, not as orders: a body that
-    restarted came back with its own files and knows nothing of what was
-    decided while it was away.
+    """What an older server decided for this bot, applied to the body at start,
+    a change at a time (see `sync_rules` for what a server with rules sends).
+    It comes in EVERY /control answer, not as orders: a body that restarted
+    came back with its own files and knows nothing of what was decided while
+    it was away.
 
     Quiet when there is nothing to do, which is the usual case."""
     if not settings:
@@ -2048,12 +2119,17 @@ def apply_setting(action, argument):
     return None
 
 
-def carry_out(order):
+def carry_out(order, in_rules=False):
     """An order given with /marionette bot <bot> ...; the server already
     checked who ran it. Goodbye first, then the cut: after it there is no
-    voice. Returns the action carried out, or None."""
+    voice. Returns the action carried out, or None.
+
+    `in_rules`: the same answer brought the rules, which already hold a change
+    to a toggle or a list; applying it again as an order would be twice."""
     action, by = order.get("action"), order.get("by", "?")
     log(f"[control] {action} ordered by {by} (server command)")
+    if action in ("pref", "food", "break") and in_rules:
+        return action
     if action in ("pref", "food", "break"):
         try:
             log(f"[control] {apply_setting(action, order.get('argument', ''))}")
@@ -2204,7 +2280,7 @@ def listen(since, inbox, control_since=None):
                     control_since = c.get("last", 0)
                     ACCESS.update({k: c[k] for k in ("owner", "admins", "hear") if k in c})
                     log("server commands on (late)")
-                    apply_settings(c.get("settings"))
+                    sync_rules(c, first=True)
                 except Exception:
                     pass
         else:
@@ -2213,8 +2289,9 @@ def listen(since, inbox, control_since=None):
                 control_since = c.get("last", control_since)
                 ACCESS.update({k: c[k] for k in ("owner", "admins", "hear") if k in c})
                 control_failures = 0
+                in_rules = sync_rules(c)
                 for order in c.get("orders", []):
-                    carry_out(order)
+                    carry_out(order, in_rules)
             except Exception as e:
                 control_failures += 1
                 if control_failures in (1, 30):
@@ -2389,7 +2466,7 @@ def main():
         ACCESS.update({k: c[k] for k in ("owner", "admins", "hear") if k in c})
         log(f"server commands on; owner {bot_owner() or 'none'}, "
             f"hears {ACCESS['hear'].get('mode', 'everyone')}")
-        apply_settings(c.get("settings"))
+        sync_rules(c, first=True)
     except Exception as e:
         # An older server mod: no commands, and everyone is heard.
         control_since = None
