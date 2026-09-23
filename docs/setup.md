@@ -150,11 +150,19 @@ The launcher is what creates and runs the bots. From the releases:
   Python (`pyside6`) and Java 21 (`jre21-openjdk-headless`), which lives beside
   a newer default Java without replacing it. `sudo pacman -R masurium-launcher`
   takes it away.
-- **Any other Linux**: `masurium-launcher-<version>.tar.gz`. Unpack it and run
-  `./install.sh`: for your user alone, without sudo, with its own Python
-  environment for the window (a download of about 100 MB, once). `./install.sh
-  --no-gui` installs the command line alone, for a machine without a screen;
-  run it again to update, and `./install.sh --uninstall` to take it away.
+- **Any other Linux**: one line in a terminal,
+
+  ```sh
+  curl -fsSL https://github.com/CharquiPayload/masurium/releases/latest/download/install.sh | sh
+  ```
+
+  It downloads the latest release, checks it against the release's
+  `SHA256SUMS` and installs it for your user alone, without sudo, with its own
+  Python environment for the window (a download of about 100 MB, once). The
+  same line again updates it. `... | sh -s -- --no-gui` installs the command
+  line alone, for a machine without a screen, and `--uninstall` takes it away.
+  Or, by hand: unpack the release's `masurium-launcher-<version>.tar.gz` and run
+  `./install.sh` in it (the same options).
 - **From a clone of this repository**: `./install.sh` as well (it takes the jars
   you built), or run `launcher/masurium.py` right where it is.
 
@@ -166,12 +174,14 @@ leaves both alone.
 **Claude Code** is installed apart, for the user that runs the bots:
 `curl -fsSL https://claude.ai/install.sh | bash`, then run `claude` once to sign in.
 
-**Updating.** The launcher never updates itself. Once a day it asks GitHub
-which is Masurium's latest release, and when there is a newer one the window
-says so on top (`masurium doctor` too), with how your copy is updated: the new
-`.deb` or `PKGBUILD`, installed the way the first one was; the new release's
-`./install.sh`, run again; or `git pull` in a clone. A notice closed is not
-shown again until there is something newer.
+**Updating.** The launcher never updates itself unasked. Once a day it asks
+GitHub which is Masurium's latest release, and when there is a newer one the
+window says so on top (`masurium doctor` too). A copy that `install.sh`
+installed has **Update now** there: it downloads the release, checks it,
+installs it the way the one-line installer does and offers to restart the
+launcher; the bots keep running. Any other copy is told how: the new `.deb` or
+`PKGBUILD`, installed the way the first one was, or `git pull` in a clone. A
+notice closed is not shown again until there is something newer.
 
 An updated launcher brings the new Masurium jars, but the bots keep the ones
 in `shared/mods` until these are put in: the window offers it, and **Set up

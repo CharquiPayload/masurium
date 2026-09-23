@@ -19,7 +19,8 @@ them play alongside you.
 
 **To install it**: the mod jar goes in your server's `mods/` folder, and
 **Masurium Launcher** on the machine that runs the bots: a `.deb` for Ubuntu and
-Debian, a `PKGBUILD` for Arch and its family, or `install.sh` for any Linux.
+Debian, a `PKGBUILD` for Arch and its family, or, for any Linux, one line:
+`curl -fsSL https://github.com/CharquiPayload/masurium/releases/latest/download/install.sh | sh`.
 The first time it opens, it sets the machine up. [docs/setup.md](docs/setup.md) has every step, and how to build it
 all yourself.
 

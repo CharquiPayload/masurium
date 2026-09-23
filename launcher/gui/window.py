@@ -2,10 +2,11 @@
 of buttons on top, every instance by group in the middle, and on the right
 what can be done with the one selected."""
 import collections
+import sys
 import time
 from dataclasses import dataclass
 
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QProcess, QSettings, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QImage, QKeySequence
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStatusBar,
@@ -21,6 +22,7 @@ from .tasks import Background, Tasks
 from .widgets import DependencySection, GroupSection, InstanceTile, icon_of
 
 REFRESH_MS = 3000
+UPDATE = "update"     # the task that updates the launcher itself
 LOOSE = ""            # the section of the instances in no group
 ISSUES = "https://github.com/CharquiPayload/masurium/issues"
 
@@ -238,9 +240,13 @@ class MainWindow(QMainWindow):
         release, older = found
         if release and self.store.value("notices/release", "") != release[1]:
             have, new, page = release
-            self.notice("release", "spark", f"Masurium {new} is out; this launcher is {have}. To update it, "
-                        f"{updates.how_to_update()}.",
-                        [("What is new", lambda: QDesktopServices.openUrl(QUrl(page)))], remember=new)
+            page_button = ("What is new", lambda: QDesktopServices.openUrl(QUrl(page)))
+            if updates.made_by_install_sh():
+                self.notice("release", "spark", f"Masurium {new} is out; this launcher is {have}.",
+                            [("Update now…", lambda: self.update_launcher(new)), page_button], remember=new)
+            else:
+                self.notice("release", "spark", f"Masurium {new} is out; this launcher is {have}. To update it, "
+                            f"{updates.how_to_update()}.", [page_button], remember=new)
         else:
             self.notice("release", None)
         jars = ",".join(jar.name for _, jar in older)
@@ -287,6 +293,39 @@ class MainWindow(QMainWindow):
         if remember is not None:
             self.store.setValue(f"notices/{key}", remember)
         self.notice(key, None)
+
+    def update_launcher(self, new):
+        """The latest release over this copy (updates.install_latest), for a
+        copy install.sh made: asked first, done as a task, and the launcher
+        offered to restart once it is. The bots keep running through it all."""
+        from .. import updates
+        if not ask(self, "Update Masurium Launcher",
+                   f"Masurium {new} is downloaded, checked and installed over this launcher, the way "
+                   "install.sh installs it. The bots keep running.\n\nUpdate now?"):
+            return
+        if not self.tasks.run(UPDATE, f"updating to Masurium {new}",
+                              lambda on_event, cancel: updates.install_latest(on_event, cancel),
+                              then=self._updated):
+            self.alert("Busy", "The launcher is already updating.")
+
+    def _updated(self, ok):
+        if not ok:
+            return                        # why was said already (_failed)
+        self.notice("release", None)
+        if ask(self, "Masurium Launcher is updated",
+               "This window is still the old launcher: restart it now, to run the new one? The bots keep "
+               "running."):
+            self.restart()
+
+    def restart(self):
+        """This launcher again, the way it was started (after an update, the new
+        one), and this one closed."""
+        argv = sys.argv if sys.argv and sys.argv[0].endswith("masurium.py") \
+            else [str(operations.REPO / "launcher" / "masurium.py"), "gui"]
+        if QProcess.startDetached(sys.executable, list(argv))[0]:
+            QApplication.quit()
+        else:
+            self.alert("Restart", "The launcher could not start again by itself: close it and open it again.")
 
     def update_jars(self, older):
         """The newer jars into shared/mods (firstrun.put_mods), once it is said

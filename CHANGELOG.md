@@ -59,7 +59,9 @@ setting ignored it without a word.
   asked of apt), a `PKGBUILD` for Arch and its family (on the system's
   `pyside6` and `jre21-openjdk-headless`), and `install.sh` for any Linux, for
   one user and without sudo (`--no-gui` for a machine without a screen,
-  `--uninstall`). All of them put
+  `--uninstall`; piped from the latest release, `curl -fsSL
+  .../releases/latest/download/install.sh | sh`, it downloads that release,
+  checks it and installs it, and the same line updates it). All of them put
   **Masurium Launcher** in the applications menu, with its own icon (element
   43's tile with only its symbol, Ma), and a `masurium` command.
   `tools/release.sh` builds them with the jars.
@@ -74,13 +76,16 @@ setting ignored it without a word.
   server's Masurium mod before writing `server.env` (readable by its user
   alone); registers the first server with the NeoForge version the server
   runs; and says how to get Java 21 and Claude Code when they are missing.
-- **Updates are said, never done by themselves.** Once a day the launcher asks
-  GitHub for Masurium's latest release, and when there is a newer one the
-  window says so on top (and `doctor`), with how that copy is updated: its
-  package, `install.sh` again, or `git pull`. An updated launcher brings newer
-  Masurium jars than the bots have: the window offers to put them in, saying
-  first that the server needs the same jar, and setup does it. A jar put in by
-  hand, newer than the launcher's, is never replaced by an older one.
+- **Updates are said, and done only when asked.** Once a day the launcher
+  asks GitHub for Masurium's latest release, and when there is a newer one the
+  window says so on top (and `doctor`). A copy `install.sh` made updates
+  itself from there when asked (**Update now**: downloaded, checked against the
+  release's checksums, installed, the launcher restarted, the bots left
+  running); any other is told how (its package, or `git pull`). An updated
+  launcher brings newer Masurium jars than the bots have: the window offers to
+  put them in, saying first that the server needs the same jar, and setup does
+  it. A jar put in by hand, newer than the launcher's, is never replaced by an
+  older one.
 - The launcher's folders (instances, servers, shared, accounts, groups) live
   in `~/.local/share/masurium` by default instead of straight in the home; a
   machine that already has them in the home keeps using them there.

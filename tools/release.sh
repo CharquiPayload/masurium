@@ -1,7 +1,8 @@
 #!/bin/sh
 # Everything a release carries, into dist/: the Masurium jars (the mod and its
 # add-ons), the launcher as a folder for any Linux (install.sh inside), as a
-# .deb and as the PKGBUILD that makes its Arch package, and their checksums.
+# .deb and as the PKGBUILD that makes its Arch package, install.sh on its own
+# (the one-line installer), and their checksums.
 # Run on Debian or Ubuntu, from a clean checkout.
 #
 #   tools/release.sh
@@ -34,6 +35,9 @@ cp -R "$ROOT/launcher" "$ROOT/mcp" "$ROOT/docs" "$ROOT/packaging" "$ROOT/install
 cp "$OUT"/masurium-*.jar "$dir/jars/"
 find "$dir" -name __pycache__ -type d -prune -exec rm -rf {} +
 tar -C "$STAGE" -czf "$OUT/masurium-launcher-$VERSION.tar.gz" "masurium-launcher-$VERSION"
+# And install.sh on its own: piped from .../releases/latest/download/install.sh,
+# it finds the tarball above in SHA256SUMS, checks it and installs it.
+cp "$ROOT/install.sh" "$OUT/"
 
 echo "==> the launcher, as a .deb"
 "$ROOT/tools/build-deb.sh"

@@ -2302,11 +2302,46 @@ def tests_masurium_update():
         updates.fetch_latest = real
         (WS.state_dir / updates.CACHE).unlink(missing_ok=True)
     (TMP / "clone" / ".git").mkdir(parents=True, exist_ok=True)
-    check("how this copy is updated, from where it lives: a clone, a package, install.sh",
+    check("how this copy is updated, from where it lives: a clone, a package, anything else",
           "git pull" in updates.how_to_update(TMP / "clone")
           and ".deb" in updates.how_to_update("/opt/masurium-launcher/app")
           and "PKGBUILD" in updates.how_to_update("/usr/share/masurium-launcher")
-          and "install.sh" in updates.how_to_update(TMP / ".local" / "share" / "masurium-launcher" / "app"))
+          and updates.ONE_LINE in updates.how_to_update(TMP / "unpacked"))
+
+    print("\n...and a copy install.sh made updates itself, when asked")
+    import hashlib
+    import tarfile
+    release = TMP / "release"
+    shutil.rmtree(release, ignore_errors=True)
+    stage = release / "stage" / "masurium-launcher-9.9.9"
+    stage.mkdir(parents=True)
+    ran = TMP / "update-ran"
+    ran.unlink(missing_ok=True)
+    (stage / "install.sh").write_text(f'#!/bin/sh\necho "installed $*" > "{ran}"\n')
+    tarball = release / "masurium-launcher-9.9.9.tar.gz"
+    with tarfile.open(tarball, "w:gz") as t:
+        t.add(stage, arcname="masurium-launcher-9.9.9")
+    digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
+    (release / "SHA256SUMS").write_text(f"{'0' * 64}  install.sh\n{digest}  masurium-launcher-9.9.9.tar.gz\n")
+    app = TMP / "installed-app"
+    app.mkdir(exist_ok=True)
+    e = fails(updates.install_latest, base=release.as_uri(), root=app)
+    check("a copy install.sh did not make is not updated from here: it is told how",
+          e is not None and e.code == "not_install_sh" and not ran.exists(), told(e))
+    (app / updates.INSTALLER).write_text("install.sh\n")
+    check("...one it made is, and is told so", updates.made_by_install_sh(app)
+          and "Update now" in updates.how_to_update(app) and updates.ONE_LINE in updates.how_to_update(app))
+    got = updates.install_latest(base=release.as_uri(), root=app)
+    check("the latest release is downloaded, checked, and its own install.sh installs it",
+          got == "9.9.9" and ran.is_file() and ran.read_text().strip() == "installed", got)
+    ran.unlink(missing_ok=True)
+    (release / "SHA256SUMS").write_text(f"{'1' * 64}  masurium-launcher-9.9.9.tar.gz\n")
+    e = fails(updates.install_latest, base=release.as_uri(), root=app)
+    check("...a tarball that is not what the release says is refused, and nothing in it runs",
+          e is not None and e.code == "bad_download" and "checksum" in told(e) and not ran.exists(), told(e))
+    e = fails(updates.install_latest, base=(TMP / "nowhere").as_uri(), root=app)
+    check("...and without the release, it says what it could not download",
+          e is not None and e.code == "download" and "SHA256SUMS" in told(e), told(e))
 
 
 def tests_version():
@@ -2615,6 +2650,8 @@ def tests_install():
         [str(prefix / "venv" / "bin" / "python"), "-c", "import pyside6_stand_in"]).returncode == 0)
     ran = subprocess.run([str(command), "--help"], capture_output=True, text=True, env=env)
     check("...the `masurium` command runs it", ran.returncode == 0 and "setup" in ran.stdout, ran.stderr)
+    check("...and the copy says install.sh made it: it can update itself",
+          updates.made_by_install_sh(prefix / "app"))
     text = desktop.read_text() if desktop.is_file() else ""
     check("...an entry in the applications menu, opening the window, with the Ma icon",
           "Name=Masurium Launcher" in text and f'Exec="{command}" gui' in text and "Icon=masurium-launcher" in text
@@ -2638,6 +2675,41 @@ def tests_install():
     check("--no-gui: the command line alone, no menu entry", r.returncode == 0 and command.exists()
           and not desktop.exists(), r.stdout + r.stderr)
     run("--uninstall")
+
+    # The one-line installer: install.sh piped into sh, anywhere, gets the
+    # latest release. Here the release is a folder, reached as a file:// URL.
+    import hashlib
+    import tarfile
+    release = TMP / "install-release"
+    shutil.rmtree(release, ignore_errors=True)
+    stage = release / "masurium-launcher-9.9.9"
+    skip = shutil.ignore_patterns("__pycache__")
+    for d in ("launcher", "mcp"):
+        shutil.copytree(REPO / d, stage / d, ignore=skip)
+    for f in ("install.sh", "README.md", "LICENSE"):
+        shutil.copy2(REPO / f, stage / f)
+    tarball = release / "masurium-launcher-9.9.9.tar.gz"
+    with tarfile.open(tarball, "w:gz") as t:
+        t.add(stage, arcname=stage.name)
+    shutil.rmtree(stage)
+    sums = f"{hashlib.sha256(tarball.read_bytes()).hexdigest()}  {tarball.name}\n"
+    (release / "SHA256SUMS").write_text(sums)
+    elsewhere = TMP / "somewhere-else"
+    elsewhere.mkdir(exist_ok=True)
+
+    def piped(*args):
+        with open(REPO / "install.sh") as script:
+            return subprocess.run(["sh", "-s", "--", *args], stdin=script, cwd=elsewhere, capture_output=True,
+                                  text=True, timeout=300, env=dict(env, MASURIUM_RELEASE_URL=release.as_uri()))
+    r = piped("--no-gui")
+    check("piped from anywhere (curl ... | sh), install.sh gets the latest release, checks it and installs it",
+          r.returncode == 0 and "checked" in r.stdout and (prefix / "app" / "launcher" / "masurium.py").is_file()
+          and command.exists() and updates.made_by_install_sh(prefix / "app"), r.stdout + r.stderr)
+    run("--uninstall")
+    (release / "SHA256SUMS").write_text(sums.replace(sums[:8], "00000000"))
+    r = piped("--no-gui")
+    check("...a tarball that is not what the release says is refused: nothing is installed",
+          r.returncode != 0 and "checksum" in r.stderr and not prefix.exists(), r.stdout + r.stderr)
 
 
 def tests_arch_package():
