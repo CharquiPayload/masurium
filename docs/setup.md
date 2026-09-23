@@ -462,6 +462,13 @@ launcher/masurium.py rules --global pref hunt_players off        # imposed on ev
 launcher/masurium.py rules --global food replace                 # ...the whole food list, not just additions
 ```
 
+Ids go in English, as the game names things, and a mod's are ids too:
+`create:cog` is exactly Create's cog, and a name alone is that name in
+whatever mod has it, the game's own first. Named on the server (in the game,
+or with `rules <instance>`), a name alone is looked up in its mods: `cog` is
+kept as `create:cog` when only Create has one, and a name two mods share, or
+one no mod has, is refused, saying which to choose or that it is not there.
+
 In a file, a layer reads:
 
 ```json

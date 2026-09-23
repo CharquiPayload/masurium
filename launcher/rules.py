@@ -71,8 +71,10 @@ FAMILIES = {
 }
 LAYERS = ("base", "own", "imposed")
 START = "start"
-ID_RULE = re.compile(r"^[a-z0-9_]{1,64}$")
-FROM_RULE = re.compile(r"^(prefs|food|break)\.([a-z0-9_]{1,64}|\*)$")
+# A bare name (beef, cog: that name in whatever mod has it, the game's own
+# first) or a full id (create:cog: exactly that). The server mod's Rules.ID.
+ID_RULE = re.compile(r"^(?:[a-z0-9_.-]{1,64}:)?[a-z0-9_./-]{1,64}$")
+FROM_RULE = re.compile(r"^(prefs|food|break)\.((?:[a-z0-9_.-]{1,64}:)?[a-z0-9_./-]{1,64}|\*)$")
 PENDING = "rules-pending.json"
 
 
@@ -83,8 +85,8 @@ def empty():
 
 
 def an_id(value):
-    """An item or block id as a layer holds it, or None. `minecraft:` is
-    taken off: it is the only namespace the body resolves."""
+    """An item or block id as a layer holds it, or None: lowercase, and
+    without `minecraft:`, so a vanilla id reads the same written either way."""
     if not isinstance(value, str):
         return None
     v = value.strip().lower()
@@ -133,8 +135,8 @@ def parse(data, where="rules"):
                 for raw in v:
                     i = an_id(raw)
                     if i is None:
-                        bad(f"'{raw}' is not an id; they go in English and without a namespace, "
-                            "like rotten_flesh or dirt")
+                        bad(f"'{raw}' is not an id; they go in English, like rotten_flesh, dirt "
+                            "or create:cog")
                     before = layer[part].get(i)
                     if before is not None and before != (verb == on):
                         bad(f"{i} is both {on} and {off}")
@@ -282,8 +284,8 @@ def edit(layer, words, where="rules"):
         raise Fail(f"{kind} {on}|{off}|default <id>, or {kind} replace|add", code="bad_rules")
     i = an_id(words[2])
     if i is None:
-        raise Fail(f"'{words[2]}' is not an id; they go in English and without a namespace, "
-                   "like rotten_flesh or dirt", code="bad_rules")
+        raise Fail(f"'{words[2]}' is not an id; they go in English, like rotten_flesh, dirt "
+                   "or create:cog", code="bad_rules")
     if words[1] == "default":
         out[kind].pop(i, None)
     else:

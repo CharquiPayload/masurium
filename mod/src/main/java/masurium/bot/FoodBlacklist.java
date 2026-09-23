@@ -79,9 +79,12 @@ final class FoodBlacklist {
         }
     }
 
-    /** Whether it must NOT eat this on its own. */
+    /**
+     * Whether it must NOT eat this on its own: by the food's full id ({@code create:cog}),
+     * which the list may hold whole or by its name alone ({@link Ids}).
+     */
     static synchronized boolean banned(String id) {
-        return id != null && load().contains(id.strip().toLowerCase());
+        return Ids.listed(load(), id);
     }
 
     /** @return true if it was not already there */

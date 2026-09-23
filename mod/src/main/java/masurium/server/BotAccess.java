@@ -497,8 +497,13 @@ final class BotAccess {
         if (b == null) return "unknown bot";
         String what = Rules.id(id);
         if (what == null) {
-            return "'" + (id == null ? "" : id.strip()) + "' is not an id; they go in English "
-                    + "and without a namespace, like rotten_flesh or dirt";
+            return "'" + (id == null ? "" : id.strip()) + "' is not an id; they go in English, "
+                    + "like rotten_flesh, dirt or create:cog";
+        }
+        try {
+            what = Rules.resolve(family, what);
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
         }
         Rules.Source imposed = b.rules.imposedOn(family, what);
         if (imposed != null) {
@@ -516,6 +521,20 @@ final class BotAccess {
         boolean listed = b.rules.effective().list(family).contains(what);
         queue(b.name, action, (listed ? family.on : family.off) + ":" + what, by, now);
         return null;
+    }
+
+    /**
+     * The id that {@code typed} is kept as, in that list ({@link Rules#resolve}), or
+     * null if it is not one: what a command says it did.
+     */
+    static String kept(Family family, String typed) {
+        String id = Rules.id(typed);
+        if (id == null) return null;
+        try {
+            return Rules.resolve(family, id);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /** Food banned, or allowed, in the bot's own layer here. */

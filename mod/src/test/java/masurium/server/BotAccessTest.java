@@ -202,12 +202,11 @@ class BotAccessTest {
         assertNull(a.food("Alice", "rotten_flesh", false, "Owner", NOW));
         assertEquals(List.of(), a.foodList("Alice", true));
         assertEquals(List.of("rotten_flesh"), a.foodList("Alice", false));
-        // Player names are not item ids, and only the game's own namespace is: it is
-        // the only one the body resolves, so it is taken off and any other refused.
-        assertNotNull(a.food("Alice", "create:gear", true, "Owner", NOW));
+        // A mod's id is an id; the game's own namespace is taken off.
+        assertNull(a.food("Alice", "create:gear", true, "Owner", NOW));
         assertNotNull(a.food("Alice", "", true, "Owner", NOW));
         assertNull(a.food("Alice", "minecraft:beef", true, "Owner", NOW));
-        assertEquals(List.of("beef"), a.foodList("Alice", true));
+        assertEquals(List.of("beef", "create:gear"), a.foodList("Alice", true));
     }
 
     @Test
@@ -221,6 +220,42 @@ class BotAccessTest {
         assertEquals(List.of(), a.breakList("Alice", true));
         String json = a.controlJson("Alice", NOW - 1, NOW);
         assertTrue(json.contains("\"argument\":\"forbid:dirt\""), json);
+    }
+
+    @Test
+    @DisplayName("a mod's name alone is found in the registry, and a typo or a clash is said")
+    void modIdsAreResolved(@TempDir Path dir) {
+        // A pretend registry: beef is the game's, cog is only Create's, gear is in two mods.
+        Map<String, List<String>> items = Map.of("beef", List.of("minecraft"), "cog", List.of("create"),
+                "gear", List.of("create", "othermod"));
+        Rules.registry = new Rules.Registry() {
+            @Override
+            public boolean has(Rules.Family f, String namespace, String path) {
+                return items.getOrDefault(path, List.of()).contains(namespace);
+            }
+
+            @Override
+            public List<String> namespacesOf(Rules.Family f, String path) {
+                return items.getOrDefault(path, List.of());
+            }
+        };
+        try {
+            BotAccess a = withAlice(dir);
+            assertNull(a.food("Alice", "cog", true, "Owner", NOW));
+            assertEquals(List.of("create:cog"), a.foodList("Alice", true));
+            assertEquals("create:cog", BotAccess.kept(Rules.Family.FOOD, "Cog"));
+            assertNull(a.food("Alice", "beef", true, "Owner", NOW));
+            assertEquals(List.of("beef", "create:cog"), a.foodList("Alice", true));
+            String clash = a.food("Alice", "gear", true, "Owner", NOW);
+            assertTrue(clash != null && clash.contains("create:gear") && clash.contains("othermod:gear"), clash);
+            String typo = a.food("Alice", "coog", true, "Owner", NOW);
+            assertTrue(typo != null && typo.contains("no item called coog"), typo);
+            String wrongMod = a.food("Alice", "othermod:cog", true, "Owner", NOW);
+            assertTrue(wrongMod != null && wrongMod.contains("no item othermod:cog"), wrongMod);
+            assertNull(a.food("Alice", "othermod:gear", true, "Owner", NOW));
+        } finally {
+            Rules.registry = null;
+        }
     }
 
     @Test

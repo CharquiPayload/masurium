@@ -58,6 +58,16 @@
       "sources": [["break", "stone", "own"], ["break", "spruce_log", "own"], ["break", "birch_log", "imposed"]]
     },
     {
+      "name": "a mod's ids, whole or by their name alone, are ids like any other",
+      "base": {"food": {"ban": ["farmersdelight:tomato"]}},
+      "own": {"break": {"allow": ["create:andesite_casing", "cog"]}},
+      "imposed": {"food": {"allow": ["golden_apple"]}, "from": {"food.golden_apple": "global"}},
+      "prefs": {},
+      "food_banned": ["enchanted_golden_apple", "farmersdelight:tomato"],
+      "break_allowed": ["cobblestone", "cog", "create:andesite_casing", "dirt", "grass_block", "stone"],
+      "sources": [["food", "farmersdelight:tomato", "base"], ["break", "create:andesite_casing", "own"], ["food", "golden_apple", "imposed"]]
+    },
+    {
       "name": "replacing with nothing leaves the list empty",
       "base": {}, "own": {}, "imposed": {"food": {"replace": true}},
       "prefs": {},

@@ -270,7 +270,7 @@ final class Needs {
             ItemStack stack = p.getInventory().getItem(i);
             if (stack.isEmpty() || !stack.has(DataComponents.FOOD)) continue;
             if (!FoodBlacklist.banned(BuiltInRegistries.ITEM
-                    .getKey(stack.getItem()).getPath())) {
+                    .getKey(stack.getItem()).toString())) {
                 return true;
             }
         }
@@ -282,8 +282,8 @@ final class Needs {
         for (int i = 0; i < 36; i++) {
             ItemStack stack = p.getInventory().getItem(i);
             if (stack.isEmpty() || !stack.has(DataComponents.FOOD)) continue;
-            String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
-            if (FoodBlacklist.banned(id)) return id;
+            var key = BuiltInRegistries.ITEM.getKey(stack.getItem());
+            if (FoodBlacklist.banned(key.toString())) return key.getPath();
         }
         return null;
     }

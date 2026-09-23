@@ -131,8 +131,9 @@ final class BreakPermissions {
         return ofTheBoss;
     }
 
+    /** By the block's full id, which a list may hold whole or by its name alone ({@link Ids}). */
     static synchronized boolean mayIBreak(String id) {
-        return load().contains(id) || ofTheBoss().contains(id);
+        return Ids.listed(load(), id) || Ids.listed(ofTheBoss(), id);
     }
 
     // --- the free zone ------------------------------------------------------

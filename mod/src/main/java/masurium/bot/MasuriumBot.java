@@ -2311,7 +2311,7 @@ public class MasuriumBot {
             // The blacklist only weighs when IT chooses. Asking for it by name is an
             // order, not an oversight, just as with rotten flesh (the bot was caught
             // snacking on what it was fishing).
-            if (FoodBlacklist.banned(id)) continue;
+            if (FoodBlacklist.banned(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())) continue;
             if (poisons(id)) {
                 if (poisonous < 0) poisonous = i;
             } else if (fine < 0) {
@@ -2332,7 +2332,8 @@ public class MasuriumBot {
             var stack = inv.getItem(i);
             if (stack.isEmpty() || !stack.has(DataComponents.FOOD)) continue;
             String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath();
-            if (FoodBlacklist.banned(id) || poisons(id)) continue;
+            if (FoodBlacklist.banned(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())
+                    || poisons(id)) continue;
             int r = takeFromBackpack(p, id);
             if (r >= 0) {
                 Logbook.note("eat", "I brought up " + id + " from the backpack to eat");
@@ -2813,12 +2814,10 @@ public class MasuriumBot {
         String give = q.getOrDefault("allow", "").trim().toLowerCase();
         String remove = q.getOrDefault("forbid", "").trim().toLowerCase();
         if (!give.isEmpty()) {
-            var id = net.minecraft.resources.ResourceLocation
-                    .tryParse("minecraft:" + give);
-            if (id == null || !BuiltInRegistries.BLOCK.containsKey(id)) {
+            if (!Ids.known(BuiltInRegistries.BLOCK, give)) {
                 return String.format("{\"ok\":false,\"error\":\"I do not know the "
-                        + "block '%s'; ids go in English, like dirt or "
-                        + "stone\"}", Request.escape(give));
+                        + "block '%s'; ids go in English, like dirt, stone or "
+                        + "create:cog\"}", Request.escape(give));
             }
             BreakPermissions.allow(give);
             Logbook.note("permissions", "I was allowed to break " + give);
@@ -3303,8 +3302,7 @@ public class MasuriumBot {
         List<String> out = new ArrayList<>();
         for (Object o : ids) {
             String id = String.valueOf(o).strip().toLowerCase();
-            var rl = net.minecraft.resources.ResourceLocation.tryParse("minecraft:" + id);
-            if (rl != null && registry.containsKey(rl)) {
+            if (Ids.known(registry, id)) {
                 out.add(id);
             } else {
                 unknown.add(id);

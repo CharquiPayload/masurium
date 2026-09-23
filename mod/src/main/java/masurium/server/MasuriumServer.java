@@ -108,6 +108,28 @@ public class MasuriumServer {
         NeoForge.EVENT_BUS.register(statusBoard);
     }
 
+    /**
+     * The ids a rule may name: the items (for food) and blocks (for break) of every mod
+     * this server runs, which are the bots' too.
+     */
+    private static final class GameRegistry implements Rules.Registry {
+        private static net.minecraft.core.Registry<?> of(Rules.Family f) {
+            return f == Rules.Family.FOOD ? BuiltInRegistries.ITEM : BuiltInRegistries.BLOCK;
+        }
+
+        @Override
+        public boolean has(Rules.Family f, String namespace, String path) {
+            ResourceLocation id = ResourceLocation.tryBuild(namespace, path);
+            return id != null && of(f).containsKey(id);
+        }
+
+        @Override
+        public List<String> namespacesOf(Rules.Family f, String path) {
+            return of(f).keySet().stream().filter(id -> id.getPath().equals(path))
+                    .map(ResourceLocation::getNamespace).distinct().sorted().toList();
+        }
+    }
+
     @SubscribeEvent
     public void onStart(ServerStartedEvent event) {
         this.server = event.getServer();
@@ -119,6 +141,7 @@ public class MasuriumServer {
         bots = PickupRule.bots(cfg.getProperty("bots", DEFAULT_BOTS));
         access.declare(bots);
         access.serverVersion(ownVersion("masurium_server"));
+        Rules.registry = new GameRegistry();
         LOG.info("[masurium] bots: {}", bots);
 
         if (!host.equals("127.0.0.1") && token.isEmpty()) {

@@ -115,7 +115,8 @@ class RulesPage(QWidget):
         v.addWidget(lst, 1)
         row = QHBoxLayout()
         field = QLineEdit()
-        field.setPlaceholderText("an id, like rotten_flesh" if family == "food" else "an id, like oak_log")
+        field.setPlaceholderText("an id, like rotten_flesh or farmersdelight:tomato" if family == "food"
+                                 else "an id, like oak_log or create:cog")
         row.addWidget(field, 1)
         buttons = {}
         for verb in (on, off, "default"):

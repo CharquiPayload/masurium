@@ -204,9 +204,13 @@ final class BotCommands {
         return Commands.argument("player", StringArgumentType.word()).suggests(suggestions);
     }
 
+    /**
+     * An item or block id, the last word of its command: the rest of the line, because a
+     * mod's id has a colon ({@code create:cog}), which a plain word does not take.
+     */
     private static RequiredArgumentBuilder<CommandSourceStack, String> id(
             SuggestionProvider<CommandSourceStack> suggestions) {
-        return Commands.argument("id", StringArgumentType.word()).suggests(suggestions);
+        return Commands.argument("id", StringArgumentType.greedyString()).suggests(suggestions);
     }
 
     private static String bot(CommandContext<CommandSourceStack> c) {
@@ -534,19 +538,20 @@ final class BotCommands {
     private int food(CommandContext<CommandSourceStack> c, Boolean ban) {
         String bot = bot(c);
         if (!allowed(c, bot, Action.FOOD)) return 0;
-        String what = StringArgumentType.getString(c, "id").toLowerCase();
+        String typed = StringArgumentType.getString(c, "id").strip().toLowerCase();
         CommandSourceStack s = c.getSource();
-        String bad = access.food(bot, what, ban, runner(s), System.currentTimeMillis());
+        String bad = access.food(bot, typed, ban, runner(s), System.currentTimeMillis());
         if (bad != null) {
             fail(s, bad);
             return 0;
         }
+        String what = BotAccess.kept(Rules.Family.FOOD, typed);
         boolean banned = access.rules(bot).effective().food().contains(what);
         LOG.info("[masurium] food {} {} for {} by {}", ban == null ? "default" : ban ? "ban" : "allow",
                 what, access.display(bot), runner(s));
         done(s, access.display(bot) + (banned
                 ? " will not eat " + what + " on its own (handed to it by name, it still will)"
-                : " may eat " + what + " on its own") + whenItApplies(bot));
+                : " may eat " + what + " on its own") + meaning(typed, what) + whenItApplies(bot));
         return 1;
     }
 
@@ -566,20 +571,27 @@ final class BotCommands {
     private int breaking(CommandContext<CommandSourceStack> c, Boolean allow) {
         String bot = bot(c);
         if (!allowed(c, bot, Action.BREAK)) return 0;
-        String what = StringArgumentType.getString(c, "id").toLowerCase();
+        String typed = StringArgumentType.getString(c, "id").strip().toLowerCase();
         CommandSourceStack s = c.getSource();
-        String bad = access.breaking(bot, what, allow, runner(s), System.currentTimeMillis());
+        String bad = access.breaking(bot, typed, allow, runner(s), System.currentTimeMillis());
         if (bad != null) {
             fail(s, bad);
             return 0;
         }
+        String what = BotAccess.kept(Rules.Family.BREAK, typed);
         boolean may = access.rules(bot).effective().breaking().contains(what);
         LOG.info("[masurium] break {} {} for {} by {}",
                 allow == null ? "default" : allow ? "allow" : "forbid", what, access.display(bot), runner(s));
         done(s, access.display(bot) + (may
                 ? " may break " + what + " on its own"
-                : " may not break " + what + " on its own") + whenItApplies(bot));
+                : " may not break " + what + " on its own") + meaning(typed, what) + whenItApplies(bot));
         return 1;
+    }
+
+    /** " (cog is create:cog here)", when a bare name turned out to be a mod's. */
+    private static String meaning(String typed, String kept) {
+        String bare = typed.startsWith("minecraft:") ? typed.substring("minecraft:".length()) : typed;
+        return kept == null || kept.equals(bare) ? "" : " (" + typed + " is " + kept + " here)";
     }
 
     /** The "there is no such bot" check the read-only commands share. */

@@ -599,9 +599,9 @@ final class Walker {
         // goes through blocks and then does not break them is going in circles.
         if (!routeBreaks && !Preferences.is("break_to_advance")) return false;
         var state = mc.level.getBlockState(plug);
-        String id = net.minecraft.core.registries.BuiltInRegistries.BLOCK
-                .getKey(state.getBlock()).getPath();
-        if (!BreakPermissions.mayIBreak(id)) {
+        var key = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        String id = key.getPath();
+        if (!BreakPermissions.mayIBreak(key.toString())) {
             stop("the way is blocked by " + id
                     + " and I have no permission to break it");
             return true;

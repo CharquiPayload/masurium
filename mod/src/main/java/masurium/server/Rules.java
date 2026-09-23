@@ -53,29 +53,37 @@ final class Rules {
     /** Where something no layer names comes from: what every bot starts with. */
     static final String START = "start";
 
-    /** Item and block ids, bare: that is what the body resolves against its registry. */
-    static final Pattern ID = Pattern.compile("[a-z0-9_]{1,64}");
-    private static final Pattern FROM_KEY = Pattern.compile("(prefs|food|break)\\.([a-z0-9_]{1,64}|\\*)");
+    /**
+     * Item and block ids: a bare name ({@code beef}, {@code cog}), which is that name in
+     * whatever mod has it, the game's own first; or a full one ({@code create:cog}),
+     * which is exactly that. {@code minecraft:} is taken off: a vanilla id stays bare.
+     */
+    static final Pattern ID = Pattern.compile("(?:[a-z0-9_.-]{1,64}:)?[a-z0-9_./-]{1,64}");
+    private static final Pattern FROM_KEY = Pattern.compile(
+            "(prefs|food|break)\\.((?:[a-z0-9_.-]{1,64}:)?[a-z0-9_./-]{1,64}|\\*)");
     private static final int LABEL_MAX = 64;
 
     /** The two lists. {@code on} puts an id on the list, {@code off} takes it off. */
     enum Family {
         /** The food it does not eat on its own. */
-        FOOD("food", "ban", "allow", Settings.FOOD_FACTORY),
+        FOOD("food", "ban", "allow", Settings.FOOD_FACTORY, "item"),
         /** The blocks it may break on its own. */
-        BREAK("break", "allow", "forbid", Settings.BREAK_SEED);
+        BREAK("break", "allow", "forbid", Settings.BREAK_SEED, "block");
 
         final String id;
         final String on;
         final String off;
         /** What the list holds before any layer says anything. */
         final List<String> start;
+        /** What its ids name, in the game's registries. */
+        final String thing;
 
-        Family(String id, String on, String off, List<String> start) {
+        Family(String id, String on, String off, List<String> start, String thing) {
             this.id = id;
             this.on = on;
             this.off = off;
             this.start = start;
+            this.thing = thing;
         }
 
         static Family of(String id) {
@@ -242,8 +250,8 @@ final class Rules {
                     String id = id(o);
                     if (id == null) {
                         if (strict) {
-                            throw new IllegalArgumentException("'" + o + "' is not an id; they go in English "
-                                    + "and without a namespace, like rotten_flesh or dirt");
+                            throw new IllegalArgumentException("'" + o + "' is not an id; they go in English, "
+                                    + "like rotten_flesh, dirt or create:cog");
                         }
                         continue;
                     }
@@ -279,14 +287,60 @@ final class Rules {
     }
 
     /**
-     * An id as a layer holds it, or null if it is not one. {@code minecraft:} is taken
-     * off, since that is the only namespace the body resolves; any other is refused.
+     * An id as a layer holds it, or null if it is not one: lowercase, and without
+     * {@code minecraft:}, so a vanilla id reads the same written either way.
      */
     static String id(Object o) {
         if (!(o instanceof String s)) return null;
         String id = s.strip().toLowerCase();
         if (id.startsWith("minecraft:")) id = id.substring("minecraft:".length());
         return ID.matcher(id).matches() ? id : null;
+    }
+
+    /**
+     * What ids are checked against when someone names one: this server's registries
+     * (the mod sets it at start). Null where there are none, as in the tests: ids are
+     * then kept as they come.
+     */
+    interface Registry {
+        /** Whether {@code namespace:path} is an item (food) or a block (break) here. */
+        boolean has(Family f, String namespace, String path);
+
+        /** The namespaces with an item or block of that name, sorted. */
+        List<String> namespacesOf(Family f, String path);
+    }
+
+    static volatile Registry registry;
+
+    /**
+     * An id someone just named, as it is kept: a vanilla one bare, a full one as it is,
+     * and a bare one that only a mod has, with that mod's namespace ({@code cog} is
+     * {@code create:cog} where only Create has one). Checked against the registry, so a
+     * typo is said instead of kept.
+     *
+     * @throws IllegalArgumentException saying why not: there is no such thing here, or
+     *     several mods have one of that name and it has to say which
+     */
+    static String resolve(Family f, String id) {
+        Registry r = registry;
+        if (r == null) return id;
+        int colon = id.indexOf(':');
+        if (colon >= 0) {
+            if (!r.has(f, id.substring(0, colon), id.substring(colon + 1))) {
+                throw new IllegalArgumentException("there is no " + f.thing + " " + id + " on this server");
+            }
+            return id;
+        }
+        if (r.has(f, "minecraft", id)) return id;
+        List<String> mods = r.namespacesOf(f, id);
+        if (mods.isEmpty()) {
+            throw new IllegalArgumentException("there is no " + f.thing + " called " + id + " on this server");
+        }
+        if (mods.size() > 1) {
+            throw new IllegalArgumentException(id + " is in " + String.join(" and ", mods) + ": say which, "
+                    + String.join(" or ", mods.stream().map(m -> m + ":" + id).toList()));
+        }
+        return mods.get(0) + ":" + id;
     }
 
     /** {@code upper} on top of {@code lower}: a new layer, neither is touched. */

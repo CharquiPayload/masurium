@@ -127,6 +127,10 @@ setting ignored it without a word.
   (animations and animated icons) can be turned off. Settings come in
   sections (the game, the brain, groups), each with an icon and a name a
   person reads, the command line's key under it.
+- Mods' ids in a bot's rules: `food ban farmersdelight:tomato`, `break allow
+  create:cog`. A name alone is that name in whatever mod has it, and named on
+  the server it is looked up: `cog` is kept as `create:cog` when only Create
+  has one; a name two mods share, or none has, is refused, saying why.
 - Offline accounts (`account add --offline NAME`): a player name, listed and
   chosen like a Microsoft account, which may play in several games at once.
 - `java` and `java_args`: the Java an instance's game runs on and extra JVM

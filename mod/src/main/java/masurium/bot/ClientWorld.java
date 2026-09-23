@@ -124,7 +124,7 @@ final class ClientWorld implements World {
         BlockState state = levelValue.getBlockState(aux);
         if (state.getDestroySpeed(levelValue, aux) < 0) return false;   // bedrock
         return BreakPermissions.mayIBreak(net.minecraft.core.registries
-                .BuiltInRegistries.BLOCK.getKey(state.getBlock()).getPath());
+                .BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
     }
 
     private byte type(int x, int y, int z) {
