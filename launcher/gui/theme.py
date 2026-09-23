@@ -133,6 +133,15 @@ QWidget#section[drop="true"], QWidget#loose[drop="true"], QWidget#dependency[dro
     background: {c['drop']}; border: 1px dashed {c['accent_light']}; border-radius: 10px; }}
 QToolButton#face {{ border: none; background: transparent; padding: 0; }}
 QLabel#muted {{ color: {c['muted']}; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
+QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
+QScrollBar::handle {{ background: {c['strong_border']}; border-radius: 3px; min-height: 28px; min-width: 28px; }}
+QScrollBar::handle:hover {{ background: {c['hover']}; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; border: none; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+QScrollArea#plain, QScrollArea#plain > QWidget, QWidget#plain {{ background: transparent; }}
+QFrame#card {{ background: {c['section']}; border: 1px solid {c['border']}; border-radius: 10px; }}
+QLabel#cardTitle {{ color: {c['header']}; font-weight: bold; font-size: 11pt; }}
 QLabel#title {{ font-weight: bold; font-size: 13pt; }}
 QFrame#side {{ background: {c['panel']}; border-left: 1px solid {c['border']}; }}
 QPushButton {{ background: {c['button']}; border: 1px solid {c['strong_border']}; border-radius: 6px;

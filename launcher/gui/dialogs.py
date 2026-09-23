@@ -63,8 +63,7 @@ class PagedDialog(Dialog):
         self.index.setCurrentRow(names.index(start) if start in names else 0)
 
     def _turn(self, row):
-        self.stack.setCurrentIndex(row)
-        anim.fade_in(self.stack.currentWidget())
+        anim.turn(self.stack, row)
 
     def page(self, name):
         self.index.setCurrentRow(list(self.pages).index(name))

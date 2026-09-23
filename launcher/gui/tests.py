@@ -16,7 +16,7 @@ import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, QSettings, QVariantAnimation  # noqa: E402
+from PySide6.QtCore import QEvent, QSettings, Qt, QVariantAnimation  # noqa: E402
 from PySide6.QtGui import QColor, QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QToolButton  # noqa: E402
 
@@ -339,7 +339,18 @@ def tests(app):
     tile.update_view(view, None)
     lp.animated_icons.setChecked(True)
     shot(sw, "settings-launcher")
+    sw.show()
+    wait(lambda: sw.isVisible(), 2)
+
+    def covers():
+        return [c for c in sw.stack.findChildren(QLabel, options=Qt.FindDirectChildrenOnly)
+                if not c.pixmap().isNull()]
     acc = sw.page("Accounts")
+    check("turning a page: the new one is there at once, a picture of the old one fading over it",
+          sw.stack.currentWidget() is acc and len(covers()) == 1, covers())
+    check("...gone when the fade ends, and the page itself never faded",
+          wait(lambda: not covers(), 2) and acc.graphicsEffect() is None, covers())
+    sw.hide()
     check("accounts: none yet, said", acc.list.topLevelItemCount() == 1
           and "none" in acc.list.topLevelItem(0).text(0))
     ops.add_offline_account(ws, "Dave")

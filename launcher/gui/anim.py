@@ -2,8 +2,8 @@
 that unfolds softly, a tile that appears where it was dropped. On by
 default, off in the launcher's settings; off, everything simply is where
 it goes."""
-from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QPropertyAnimation
-from PySide6.QtWidgets import QGraphicsOpacityEffect
+from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QPropertyAnimation, Qt
+from PySide6.QtWidgets import QGraphicsOpacityEffect, QLabel
 
 enabled = True
 DURATION = 170
@@ -23,6 +23,35 @@ def fade_in(widget, ms=DURATION):
     motion.setEndValue(1.0)
     motion.setEasingCurve(QEasingCurve.OutCubic)
     motion.finished.connect(lambda: widget.setGraphicsEffect(None))
+    motion.start(QAbstractAnimation.DeleteWhenStopped)
+
+
+def turn(stack, index, ms=DURATION):
+    """A stacked widget turned to `index`: the new page is there at once,
+    and a picture of the old one fades out over it.
+
+    The picture fades, not the page. A page faded in with an opacity effect
+    left pieces of the one before on screen while it came in: pages hold
+    tables and scroll areas, whose insides the effect does not repaint."""
+    old = stack.currentWidget()
+    if not enabled or old is None or index == stack.currentIndex() or not stack.isVisible():
+        stack.setCurrentIndex(index)
+        return
+    picture = old.grab()
+    stack.setCurrentIndex(index)
+    cover = QLabel(stack)
+    cover.setPixmap(picture)
+    cover.setGeometry(old.geometry())
+    cover.setAttribute(Qt.WA_TransparentForMouseEvents)
+    effect = QGraphicsOpacityEffect(cover)
+    cover.setGraphicsEffect(effect)
+    cover.show()
+    motion = QPropertyAnimation(effect, b"opacity", cover)
+    motion.setDuration(ms)
+    motion.setStartValue(1.0)
+    motion.setEndValue(0.0)
+    motion.setEasingCurve(QEasingCurve.OutCubic)
+    motion.finished.connect(cover.deleteLater)
     motion.start(QAbstractAnimation.DeleteWhenStopped)
 
 

@@ -261,10 +261,66 @@ def _globe(p):
     p.drawLine(QPointF(3.5, 12), QPointF(20.5, 12))
 
 
+def _chip(p):
+    """Memory: a chip with its pins."""
+    p.drawRoundedRect(QRectF(6.5, 6.5, 11, 11), 2, 2)
+    for k in (9, 12, 15):
+        p.drawLine(QPointF(3.5, k), QPointF(6.5, k))
+        p.drawLine(QPointF(17.5, k), QPointF(20.5, k))
+        p.drawLine(QPointF(k, 3.5), QPointF(k, 6.5))
+        p.drawLine(QPointF(k, 17.5), QPointF(k, 20.5))
+
+
+def _spark(p):
+    """The model: a four-pointed spark."""
+    path = QPainterPath()
+    path.moveTo(12, 3.5)
+    path.cubicTo(12.8, 8.8, 15.2, 11.2, 20.5, 12)
+    path.cubicTo(15.2, 12.8, 12.8, 15.2, 12, 20.5)
+    path.cubicTo(11.2, 15.2, 8.8, 12.8, 3.5, 12)
+    path.cubicTo(8.8, 11.2, 11.2, 8.8, 12, 3.5)
+    p.drawPath(path)
+
+
+def _bolt(p):
+    p.drawPolygon(QPolygonF([QPointF(13.5, 3), QPointF(6, 13.5), QPointF(11.5, 13.5), QPointF(10.5, 21),
+                             QPointF(18, 10.5), QPointF(12.5, 10.5)]))
+
+
+def _crown(p):
+    p.drawPolygon(QPolygonF([QPointF(4.5, 17), QPointF(3.5, 7.5), QPointF(8.5, 11.5), QPointF(12, 5),
+                             QPointF(15.5, 11.5), QPointF(20.5, 7.5), QPointF(19.5, 17)]))
+    p.drawLine(QPointF(4.5, 20), QPointF(19.5, 20))
+
+
+def _shield(p):
+    path = QPainterPath()
+    path.moveTo(12, 3.5)
+    path.lineTo(19, 6)
+    path.lineTo(19, 11.5)
+    path.cubicTo(19, 16, 15.5, 19.2, 12, 20.5)
+    path.cubicTo(8.5, 19.2, 5, 16, 5, 11.5)
+    path.lineTo(5, 6)
+    path.closeSubpath()
+    p.drawPath(path)
+
+
+def _lock(p):
+    p.drawRoundedRect(QRectF(5.5, 10.5, 13, 10), 2, 2)
+    path = QPainterPath()
+    path.moveTo(8.5, 10.5)
+    path.lineTo(8.5, 8)
+    path.arcTo(QRectF(8.5, 4.5, 7, 7), 180, -180)
+    path.lineTo(15.5, 10.5)
+    p.drawPath(path)
+    p.setBrush(p.pen().color())
+    p.drawEllipse(QPointF(12, 15.5), 1.1, 1.1)
+
+
 DRAW = dict(rules=_rules, cube=_cube, cup=_cup, server=_server, window=_window, globe=_globe, play=_play, stop=_stop, cancel=_cancel, edit=_edit, move=_move, folder=_folder, copy=_copy,
             delete=_delete, plus=_plus, gear=_gear, help=_help, account=_account, bot=_bot, restart=_restart,
             connect=_connect, bridge=_bridge, key=_key, logs=_logs, doctor=_doctor, quit=_quit, group=_group,
-            info=_info)
+            info=_info, chip=_chip, spark=_spark, bolt=_bolt, crown=_crown, shield=_shield, lock=_lock)
 
 
 # Each icon's gesture: (kind, amount, how long in ms). The icons that draw

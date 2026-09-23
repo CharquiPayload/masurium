@@ -5,10 +5,10 @@ their names down the left.
 """
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QHeaderView,
-                               QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit,
-                               QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QTabWidget, QTreeWidget,
-                               QTreeWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QFrame, QGridLayout,
+                               QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
+                               QListWidgetItem, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTableWidget,
+                               QTableWidgetItem, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .. import accounts, operations, rules, settings
 from ..bots import Instance
@@ -36,6 +36,14 @@ def side_buttons(*buttons):
 
 
 # What a yes-or-no setting's switch says next to it; the whole story is its tooltip.
+def picture(name, size):
+    """One of the icons, as a picture beside a name."""
+    lab = QLabel()
+    lab.setPixmap(icons.pixmap(name, size))
+    lab.setFixedSize(size, size)
+    return lab
+
+
 SWITCH_LABELS = {"ignore_global": "ignore the global config", "lock": "keep the groups around it out",
                  "fast_responses": "Pregenerate fast responses"}
 
@@ -294,6 +302,17 @@ class RulesPage(QWidget):
         self._load()
 
 
+# The settings in sections, each with its icon and a name a person reads;
+# the key the command line knows it by goes under the name.
+SECTIONS = (("The game", "cube", ("account", "heap", "port", "java", "java_args")),
+            ("The brain", "spark", ("model", "fast_responses", "owner", "role")),
+            ("Groups", "group", ("ignore_global", "lock")))
+NAMES = {"account": ("Account", "account"), "heap": ("Memory", "chip"), "port": ("Port", "connect"),
+         "java": ("Java", "cup"), "java_args": ("Java arguments", "logs"), "model": ("Model", "spark"),
+         "fast_responses": ("Fast responses", "bolt"), "owner": ("Owner", "crown"), "role": ("Role", "shield"),
+         "ignore_global": ("Global config", "globe"), "lock": ("Lock", "lock")}
+
+
 class SettingsPage(QWidget):
     """The settings of one layer: an instance's, a bot's, a group's or the
     global ones. Each row shows what applies now and where it comes from;
@@ -305,19 +324,23 @@ class SettingsPage(QWidget):
         self.layer = settings.layer_of(target)
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(6)
         v.addWidget(title(heading or f"Settings of {self._name()}"))
         v.addWidget(muted({"instance": "Its own layer: over its bot's, under its groups and the global config.",
                            "bot": "The bot's: under the settings of each of its instances.",
                            "group": "The group's: imposed on everything inside it.",
                            "global": "Imposed on every instance that does not ignore it."}[self.layer]))
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["setting", "here", "what applies now"])
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.verticalHeader().hide()
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.table.setColumnWidth(0, 130)
-        self.table.setColumnWidth(1, 260)
-        v.addWidget(self.table, 1)
+        scroll = QScrollArea()
+        scroll.setObjectName("plain")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        body = QWidget()
+        body.setObjectName("plain")
+        self.sections = QVBoxLayout(body)
+        self.sections.setContentsMargins(0, 6, 8, 6)
+        self.sections.setSpacing(14)
+        scroll.setWidget(body)
+        v.addWidget(scroll, 1)
         v.addWidget(muted("The first choice of each list is what applies when this layer says nothing: choosing "
                           "it takes the setting out of this layer. In bold, what differs from the default."))
         row = QHBoxLayout()
@@ -330,35 +353,62 @@ class SettingsPage(QWidget):
         self._fill()
 
     def _fill(self):
-        """The rows, as they stand now (again after Apply)."""
+        """The sections, as they stand now (again after Apply)."""
         target = self.target
+        while self.sections.count():
+            item = self.sections.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
         keys = [k for k, s in settings.SETTINGS.items()
                 if self.layer in s.layers and (self.only is None or k in self.only)]
-        self.table.setRowCount(len(keys))
+        sections = [(heading, pic, [k for k in ks if k in keys]) for heading, pic, ks in SECTIONS]
+        known = {k for _, _, ks in SECTIONS for k in ks}
+        sections.append(("Other", "gear", [k for k in keys if k not in known]))
         self.editors = {}
         own = settings.own_values(target)
-        for r, key in enumerate(keys):
+        for heading, pic, ks in sections:
+            if ks:
+                self.sections.addWidget(self._section(heading, pic, ks, own))
+        self.sections.addStretch()
+        self.apply_button.setEnabled(True)
+
+    def _section(self, heading, pic, keys, own):
+        card = QFrame()
+        card.setObjectName("card")
+        grid = QGridLayout(card)
+        grid.setContentsMargins(16, 12, 16, 14)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(12)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        head.addWidget(picture(pic, 20))
+        name = QLabel(heading)
+        name.setObjectName("cardTitle")
+        head.addWidget(name)
+        head.addStretch()
+        grid.addLayout(head, 0, 0, 1, 4)
+        line = QFrame()
+        line.setObjectName("headerLine")
+        line.setFrameShape(QFrame.HLine)
+        grid.addWidget(line, 1, 0, 1, 4)
+        for r, key in enumerate(keys, start=2):
             s = settings.SETTINGS[key]
-            item = QTableWidgetItem(key)
-            item.setToolTip(s.help)
-            self.table.setItem(r, 0, item)
+            label, icon_name = NAMES.get(key, (key, "gear"))
             current = "" if own.get(key) is None else str(own.get(key))
-            under, from_ = settings.resolve(target, key, own_layer=False)
+            under, from_ = settings.resolve(self.target, key, own_layer=False)
             if tuple(s.choices) == ("no", "yes"):
                 # Yes or no is a switch. Off where nothing above says yes is
                 # simply not set here.
-                row, editor = switch_row(SWITCH_LABELS.get(key, key), (current or under) == "yes")
-                row.setToolTip(s.help)
-                self.table.setCellWidget(r, 1, row)
-                self.table.setRowHeight(r, 34)
+                widget, editor = switch_row(SWITCH_LABELS.get(key, key), (current or under) == "yes")
             else:
-                editor = QComboBox()
+                editor = widget = QComboBox()
                 editor.setEditable(key not in ("role", "account"))
+                editor.setMinimumWidth(260)
                 # The first entry is what applies when this layer says nothing,
                 # shown as the value it is and where it comes from: never a
                 # blank box to guess at.
                 editor.addItem(f"{under or '(none)'}   ·   {from_}", None)
-                for c in settings.suggestions(target, key):
+                for c in settings.suggestions(self.target, key):
                     editor.addItem(c, c)
                 if current:
                     i = editor.findData(current)
@@ -366,19 +416,29 @@ class SettingsPage(QWidget):
                         editor.addItem(current, current)
                         i = editor.count() - 1
                     editor.setCurrentIndex(i)
-                editor.setToolTip(s.help)
-                self.table.setCellWidget(r, 1, editor)
+            widget.setToolTip(s.help)
             self.editors[key] = (editor, current, under)
-            value, source = settings.resolve(target, key)
-            now = QTableWidgetItem(f"{value or '-'}   ({source})   · counts {settings.APPLIES[s.applies]}")
-            if source != "default":
-                # Bold, as everywhere: what differs from the default.
+            value, source = settings.resolve(self.target, key)
+            changed = source != "default"
+            # Bold, as everywhere: what differs from the default.
+            name = QLabel(f"{'<b>' if changed else ''}{label}{'</b>' if changed else ''}"
+                          f"<br><span style='color:{theme.FAINT}; font-size:8pt'>{key}</span>")
+            name.setToolTip(s.help)
+            now = muted(f"now {value or '—'}  ·  {'the default' if source == 'default' else source}"
+                        f"  ·  counts {settings.APPLIES[s.applies]}")
+            if changed:
                 font = now.font()
                 font.setBold(True)
                 now.setFont(font)
-                item.setFont(font)
-            self.table.setItem(r, 2, now)
-        self.apply_button.setEnabled(True)
+            icon = picture(icon_name, 18)
+            icon.setToolTip(s.help)
+            grid.addWidget(icon, r, 0)
+            grid.addWidget(name, r, 1)
+            grid.addWidget(widget, r, 2)
+            grid.addWidget(now, r, 3)
+        grid.setColumnMinimumWidth(1, 140)
+        grid.setColumnStretch(3, 1)
+        return card
 
     def _name(self):
         t = self.target

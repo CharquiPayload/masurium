@@ -124,7 +124,9 @@ setting ignored it without a word.
   out as Prism Launcher's (a bar on top, instances as faces by group, the
   selected one's actions on the right, Edit Instance and Settings windows with
   their pages down the left), with icons of its own, drawn in code; motion
-  (animations and animated icons) can be turned off.
+  (animations and animated icons) can be turned off. Settings come in
+  sections (the game, the brain, groups), each with an icon and a name a
+  person reads, the command line's key under it.
 - Offline accounts (`account add --offline NAME`): a player name, listed and
   chosen like a Microsoft account, which may play in several games at once.
 - `java` and `java_args`: the Java an instance's game runs on and extra JVM

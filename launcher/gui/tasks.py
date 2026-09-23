@@ -85,6 +85,17 @@ class Tasks(QObject):
         self.changed.emit()
 
 
+def _answer(callback, value):
+    """An answer to what asked, unless what asked is gone: a page closed
+    while its server was still being asked leaves its labels deleted, and
+    writing on them would be an error for nothing."""
+    try:
+        callback(value)
+    except RuntimeError as e:
+        if "already deleted" not in str(e):
+            raise
+
+
 class Background(QObject):
     """One question on a thread, its answer back on the window's: for what a
     dialog needs from a server before it can show anything."""
@@ -94,8 +105,8 @@ class Background(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.answered.connect(lambda cb, result: cb(result))
-        self.broke.connect(lambda cb, e: cb(e))
+        self.answered.connect(_answer)
+        self.broke.connect(_answer)
 
     def ask(self, fn, then, otherwise):
         def work():
