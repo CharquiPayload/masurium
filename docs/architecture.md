@@ -298,28 +298,28 @@ hard links to the server's pack, so **creating a bot costs a few megabytes**.
 
 ```text
 servers/<slug>/        server.conf + mods/ (one server and ITS client pack), server.env (its token)
-accounts/<account>/    account.json + the HeadlessMC folder its login lives in
-bots/<bot>/            bot.json + personality.txt: a character, and nothing heavy
+accounts/<account>/    account.json + the HeadlessMC folder its login lives in (Microsoft accounts)
 groups/<group>/        group.json: instances and groups, or a leader and its guards
-instances/<instance>/  instance.json (which bot, which server, its port, its own settings),
-                       mods/ (its extras), gamedir/, hmc/, run/: a bot on a server, what runs
+instances/<instance>/  instance.json (its player name, server, port, account, settings),
+                       personality.txt, icon.png, mods/ (its extras), gamedir/, hmc/, run/:
+                       a bot, and what runs
 shared/                the HeadlessMC launcher and the mods every instance uses
 <state>/servers/<slug>/   what the bridges of that server keep (sessions, channels, jobs)
 ```
 
-**A bot and an instance are two things.** The bot is who it is: its player
-name, its personality, its settings. The instance is that bot on a server, and
-carries what running needs: a game folder, a HeadlessMC with its login, a port,
-logs, extra mods, and settings of its own that win over the bot's. One bot can
-have several instances, on several servers, and instances are cloned without
-questions: two may even be the same player on the same server. What cannot
-happen is both RUNNING, which is one player joining twice; `start` refuses it
-(the same player on one server, or an online account already playing
-anywhere), saying which instance is in the way.
+**A bot is an instance.** Who it is (its player name, its personality, its
+settings, its picture) and what running needs (a game folder, a HeadlessMC
+with its login, a port, logs, extra mods) live together in one folder. There
+were bots apart from instances once, a character that several instances
+played; two places to set one thing was one too many, and a person could not
+tell which applied. The same character on two servers is a copy of the
+instance, made without questions: two may even be the same player on the same
+server. What cannot happen is both RUNNING, which is one player joining twice;
+`start` refuses it (the same player on one server, or a Microsoft account
+already playing anywhere), saying which instance is in the way.
 
-**Settings come in layers**, weakest first: the bot's (`bot.json`), the
-instance's (`instance.json`), its groups' from its own outwards, and the global
-config (`launcher.json`). The outer ones impose; a `lock` on an instance or a
+**Settings come in layers**, weakest first: the instance's (`instance.json`),
+its groups' from its own outwards, and the global config (`launcher.json`). The outer ones impose; a `lock` on an instance or a
 group keeps the groups around it out, and `ignore_global` the global config.
 One table (`launcher/settings.py`) says what each setting accepts, at which
 layers, and when a change counts. The bridge knows nothing about layers: on

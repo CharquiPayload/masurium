@@ -1,10 +1,10 @@
-"""Minecraft accounts, logged in once and shared by the instances that use them.
+"""Microsoft accounts, logged in once and shared by the instances that use them.
 
-An account is a player: online, a real, purchased Minecraft Java account
-logged in once; or offline, only a player name, for private servers with
-online-mode=false (no login at all). Bots and instances name one.
+An instance plays offline, as the player name it was given (private servers
+with online-mode=false, no login at all), or with one of these: a real,
+purchased Minecraft Java account.
 
-An online bot plays with a real, purchased Minecraft Java account. HeadlessMC
+An instance with an account plays as the account's player. HeadlessMC
 keeps the login of an account in its own folder (HeadlessMC/auth/.accounts.json,
 a path it does not let be changed), and renews it every time it launches the
 game: Microsoft hands back a new key each time and the old one stops working.
@@ -22,7 +22,7 @@ import shutil
 from .events import Fail
 from .files import link_or_copy, link_target
 
-OFFLINE, ONLINE = "offline", "online"
+OFFLINE = "offline"
 
 
 class Account:
@@ -67,17 +67,17 @@ class Account:
 
     @property
     def offline(self):
-        """An offline account: a player name and nothing to log in."""
+        """An offline account, from before an offline instance simply had a
+        name: a player name and nothing to log in (`migrate` turns the
+        instances that used one into offline instances with that name)."""
         return bool(self.data.get("offline"))
 
     def logged_in(self):
-        return self.offline or bool(players_in(self.logins))
+        return bool(players_in(self.logins))
 
     def users(self):
-        """The bots and instances whose account this is, by their own layer."""
-        bots = [b.key for b in self.ws.bots() if b.data.get("account") == self.key]
-        insts = [i.key for i in self.ws.instances() if i.data.get("account") == self.key]
-        return bots, insts
+        """The instances that play with it."""
+        return [i.key for i in self.ws.instances() if i.data.get("account") == self.key]
 
 
 def players_in(path):
@@ -107,33 +107,9 @@ def players_in(path):
     return names
 
 
-def kind(value):
-    """What an `account` setting says: OFFLINE, ONLINE (a login kept in the
-    instance's own HeadlessMC, the way before accounts), or an account's key."""
-    return value if value in (OFFLINE, ONLINE) else "account"
-
-
-def plays_offline(ws, value):
-    """Whether an `account` setting means playing offline: `offline`, or an
-    offline account."""
-    if value == OFFLINE:
-        return True
-    return kind(value) == "account" and ws.account(value).exists() and ws.account(value).offline
-
-
-def add_offline(ws, name, key=None):
-    """An offline account: accounts/<key>/account.json with its player name.
-    Nothing to log in; it is listed and chosen like the others."""
-    from .bots import check_key, check_name
-    check_name(name)
-    key = (key or name).lower()
-    check_key(key, "account")
-    account = Account(ws, key)
-    if account.dir.exists():
-        raise Fail(f"there is already an account {key}.", code="exists")
-    account.dir.mkdir(parents=True)
-    account.json.write_text(json.dumps({"name": name, "offline": True}, indent=2) + "\n", encoding="utf-8")
-    return account
+def plays_offline(value):
+    """Whether an `account` setting means playing offline."""
+    return value == OFFLINE
 
 
 def prepare_login(ws):
@@ -209,15 +185,14 @@ def unlink_login(inst):
 
 
 def remove(ws, key):
-    """An account out of the launcher, login and all. Refused while a bot or
-    an instance names it."""
+    """An account out of the launcher, login and all. Refused while an
+    instance plays with it."""
     account = Account(ws, key).require()
-    bots, insts = account.users()
-    if bots or insts:
-        raise Fail(f"the account {key} is in use: "
-                   + "; ".join(x for x in (f"bots {', '.join(bots)}" if bots else "",
-                                          f"instances {', '.join(insts)}" if insts else "") if x),
-                   lines=["set them to another account first:  masurium.py set --bot <bot> account ..."],
+    users = account.users()
+    if users:
+        raise Fail(f"the account {key} is in use: instances {', '.join(users)}",
+                   lines=["set them to another account, or offline, first:  "
+                          "masurium.py set <instance> account ..."],
                    code="in_use")
     shutil.rmtree(account.dir)
 

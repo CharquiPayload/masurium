@@ -9,8 +9,7 @@ from collections import namedtuple
 
 from . import brain, groups, rules, settings
 from .api import UNREACHABLE
-from .accounts import players_in
-from .bots import check_name
+from .instances import check_name
 from .events import Fail
 from .files import read_env_file
 from .packs import ADDON_FOR, CORE_JAR, compare_packs, jar_family, pack_carries, pack_mods
@@ -205,10 +204,17 @@ def checks(ws):
                     f"carried by {', '.join(carriers)}; a headless bot needs {addon}-<version>.jar "
                     f"in shared/mods (see addons/)")
 
-    legacy = ws.legacy_bots()
-    if legacy:
-        add("layout", False, f"bots in the layout from before instances: {', '.join(legacy)} "
-            "(masurium.py migrate)")
+    old = ws.old_bots()
+    offline_accounts = [k for k in ws.account_keys() if ws.account(k).offline]
+    server_rules = [s for s in slugs if (ws.servers_dir / s / "rules.json").is_file()]
+    unfolded = [i.key for i in ws.instances() if "bot" in i.data]
+    if old or offline_accounts or server_rules or unfolded:
+        add("layout", False, "from before bots lived in their instances: "
+            + "; ".join(x for x in (f"bots {', '.join(old)}" if old else "",
+                                   f"instances of a bot {', '.join(unfolded)}" if unfolded else "",
+                                   f"offline accounts {', '.join(offline_accounts)}" if offline_accounts else "",
+                                   f"servers' rules {', '.join(server_rules)}" if server_rules else "") if x)
+            + " (masurium.py migrate)")
 
     if ws.config_file.is_file():
         try:
@@ -223,27 +229,13 @@ def checks(ws):
 
     for key in ws.account_keys():
         account = ws.account(key)
-        bots_, insts_ = account.users()
+        if account.offline:
+            continue                    # said under layout: migrate folds it into its instances
+        users = account.users()
         add(f"accounts/{key}", account.logged_in(),
-            (f"plays as {account.name}" + (", offline" if account.offline else "") if account.logged_in()
+            (f"plays as {account.name}" if account.logged_in()
              else "its login is gone (HeadlessMC deletes one it could not renew): remove it and add it again")
-            + (f"; used by {', '.join(bots_ + insts_)}" if bots_ or insts_ else ""))
-
-    keys = ws.bot_keys()
-    add("bots", True if keys else None, ", ".join(keys) if keys else f"none yet under {ws.bots_dir}")
-    for key in keys:
-        bot = ws.bot(key)
-        problems = [why for _, why in settings.problems(bot)]
-        try:
-            check_name(bot.name)
-        except Fail as e:
-            problems.append(str(e))
-        try:
-            rules.of_bot(bot)
-        except Fail as e:
-            problems.append(str(e))
-        add(f"bots/{key}", not problems, "; ".join(problems) or f"plays as {bot.name}, "
-            f"{len(bot.instances())} instance(s)")
+            + (f"; used by {', '.join(users)}" if users else ""))
 
     instances = ws.instances()
     add("instances", True if instances else None,
@@ -260,18 +252,14 @@ def checks(ws):
             problems.append(f"port {port} also belongs to {seen_ports[port]}")
         else:
             seen_ports[port] = inst.key
-        if not inst.bot.exists():
-            problems.append(f"its bot '{data.get('bot')}' is not in {ws.bots_dir}")
         if inst.slug not in slugs:
             problems.append(f"its server '{inst.slug}' is not registered")
         if not (inst.hmc / "HeadlessMC" / "config.properties").is_file():
             problems.append("no hmc config")
-        logins = inst.hmc / "HeadlessMC" / "auth" / ".accounts.json"
-        if settings.get(inst, "account") == "online" and not players_in(logins):
-            # HeadlessMC makes an EMPTY accounts file on its first run: the
-            # folder being there never meant a login.
-            problems.append(f"online account never logged in (masurium.py login {inst.key}, or "
-                            "an account of the launcher: masurium.py account add)")
+        try:
+            check_name(inst.name)
+        except Fail as e:
+            problems.append(str(e))
         group, place = groups.dependency_of(inst)
         if settings.get(inst, "role") == "guard" and place != "guard":
             problems.append("a guard, and no dependency group names it as one: it will not start")

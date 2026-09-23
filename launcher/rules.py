@@ -5,8 +5,9 @@ They are enforced on the SERVER: the server mod keeps them for each bot and
 its bridge makes the body hold what they come to. In three layers, weakest
 first:
 
-    base      the bot's config (bots/<bot>/bot.json, "rules"), with its
-              server's on top (servers/<slug>/rules.json)
+    base      nothing, any more: it was a bot's config and its server's, and
+              `migrate` moved those into each instance's own layer. It goes
+              to the server empty, so nothing old is left in it there.
     own       the instance's. `masurium.py rules <instance> ...` edits it
               and so does /masurium bot in the game: it lives on the
               server, once, and this launcher sends it CHANGES, never a copy
@@ -41,7 +42,7 @@ import urllib.error
 import urllib.parse
 
 from .api import UNREACHABLE
-from .bots import read_json, write_json
+from .instances import read_json, write_json
 from .events import Fail
 
 # What every bot starts with. The server mod's table (common/Settings.java) is
@@ -310,11 +311,15 @@ def describe(layer):
 
 # --- where the launcher keeps its layers ---------------------------------------
 
-def of_bot(bot):
-    return parse(bot.data.get("rules"), f"{bot.json} (rules)")
+def of_old_bot(path):
+    """The rules of a bot kept apart from its instances (bots/<bot>/bot.json),
+    for `migrate`."""
+    return parse(read_json(path).get("rules"), f"{path} (rules)")
 
 
 def of_server(ws, slug):
+    """The rules a server once imposed on its bots (servers/<slug>/rules.json),
+    for `migrate`."""
     f = ws.servers_dir / slug / "rules.json"
     return parse(read_json(f) if f.is_file() else None, str(f))
 
@@ -328,7 +333,19 @@ def of_group(group):
 
 
 def base_of(inst):
-    return merge(of_bot(inst.bot), of_server(inst.ws, inst.slug))
+    return empty()
+
+
+def changes_of(layer):
+    """A layer as the own-layer changes that make it, in the shape of the
+    changes that wait for a server: what `migrate` queues for an instance."""
+    out = [{"kind": "pref", "key": k, "value": "on" if v else "off"} for k, v in sorted(layer["prefs"].items())]
+    for family, (on, off, _) in FAMILIES.items():
+        for i, v in sorted(layer[family].items()):
+            out.append({"kind": family, "key": i, "value": on if v else off})
+        if family in layer["replace"]:
+            out.append({"kind": family, "key": "*", "value": "replace"})
+    return out
 
 
 def imposed_of(inst):
@@ -341,23 +358,6 @@ def imposed_of(inst):
     if settings.get(inst, "ignore_global") != "yes":
         out = merge(out, labeled(of_global(inst.ws), "global"))
     return out
-
-
-def save_bot(bot, layer):
-    data = bot.data
-    if is_empty(layer):
-        data.pop("rules", None)
-    else:
-        data["rules"] = dump(layer)
-    bot.save(data)
-
-
-def save_server(ws, slug, layer):
-    f = ws.servers_dir / slug / "rules.json"
-    if is_empty(layer):
-        f.unlink(missing_ok=True)
-    else:
-        write_json(f, dump(layer))
 
 
 def save_group(group, layer):

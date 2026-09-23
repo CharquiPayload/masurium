@@ -3,10 +3,9 @@
 Four folders, outside the repo because they are heavy and are not code:
 
     servers/<slug>/        one server: how to get in, and ITS pack of client mods
-    accounts/<account>/    a Minecraft account, logged in once
-    bots/<bot>/            a character: its name, personality and settings
-    instances/<name>/      a bot on a server, which is what runs: its game, its
-                           HeadlessMC, its logs and its own settings
+    accounts/<account>/    a Microsoft account, logged in once
+    instances/<name>/      a bot on a server, and everything it is: its player name,
+                           personality, settings, game, HeadlessMC and logs
     groups/<name>/         instances started together, a leader with its guards,
                            and the settings and rules they impose
     shared/                what every instance uses: HeadlessMC and the Masurium mods
@@ -17,8 +16,8 @@ variables that override the defaults. All of it held by one Workspace object
 instead of module globals resolved at import: a window can change a folder
 without restarting, and a test gets a workspace of its own.
 
-Instances are named freely and cloned freely: two of them may be the same
-bot on the same server. What cannot happen is both RUNNING, since that is one
+Instances are named freely and copied freely: two of them may be the same
+player on the same server. What cannot happen is both RUNNING, since that is one
 player joining twice; `start` is where that is refused (see operations).
 """
 import os
@@ -158,11 +157,11 @@ class Workspace:
         return self.env_file.parent / "launcher.json"
 
     def config(self):
-        from .bots import read_json
+        from .instances import read_json
         return read_json(self.config_file)
 
     def save_config(self, data):
-        from .bots import write_json
+        from .instances import write_json
         write_json(self.config_file, data)
 
     def api(self):
@@ -264,30 +263,14 @@ class Workspace:
         from .groups import Global
         return Global(self)
 
-    # --- bots (characters) ------------------------------------------------------
+    # --- bots from before they moved into their instances ----------------------
 
-    def bot(self, key):
-        from .bots import Character
-        return Character(self, key)
-
-    def bot_keys(self):
-        """The characters: folders of bots/ with a bot.json. A folder of the
-        layout before instances has none (see `legacy_bots`)."""
+    def old_bots(self):
+        """The folders of bots/ with a bot.json: bots kept apart from their
+        instances, as they were until `migrate` folds them in."""
         if not self.bots_dir.is_dir():
             return []
         return sorted(d.name for d in self.bots_dir.iterdir() if (d / "bot.json").is_file())
-
-    def bots(self):
-        return [self.bot(k) for k in self.bot_keys()]
-
-    def legacy_bots(self):
-        """Folders of bots/ still in the layout from before instances: the
-        bot and its game in one folder (a `port` file, an `hmc/`)."""
-        if not self.bots_dir.is_dir():
-            return []
-        return sorted(d.name for d in self.bots_dir.iterdir()
-                      if d.is_dir() and not (d / "bot.json").is_file()
-                      and ((d / "port").is_file() or (d / "hmc").is_dir()))
 
     # --- instances --------------------------------------------------------------
 
@@ -297,20 +280,17 @@ class Workspace:
         return sorted(d.name for d in self.instances_dir.iterdir() if (d / "instance.json").is_file())
 
     def instances(self, slug=None):
-        from .bots import Instance
+        from .instances import Instance
         out = [Instance(self, k) for k in self.instance_keys()]
         return [i for i in out if i.slug == slug] if slug else out
 
     def instance(self, key):
-        from .bots import Instance
+        from .instances import Instance
         inst = Instance(self, key)
         if inst.exists():
             return inst
-        hint = []
-        if key.lower() in self.legacy_bots():
-            hint = [f"{key} is in the layout from before instances: masurium.py migrate"]
         raise Fail(f"there is no instance {key}.",
-                   lines=hint or ["these are: " + (", ".join(self.instance_keys()) or "(none yet)")],
+                   lines=["these are: " + (", ".join(self.instance_keys()) or "(none yet)")],
                    code="no_instance")
 
     def free_key(self, wanted, taken):

@@ -40,7 +40,7 @@ FAKE_JAVA.chmod(FAKE_JAVA.stat().st_mode | stat.S_IEXEC)
 
 sys.path.insert(0, str(REPO))
 from launcher import cli, doctor, operations as ops, settings  # noqa: E402
-from launcher import bots, files, groups, keeper, packs, processes, rules  # noqa: E402
+from launcher import files, groups, instances, keeper, packs, processes, rules  # noqa: E402
 from launcher import brain  # noqa: E402
 from launcher.events import Fail  # noqa: E402
 from launcher import workspace as workspace_module  # noqa: E402
@@ -60,7 +60,7 @@ WS = Workspace(TMP / "bots", TMP / "servers", TMP / "shared", TMP / "server.env"
 # use (8478 on). Stopping an instance stops whatever java carries its port on
 # the whole machine (processes.game_pids): with the same ports, running the
 # tests next to a real bot stopped that bot.
-FIRST_PORT = workspace_module.FIRST_PORT = bots.FIRST_PORT = 18478
+FIRST_PORT = workspace_module.FIRST_PORT = instances.FIRST_PORT = 18478
 # Nor do they ask GitHub which Claude Code is the latest: that is pretended.
 brain.fetch_latest = lambda: "v2.1.280"
 
@@ -111,12 +111,17 @@ def said(fn, *args, **kw):
 
 
 def run_cli(*argv):
-    """The command line itself, on the test workspace: (what it printed, exit code)."""
+    """The command line itself, on the test workspace: (what it printed, exit code).
+    What argparse refuses (a command or an option there is not) is its exit
+    code too, not the end of the tests."""
     import contextlib
     import io
     out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        code = cli.main(list(argv), ws=WS)
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+        try:
+            code = cli.main(list(argv), ws=WS)
+        except SystemExit as e:
+            code = e.code
     return out.getvalue(), code
 
 
@@ -234,15 +239,15 @@ def tests_workspace():
 
 def tests_names():
     print("\nNames: Minecraft's rules for players, the launcher's for folders")
-    check("letters, digits, underscore pass", fails(bots.check_name, "Bot_42") is None)
-    check("a dash is refused in a player name", "not a valid name" in told(fails(bots.check_name, "bot-1")))
-    check("an accent is refused", fails(bots.check_name, "Iñaki") is not None)
-    check("empty is refused", fails(bots.check_name, "") is not None)
-    check("17 characters are refused", "allows 16" in told(fails(bots.check_name, "A" * 17)))
-    check("16 characters pass", fails(bots.check_name, "A" * 16) is None)
-    check("a bot or instance name takes a dash (alice-1)", fails(bots.check_key, "alice-1") is None)
+    check("letters, digits, underscore pass", fails(instances.check_name, "Bot_42") is None)
+    check("a dash is refused in a player name", "not a valid name" in told(fails(instances.check_name, "bot-1")))
+    check("an accent is refused", fails(instances.check_name, "Iñaki") is not None)
+    check("empty is refused", fails(instances.check_name, "") is not None)
+    check("17 characters are refused", "allows 16" in told(fails(instances.check_name, "A" * 17)))
+    check("16 characters pass", fails(instances.check_name, "A" * 16) is None)
+    check("an instance name takes a dash (alice-1)", fails(instances.check_key, "alice-1") is None)
     check("...but not capitals, spaces or slashes",
-          all(fails(bots.check_key, k) for k in ("Alice", "my bot", "../x", "")))
+          all(fails(instances.check_key, k) for k in ("Alice", "my bot", "../x", "")))
 
 
 
@@ -275,7 +280,7 @@ def tests_ports():
     layout()
     one = TMP / "instances" / "one"
     one.mkdir(parents=True)
-    (one / "instance.json").write_text(json.dumps({"bot": "one", "server": "test", "port": FIRST_PORT}))
+    (one / "instance.json").write_text(json.dumps({"name": "One", "server": "test", "port": FIRST_PORT}))
     check("the first port is reserved by 'one'", WS.port_reserved(FIRST_PORT))
     check("...but not against 'one' itself", not WS.port_reserved(FIRST_PORT, "one"))
     check("the free port skips it", WS.free_port("two") == FIRST_PORT + 1)
@@ -316,54 +321,50 @@ def tests_mods():
     remove_tree(TMP / "x")
 
 
-# --- bots and instances -----------------------------------------------------
+# --- instances --------------------------------------------------------------
 
 def tests_create():
-    print("\nCreate: a bot is a character; an instance is that bot on a server")
+    print("\nCreate: a bot is an instance, a player on a server with everything it is")
     layout()
-    text, inst = said(ops.create, WS, "Alice", "test", "offline")
+    text, inst = said(ops.create, WS, "Alice", "test")
     check("returns the instance", not isinstance(inst, Fail) and inst.key == "alice", text)
-    bot = WS.bot("alice")
-    check("the bot is bots/alice/bot.json, with the name's capitals",
-          bot.exists() and bot.data.get("name") == "Alice" and bot.name == "Alice")
-    check("the account goes in the bot, and nothing about language",
-          bot.data == {"name": "Alice", "account": "offline"}, bot.data)
-    check("a personality template is there, which says the language it speaks",
-          "You are Alice" in bot.personality.read_text() and "speak English" in bot.personality.read_text())
-    check("the instance is instances/alice/instance.json: which bot, which server, its port",
+    check("it is instances/alice/instance.json: its player name, its server, its port; offline by default",
           inst.dir == TMP / "instances" / "alice"
-          and inst.data == {"bot": "alice", "server": "test", "port": FIRST_PORT})
-    check("the instance plays as the bot", inst.name == "Alice" and inst.player == "alice" and inst.slug == "test")
+          and inst.data == {"name": "Alice", "server": "test", "port": FIRST_PORT}, inst.data)
+    check("a personality template is in it, which says the language it speaks",
+          "You are Alice" in inst.personality.read_text() and "speak English" in inst.personality.read_text())
+    check("it plays as its name, with its capitals", inst.name == "Alice" and inst.player == "alice"
+          and inst.slug == "test" and settings.get(inst, "account") == "offline")
+    check("no bots folder is made", not (TMP / "bots" / "alice").exists())
     props = files.read_java_properties(inst.hmc / "HeadlessMC" / "config.properties")
     check("HeadlessMC is offline, as Alice, and points at the instance's game folder",
           props.get("hmc.offline") == "true" and props.get("hmc.offline.username") == "Alice"
           and props.get("hmc.gamedir") == str(inst.gamedir))
     check("the launcher jar is next to the hmc config", (inst.hmc / "headlessmc-launcher.jar").is_file())
     check("its mods are linked", len(list((inst.gamedir / "mods").glob("*.jar"))) == 3)
-    check("what it did is reported, not printed",
-          "bot alice created" in text and "instance alice: Alice on test" in text, text)
+    check("what it did is reported, not printed", "instance alice: Alice on test (offline)" in text, text)
     check("an unknown server is refused before anything is made",
           "unknown server" in told(fails(ops.create, WS, "Bob", "nope"))
-          and not (TMP / "bots" / "bob").exists())
+          and not (TMP / "instances" / "bob").exists())
+    check("a name no player could have is refused", fails(ops.create, WS, "Da ve", "test") is not None
+          and not (TMP / "instances" / "da ve").exists())
+    check("an account that is not there is refused", fails(ops.create, WS, "Eve", "test", "nobody") is not None)
     check("'Ali' is a valid second bot: clashes are for start, on one server",
-          not isinstance(said(ops.create, WS, "Ali", "test", "offline")[1], Fail))
-    remove_tree(TMP / "bots" / "ali")
+          not isinstance(said(ops.create, WS, "Ali", "test")[1], Fail))
     remove_tree(TMP / "instances" / "ali")
     text, inst2 = said(ops.create, WS, "Alice", "test")
     check("creating Alice again on the same server makes a second instance, alice-1",
           not isinstance(inst2, Fail) and inst2.key == "alice-1" and inst2.port == FIRST_PORT + 1, text)
     remove_tree(inst2.dir)
-    check("an existing bot with another player name is refused",
-          "plays as Alice" in told(fails(ops.create, WS, "Alicia", "test", bot_key="alice")))
     check("a second bot takes the next port",
-          not isinstance(said(ops.create, WS, "Bob", "test", "offline")[1], Fail)
+          not isinstance(said(ops.create, WS, "Bob", "test")[1], Fail)
           and WS.instance("bob").port == FIRST_PORT + 1)
     check("instances are found by name; a missing one lists the ones there are",
           WS.instance("Bob").key == "bob" and "alice, bob" in told(fails(WS.instance, "carol")))
 
 
 def tests_clone():
-    print("\nClone: the same bot again, or a new bot from another, under a name of its own")
+    print("\nClone: the same bot again, here or on another server")
     second_server("other")
     alice = WS.instance("alice")
     (alice.gamedir / "config").mkdir(parents=True, exist_ok=True)
@@ -371,12 +372,15 @@ def tests_clone():
     alice.extra_mods.mkdir(exist_ok=True)
     (alice.extra_mods / "minimap-1.jar").write_bytes(b"e")
     settings.set_value(alice, "heap", "4g")
+    alice.personality.write_text("You are Alice, and you love cake.\n")
+    alice.icon.write_bytes(b"png")
 
     text, c = said(ops.clone_instance, WS, "alice")
-    check("cloned without a question: alice-1, the same bot on the same server",
-          not isinstance(c, Fail) and c.key == "alice-1" and c.bot.key == "alice" and c.slug == "test", text)
+    check("cloned without a question: alice-1, Alice again on the same server",
+          not isinstance(c, Fail) and c.key == "alice-1" and c.name == "Alice" and c.slug == "test", text)
     check("...with a port of its own", c.port not in (alice.port, WS.instance("bob").port))
-    check("...its own settings copied", c.data.get("heap") == "4g")
+    check("...its settings, personality and picture copied", c.data.get("heap") == "4g"
+          and c.personality.read_text() == "You are Alice, and you love cake.\n" and c.icon.read_bytes() == b"png")
     check("...its extra mods and its memories of that world",
           (c.extra_mods / "minimap-1.jar").exists()
           and (c.gamedir / "config" / "masurium-places-test.txt").exists())
@@ -390,15 +394,10 @@ def tests_clone():
     check("a clone to an unknown server is refused", "unknown server" in told(
         fails(ops.clone_instance, WS, "alice", slug="nope")))
 
-    text, b = said(ops.clone_bot, WS, "alice")
-    check("a bot cloned: alice-1, playing as Alice_1 (a dash is not a player-name letter)",
-          not isinstance(b, Fail) and b.key == "alice-1" and b.name == "Alice_1", text)
-    check("...with the personality and settings of the first",
-          b.personality.read_text() == WS.bot("alice").personality.read_text()
-          and b.data.get("account") == "offline")
-    for d in (c.dir, o.dir, b.dir):
+    for d in (c.dir, o.dir):
         remove_tree(d)
     settings.clear(alice, "heap")
+    alice.icon.unlink()
     remove_tree(alice.extra_mods)
 
 
@@ -407,20 +406,16 @@ def tests_render():
     alice = WS.instance("alice")
     settings.render(alice)
     check("the port and the server, always", alice.read("port") == str(FIRST_PORT) and alice.read("server") == "test")
-    check("a setting the bot sets is written for the bridge", alice.read("account") == "offline")
-    check("a setting nobody sets is not: the bridge applies the same default",
-          not (alice.dir / "model").exists() and not (alice.dir / "owner").exists())
-    check("the personality is the bot's", alice.read("personality.txt").startswith("You are Alice"))
-    settings.set_value(WS.bot("alice"), "model", "haiku low")
+    check("a setting nobody sets is not written: the bridge applies the same default",
+          not (alice.dir / "model").exists() and not (alice.dir / "owner").exists()
+          and not (alice.dir / "account").exists())
+    check("its personality is its own file, left as it is", alice.read("personality.txt").startswith("You are Alice"))
     settings.set_value(alice, "model", "sonnet")
     settings.render(alice)
-    check("the instance wins over the bot", alice.read("model") == "sonnet")
+    check("a setting it sets is written for the bridge", alice.read("model") == "sonnet")
     settings.clear(alice, "model")
     settings.render(alice)
-    check("taken out of the instance, the bot's applies again", alice.read("model") == "haiku low")
-    settings.clear(WS.bot("alice"), "model")
-    settings.render(alice)
-    check("taken out of both, the file goes", not (alice.dir / "model").exists())
+    check("taken out, the file goes", not (alice.dir / "model").exists())
 
 
 def tests_prepare():
@@ -446,7 +441,6 @@ def tests_prepare():
 def tests_launch_line():
     print("\nLaunch line: what HeadlessMC is told")
     inst = WS.instance("alice")
-    bot = inst.bot
     server = WS.server("test")
     line = keeper.launch_line(inst, server)
     check("no -commands, ever", "-commands" not in line)
@@ -462,17 +456,14 @@ def tests_launch_line():
     line = keeper.launch_line(inst, server)
     check("MASURIUM_HEAP and MASURIUM_VERSION from the environment win",
           "-Xmx1g" in line and "launch neoforge-21.1.999 " in line)
-    settings.set_value(bot, "heap", "4g")
-    check("...a bot's own heap wins over MASURIUM_HEAP", "-Xmx4g " in keeper.launch_line(inst, server))
     settings.set_value(inst, "heap", "6g")
-    check("...and the instance's over the bot's", "-Xmx6g " in keeper.launch_line(inst, server))
+    check("...and the instance's own heap wins over MASURIUM_HEAP", "-Xmx6g " in keeper.launch_line(inst, server))
     data = inst.data
     data["heap"] = "4g -XX:+Evil"
     inst.save(data)
     check("a heap that is not a size never reaches the JVM",
           "Evil" not in keeper.launch_line(inst, server) and "-Xmx1g " in keeper.launch_line(inst, server))
     settings.clear(inst, "heap")
-    settings.clear(bot, "heap")
     WS.environ.pop("MASURIUM_HEAP")
     WS.environ.pop("MASURIUM_VERSION")
     WS.environ["HEAP"] = "1g"
@@ -647,9 +638,9 @@ def tests_doctor():
           any(l == "server mod answers" and ok is False for l, ok, _ in checks))
     check("shared and the masurium jar are found",
           any(l == "shared/mods/masurium" and ok for l, ok, _ in checks))
-    check("bots and instances are checked apart",
-          any(l == "bots/alice" and ok for l, ok, _ in checks)
-          and any(l == "instances/alice" and ok for l, ok, _ in checks), [c for c in checks if "alice" in c.label])
+    check("each instance is checked, and there are no bots apart from them",
+          any(l == "instances/alice" and ok for l, ok, _ in checks)
+          and not any(l.startswith("bots") for l, ok, _ in checks), [c for c in checks if "alice" in c.label])
     (TMP / "shared" / "mods" / "masurium-0.9.0.jar").write_bytes(b"old")
     checks = doctor.checks(WS)
     check("two masurium jars are a problem",
@@ -691,17 +682,13 @@ def tests_doctor():
           any(l == "instances/bob" and ok is False and "also belongs" in d for l, ok, d in checks))
     data["port"] = FIRST_PORT + 1
     bob.save(data)
-    settings.set_value(WS.bot("bob"), "account", "online")
+    data["name"] = "Bob Two"
+    bob.save(data)
     checks = doctor.checks(WS)
-    check("an online instance whose accounts file is empty was never logged in",
-          any(l == "instances/bob" and ok is False and "never logged in" in d for l, ok, d in checks))
-    accounts = bob.hmc / "HeadlessMC" / "auth" / ".accounts.json"
-    accounts.parent.mkdir(parents=True, exist_ok=True)
-    accounts.write_text("")
-    checks = doctor.checks(WS)
-    check("...even when HeadlessMC made the (empty) file: the folder never meant a login",
-          any(l == "instances/bob" and ok is False and "never logged in" in d for l, ok, d in checks))
-    settings.set_value(WS.bot("bob"), "account", "offline")
+    check("a player name no player could have is a problem",
+          any(l == "instances/bob" and ok is False and "not a valid name" in d for l, ok, d in checks))
+    data["name"] = "Bob"
+    bob.save(data)
     text, code = run_cli("doctor")
     check("the command line prints every check and fails when one fails",
           code == 1 and "!!  java 21" in text and "problem(s) above" in text, text[-300:])
@@ -768,14 +755,14 @@ def tests_lock():
     check("the lock is free once its holder is gone, however it ended", handle is not None)
     if handle:
         handle.close()
-    with bots.operating(inst):
-        with bots.operating(inst):
+    with instances.operating(inst):
+        with instances.operating(inst):
             nested = True
     check("it is re-entrant in one thread (restart = stop + start)", nested)
 
     import threading
     seen = {}
-    with bots.operating(inst):
+    with instances.operating(inst):
         t = threading.Thread(target=lambda: seen.update(e=fails(ops.stop, inst)))
         t.start()
         t.join(10)
@@ -822,19 +809,23 @@ def tests_conflicts():
               isinstance(result, Fail) and result.code == "player_taken" and "preparing" not in text, text)
         check("an offline player may be on another server at the same time",
               fails(ops.check_can_run, away) is None)
-        settings.set_value(WS.bot("alice"), "account", "online")
+        said(ops.add_account, WS, fake_login("Steve"))
+        for inst in (alice, away):
+            settings.set_value(inst, "account", "steve")
         e = fails(ops.check_can_run, away)
-        check("an online account may not: one Microsoft account, one game at a time",
+        check("a Microsoft account may not: one account, one game at a time",
               e is not None and e.code == "account_in_use" and "on test" in str(e), told(e))
-        settings.set_value(WS.bot("alice"), "account", "offline")
-        _, ali = said(ops.create, WS, "Ali", "test", "offline")
+        for inst in (alice, away):
+            settings.clear(inst, "account")
+        remove_tree(WS.account("steve").dir)
+        _, ali = said(ops.create, WS, "Ali", "test")
         e = fails(ops.check_can_run, ali)
         check("a player whose name is inside a running one's, on the same server, is refused",
               e is not None and e.code == "name_clash", told(e))
         ali_elsewhere = said(ops.clone_instance, WS, ali.key, slug="other")[1]
         check("...but not on another server, where they share no chat",
               fails(ops.check_can_run, ali_elsewhere) is None)
-        for d in (ali.dir, ali_elsewhere.dir, WS.bot("ali").dir):
+        for d in (ali.dir, ali_elsewhere.dir):
             remove_tree(d)
     finally:
         said(ops.stop, alice)
@@ -1297,8 +1288,6 @@ def tests_groups():
         remove_tree(WS.group(key).dir)
     for key in ("carol", "dave", "eve", "carol-1", "alice-1", "bob-1"):
         remove_tree(WS.instance(key).dir)
-    for key in ("carol", "dave", "eve"):
-        remove_tree(WS.bot(key).dir)
     remove_tree(TMP / "servers" / "other")
     for inst in (alice, bob):
         data = inst.data
@@ -1325,7 +1314,7 @@ def tests_status():
     check("...above a table with a row per instance",
           "alice" in text and "Bob" in text and "plays as" in text, text)
     text, code = run_cli("bots")
-    check("`bots` lists the characters and their instances", code == 0 and "plays as Alice" in text, text)
+    check("there is no `bots` any more: a bot is its instance", code != 0, text)
     layout()
 
 
@@ -1351,28 +1340,27 @@ def tests_cli():
 # --- settings ---------------------------------------------------------------
 
 def tests_settings():
-    print("\nSettings: in layers, bot < instance, and one table says what each accepts")
+    print("\nSettings: in layers, instance < groups < global, and one table says what each accepts")
     alice, bob = WS.instance("alice"), WS.instance("bob")
-    bot = alice.bot
     check("a value no layer sets is the default",
           settings.resolve(alice, "model") == ("opus medium", "default"))
     check("the owner's default comes from server.env", settings.get(alice, "owner") == "Owner")
-    settings.set_value(bot, "model", "sonnet")
-    check("set in the bot, every instance of it has it", settings.resolve(alice, "model") == ("sonnet", "bot"))
     settings.set_value(alice, "model", "haiku low")
-    check("set in the instance, it wins over the bot's", settings.resolve(alice, "model") == ("haiku low", "instance"))
+    check("set in the instance, it is the instance's", settings.resolve(alice, "model") == ("haiku low", "instance"))
     settings.clear(alice, "model")
-    settings.clear(bot, "model")
-    for target, key, value, why in ((bot, "language", "es", "no longer a setting: the personality"),
-                                    (bot, "gender", "f", "no longer a setting: the personality"),
-                                    (bot, "account", "maybe", "offline, online, or one of the accounts"),
-                                    (bot, "owner", "not a name!", "player name"),
-                                    (bot, "model", "haiku lowest", "effort is one of"),
-                                    (bot, "model", "a b c", "optional effort"),
-                                    (bot, "port", "9000", "set per instance"),
-                                    (bot, "escort", "bob", "no longer a setting: a guard's leader"),
-                                    (bot, "role", "boss", "one of main, guard"),
-                                    (bot, "ignore_global", "yes", "set per instance or group"),
+    group = WS.global_config()
+    for target, key, value, why in ((alice, "language", "es", "no longer a setting: the personality"),
+                                    (alice, "gender", "f", "no longer a setting: the personality"),
+                                    (alice, "account", "maybe", "offline, or one of the Microsoft accounts"),
+                                    (alice, "owner", "not a name!", "player name"),
+                                    (alice, "model", "haiku lowest", "effort is one of"),
+                                    (alice, "model", "a b c", "optional effort"),
+                                    (group, "port", "9000", "set per instance"),
+                                    (group, "account", "offline", "set per instance"),
+                                    (group, "name", "Bob", "set per instance"),
+                                    (alice, "escort", "bob", "no longer a setting: a guard's leader"),
+                                    (alice, "role", "boss", "one of main, guard"),
+                                    (group, "ignore_global", "yes", "set per instance or group"),
                                     (alice, "lock", "maybe", "one of no, yes"),
                                     (alice, "heap", "512m", "at least 1g"),
                                     (alice, "heap", "lots", "heap size"),
@@ -1384,10 +1372,11 @@ def tests_settings():
     check("an unknown setting is refused, listing the ones there are",
           "model" in told(fails(settings.setting, "colour")))
     check("a good value is written into the layer's JSON",
-          settings.set_value(bot, "account", "ONLINE") == "online" and bot.data.get("account") == "online")
-    settings.set_value(bot, "account", "offline")
-    check("a model keeps its two words", settings.set_value(bot, "model", "haiku   low") == "haiku low")
+          settings.set_value(alice, "account", "OFFLINE") == "offline" and alice.data.get("account") == "offline")
+    settings.clear(alice, "account")
+    check("a model keeps its two words", settings.set_value(alice, "model", "haiku   low") == "haiku low")
     check("a role goes in lowercase", settings.set_value(alice, "role", "GUARD") == "guard")
+    check("a player name keeps its capitals", settings.set_value(alice, "name", "Alice") == "Alice")
     claude_dir = WS.home / ".claude"
     claude_dir.mkdir(exist_ok=True)
     (claude_dir / "settings.json").write_text(json.dumps({"availableModels": ["claude-opus-5-5", "opus"]}))
@@ -1396,20 +1385,22 @@ def tests_settings():
           "opus[1m]" in offered and "fable" in offered and "claude-opus-5-5" in offered
           and offered.count("opus") == 1, offered)
     (claude_dir / "settings.json").unlink()
-    check("an alias with its million tokens is a valid model", settings.problem(bot, "model", "opus[1m] high") is None)
+    check("an alias with its million tokens is a valid model", settings.problem(alice, "model", "opus[1m] high") is None)
     settings.clear(alice, "role")
-    settings.clear(bot, "model")
+    settings.clear(alice, "model")
     check("the port cannot be cleared: every instance needs one",
           "no default" in told(fails(settings.clear, alice, "port")))
-    settings.set_value(bot, "account", "online")
+    said(ops.add_account, WS, fake_login("Steve"))
+    settings.set_value(alice, "account", "steve")
     settings.render(alice)
     props = files.read_java_properties(alice.hmc / "HeadlessMC" / "config.properties")
     check("the account is written into HeadlessMC's own config at render", props.get("hmc.offline") == "false")
-    settings.set_value(bot, "account", "offline")
+    settings.clear(alice, "account")
     settings.render(alice)
     props = files.read_java_properties(alice.hmc / "HeadlessMC" / "config.properties")
     check("...both ways, and nothing else in it is lost",
           props.get("hmc.offline") == "true" and props.get("hmc.offline.username") == "Alice")
+    remove_tree(WS.account("steve").dir)
 
     # The operation: the lock, and no start-time setting under a running client.
     text, now = said(ops.configure, alice, "heap", "4g")
@@ -1421,8 +1412,8 @@ def tests_settings():
         text, result = said(ops.configure, alice, "heap", "6g")
         check("a setting read at start is refused while the client runs",
               isinstance(result, Fail) and result.code == "running" and alice.data.get("heap") == "4g", text)
-        text, result = said(ops.configure, bot, "heap", "6g")
-        check("...in the bot too, while any instance of it runs",
+        text, result = said(ops.configure, WS.global_config(), "heap", "6g")
+        check("...globally too, while any instance it reaches runs",
               isinstance(result, Fail) and result.code == "running", text)
         text, result = said(ops.configure, alice, "owner", "SomePlayer")
         check("...one read as it is used is not", result == "SomePlayer" and "right away" in text, text)
@@ -1435,34 +1426,36 @@ def tests_settings():
     # The command line.
     text, code = run_cli("set", "alice")
     check("`set <instance>` lists every setting with its value and where it comes from",
-          code == 0 and all(k in text for k in settings.SETTINGS) and "(default)" in text and "(bot)" in text,
-          text)
-    text, code = run_cli("set", "--bot", "alice", "model", "sonnet", "low")
-    check("`set --bot <bot> <key> <value...>` changes the bot (two words are one value)",
-          code == 0 and bot.data.get("model") == "sonnet low", text)
+          code == 0 and all(k in text for k in settings.SETTINGS if "instance" in settings.SETTINGS[k].layers)
+          and "(default)" in text, text)
+    text, code = run_cli("set", "alice", "model", "sonnet", "low")
+    check("`set <instance> <key> <value...>` changes it (two words are one value)",
+          code == 0 and alice.data.get("model") == "sonnet low", text)
     text, code = run_cli("set", "alice", "model")
     check("`set <instance> <key>` shows one: its choices, its layers, when it counts",
-          "choices:" in text and "when its bridge restarts" in text and "(bot)" in text, text)
-    text, code = run_cli("set", "--bot", "alice", "model", "--default")
-    check("`--default` takes it out of the layer", code == 0 and "model" not in bot.data, text)
+          "choices:" in text and "when its bridge restarts" in text, text)
+    text, code = run_cli("set", "alice", "model", "--default")
+    check("`--default` takes it out of the layer", code == 0 and "model" not in alice.data, text)
     text, code = run_cli("set", "alice", "account", "maybe")
     check("a bad value is a failure of the command, with the reason",
-          code == 1 and "offline, online, or one of the accounts" in text, text)
+          code == 1 and "offline, or one of the Microsoft accounts" in text, text)
+    text, code = run_cli("set", "--bot", "alice", "model", "sonnet")
+    check("there is no --bot any more", code != 0, text)
 
-    data = bob.bot.data
+    data = bob.data
     data["model"] = "haiku lowest"
     data["language"] = "es"
-    bob.bot.save(data)
+    bob.save(data)
     checks = doctor.checks(WS)
     check("doctor names a JSON edited by hand into something `set` would refuse",
-          any(l == "bots/bob" and ok is False and "effort is one of" in d for l, ok, d in checks))
+          any(l == "instances/bob" and ok is False and "effort is one of" in d for l, ok, d in checks))
     check("...and a setting there is no more, saying where it went",
-          any(l == "bots/bob" and "'language' is no longer a setting" in d for l, ok, d in checks))
-    text, code = run_cli("set", "--bot", "bob")
+          any(l == "instances/bob" and "'language' is no longer a setting" in d for l, ok, d in checks))
+    text, code = run_cli("set", "bob")
     check("...and so does `set`", "!! 'haiku lowest' is not a valid model" in text, text)
     data.pop("model")
     data.pop("language")
-    bob.bot.save(data)
+    bob.save(data)
 
 
 # --- one server mod per server ------------------------------------------------
@@ -1691,29 +1684,29 @@ def tests_rules_model():
 
 
 def tests_rules():
-    print("\nRules in the launcher: the bot's, the server's and the global ones, sent to the server")
-    ops.create(WS, "Rulesy", "test", account="offline")
-    inst, bot = WS.instance("rulesy"), WS.bot("rulesy")
+    print("\nRules in the launcher: its groups' and the global ones, sent to the server")
+    ops.create(WS, "Rulesy", "test")
+    inst = WS.instance("rulesy")
+    ops.create_group(WS, "crew")
+    ops.group_add(WS, "crew", ["rulesy"])
+    crew = WS.group("crew")
     store = {}
     httpd = serve_a_server_mod(store=store)
     try:
-        text, result = said(ops.edit_layer, WS, ["food", "ban", "beef"], bot=bot)
-        check("--bot: the change goes to bot.json",
-              bot.data.get("rules") == {"food": {"ban": ["beef"]}} and "bot rulesy: food ban beef" in text, text)
+        text, result = said(ops.edit_layer, WS, ["food", "ban", "beef"], group=crew)
+        check("--group: the change goes to group.json",
+              crew.data.get("rules") == {"food": {"ban": ["beef"]}} and "group crew: food ban beef" in text, text)
         check("...and the instances not running get it when they start", "on their next start" in text, text)
-        said(ops.edit_layer, WS, ["pref", "tame_wolves", "off"], slug="test")
-        check("--server: the change goes to servers/<slug>/rules.json",
-              json.loads((TMP / "servers/test/rules.json").read_text()) == {"prefs": {"tame_wolves": False}})
         said(ops.edit_layer, WS, ["pref", "hunt_players", "off"])
         check("--global: the change goes to launcher.json",
               WS.config().get("rules") == {"prefs": {"hunt_players": False}}, WS.config())
         base = rules.base_of(inst)
-        check("the base is the bot's with its server's on top",
-              base["food"] == {"beef": True} and base["prefs"] == {"tame_wolves": False})
+        check("the base is empty: nothing apart from the instance says what it is", rules.is_empty(base))
         imposed = rules.imposed_of(inst)
-        check("the global rules are imposed, and say they come from the global config",
-              imposed["prefs"] == {"hunt_players": False}
-              and imposed["from"] == {"prefs.hunt_players": "global"}, imposed)
+        check("its group's rules and the global ones are imposed, each saying who",
+              imposed["prefs"] == {"hunt_players": False} and imposed["food"] == {"beef": True}
+              and imposed["from"].get("prefs.hunt_players") == "global"
+              and imposed["from"].get("food.beef") == "group crew", imposed)
 
         view = ops.show_rules(inst)
         check("before its first start its server has not seen it, and says so",
@@ -1734,16 +1727,15 @@ def tests_rules():
         toggles = {k: (on, who) for k, on, who in view.toggles}
         food = dict(view.lists[0][1])
         check("shown: each toggle with who decides it",
-              toggles["hunt_players"] == (False, "imposed by global")
-              and toggles["tame_wolves"] == (False, "its config") and toggles["sleep_alone"] == (True, ""),
+              toggles["hunt_players"] == (False, "imposed by global") and toggles["sleep_alone"] == (True, ""),
               toggles)
         check("shown: each list whole, each id with who put it there",
-              food == {"beef": "its config", "salmon": "set here", "golden_apple": "",
+              food == {"beef": "imposed by group crew", "salmon": "set here", "golden_apple": "",
                        "enchanted_golden_apple": ""}, food)
         check("shown: nothing to say when the server holds what the launcher does", view.note == "", view.note)
-        said(ops.edit_layer, WS, ["food", "ban", "cod"], bot=bot)
-        check("...and a note when it holds an older config, which goes on the next start",
-              "older config" in ops.show_rules(inst).note)
+        said(ops.edit_layer, WS, ["food", "ban", "cod"], group=crew)
+        check("...and a note when it holds older rules, which go on the next start",
+              "older" in ops.show_rules(inst).note)
 
         text, code = run_cli("rules", "rulesy")
         check("`masurium.py rules <instance>` shows it",
@@ -1752,13 +1744,15 @@ def tests_rules():
         text, code = run_cli("rules", "rulesy", "break", "forbid", "dirt")
         check("`masurium.py rules <instance> <change>` changes its own",
               code == 0 and store["rulesy"]["own"].get("break") == {"forbid": ["dirt"]}, text)
+        text, code = run_cli("rules", "--group", "crew")
+        check("`rules --group <group>` shows the group's layer", code == 0 and "food ban beef, cod" in text, text)
         text, code = run_cli("rules", "--bot", "rulesy")
-        check("`rules --bot <bot>` shows the bot's layer", code == 0 and "food ban beef, cod" in text, text)
+        check("there is no --bot any more", code != 0, text)
         text, code = run_cli("rules", "--global", "pref", "hunt_players", "default")
         check("`rules --global <change>` changes the global ones, and the file goes when nothing is left",
               code == 0 and WS.config() == {} and not WS.config_file.exists(), WS.config())
-        check("doctor does not take a bot's rules for a setting",
-              any(c.label == "bots/rulesy" and c.ok for c in doctor.checks(WS)))
+        check("doctor does not take a group's rules for a setting",
+              any(c.label == "groups/crew" and c.ok for c in doctor.checks(WS)))
     finally:
         httpd.shutdown()
 
@@ -1782,19 +1776,19 @@ def tests_rules():
     WS.environ["MASURIUM_JAVA"] = str(TMP / "no-such-java")
     try:
         text, result = said(ops.start, inst)
-        check("start sends its config, the global rules and what waited, before the game",
-              store["rulesy"]["base"] == rules.dump(rules.base_of(inst))
+        check("start sends its groups' and the global rules and what waited, before the game",
+              store["rulesy"]["base"] == {}
               and store["rulesy"]["own"] == {"prefs": {"sleep_alone": False}}
               and not rules.pending(inst) and "could not run" in text, f"{text} {store.get('rulesy')}")
         check("...saying what waited", "sent: pref sleep_alone off" in text, text)
-        bot.save({**bot.data, "rules": {"prefs": {"fly": True}}})
+        crew.save({**crew.data, "rules": {"prefs": {"fly": True}}})
         text, result = said(ops.start, inst)
         check("a rule written wrong stops the start, saying where",
-              isinstance(result, Fail) and result.code == "bad_rules" and "bot.json" in text
+              isinstance(result, Fail) and result.code == "bad_rules" and "group.json" in text
               and "fly" in text and "could not run" not in text, text)
-        check("...and doctor says it too", any(c.label == "bots/rulesy" and c.ok is False and "fly" in c.detail
+        check("...and doctor says it too", any(c.label == "groups/crew" and c.ok is False and "fly" in c.detail
                                                 for c in doctor.checks(WS)))
-        rules.save_bot(bot, rules.empty())
+        rules.save_group(crew, rules.empty())
 
         # A clone elsewhere carries a copy of its own rules; one that is the
         # same player on the same server shares them.
@@ -1817,6 +1811,7 @@ def tests_rules():
               isinstance(result, Fail) and result.code == "old_server_mod" and "deploy-mod" in text, text)
     finally:
         old.shutdown()
+    said(ops.delete_group, WS, "crew")
     set_text, _ = said(ops.configure, inst, "ignore_global", "yes")
     WS.save_config({"rules": {"prefs": {"hunt_players": True}}})
     check("an instance that ignores the global rules has nothing imposed",
@@ -1824,8 +1819,6 @@ def tests_rules():
     WS.config_file.unlink()
     for key in (clone.key, twin.key, "rulesy"):
         remove_tree(WS.instance(key).dir)
-    remove_tree(bot.dir)
-    (TMP / "servers/test/rules.json").unlink(missing_ok=True)
     remove_tree(TMP / "servers" / "elsewhere")
     layout()
 
@@ -1874,24 +1867,22 @@ def tests_accounts():
           == "several_logins")
 
     alice, bob = WS.instance("alice"), WS.instance("bob")
-    e = fails(settings.set_value, alice.bot, "account", "nobody")
+    e = fails(settings.set_value, alice, "account", "nobody")
     check("an account that does not exist is refused, naming the ones there are",
           e is not None and "steve" in told(e), told(e))
     own = alice.hmc / "HeadlessMC" / "auth"
     own.mkdir(parents=True, exist_ok=True)
     (own / ".accounts.json").write_text(hmc_logins("OldLogin"))
-    settings.set_value(alice.bot, "account", "steve")
-    check("a bot with an account plays as its player", alice.bot.name == "Steve" and alice.name == "Steve"
-          and alice.bot.own_name == "Alice")
+    settings.set_value(alice, "account", "steve")
+    check("an instance with an account plays as its player, keeping its own name for offline",
+          alice.name == "Steve" and alice.own_name == "Alice")
     settings.render(alice)
     props = files.read_java_properties(alice.hmc / "HeadlessMC" / "config.properties")
     check("its instance's login IS the account's: a link, not a copy",
           files.link_target(own) == acc.auth and props.get("hmc.offline") == "false")
     check("...and a login the instance had of its own is kept aside, not destroyed",
           accounts.players_in(alice.hmc / "HeadlessMC" / "auth.before-account" / ".accounts.json") == ["OldLogin"])
-    check("logging it in through the instance is refused: that is the account's",
-          fails(ops.login_command, alice).code == "has_account")
-    settings.set_value(alice.bot, "account", "offline")
+    settings.set_value(alice, "account", "offline")
     settings.render(alice)
     check("back to offline, the link goes and its own login comes back",
           not own.is_symlink() and accounts.players_in(own / ".accounts.json") == ["OldLogin"]
@@ -1902,8 +1893,8 @@ def tests_accounts():
     # One account, one game at a time; and one start at a time.
     quick_server_env()
     other = second_server("other")
-    settings.set_value(alice.bot, "account", "steve")
-    settings.set_value(bob.bot, "account", "steve")
+    settings.set_value(alice, "account", "steve")
+    settings.set_value(bob, "account", "steve")
     data = bob.data
     data["server"] = "other"
     bob.save(data)
@@ -1927,11 +1918,13 @@ def tests_accounts():
     text, code = run_cli("account")
     check("`account` lists them: who they play as, logged in, who uses them",
           code == 0 and "steve" in text and "plays as Steve" in text and "logged in" in text
-          and "bot alice" in text and "bot bob" in text, text)
+          and "alice, bob" in text, text)
     text, code = run_cli("account", "remove", "steve")
     check("an account in use is not removed", code == 1 and "in use" in text and acc.exists(), text)
-    for b in (alice.bot, bob.bot):
-        settings.set_value(b, "account", "offline")
+    data = bob.data
+    for inst in (alice, bob):
+        settings.clear(inst, "account")
+    data = bob.data
     data["server"] = "test"
     bob.save(data)
     checks = doctor.checks(WS)
@@ -1961,46 +1954,31 @@ def tests_accounts():
 
 
 def tests_offline_and_java():
-    print("\nOffline accounts, and the Java a game runs on")
+    print("\nOffline, a player name; and the Java a game runs on")
     from launcher import accounts
     import shutil
     layout()
     alice, bob = WS.instance("alice"), WS.instance("bob")
-    text, acc = said(ops.add_offline_account, WS, "Dave")
-    check("an offline account is a player name: accounts/dave, playing as Dave, nothing to log in",
-          not isinstance(acc, Fail) and acc.key == "dave" and acc.offline and acc.logged_in()
-          and json.loads(acc.json.read_text()) == {"name": "Dave", "offline": True}, text)
-    check("adding it again is refused", fails(ops.add_offline_account, WS, "Dave").code == "exists")
-    check("a name no player could have is refused", fails(ops.add_offline_account, WS, "Da ve") is not None)
-    check("offline, and an offline account, play offline; online does not",
-          accounts.plays_offline(WS, "offline") and accounts.plays_offline(WS, "dave")
-          and not accounts.plays_offline(WS, "online"))
+    check("offline plays offline; an account does not", accounts.plays_offline("offline")
+          and not accounts.plays_offline("steve"))
     own = alice.hmc / "HeadlessMC"
     existed = own.is_dir()
     own.mkdir(parents=True, exist_ok=True)
-    settings.set_value(alice.bot, "account", "dave")
+    text, _ = said(ops.configure, alice, "name", "Dave")
     settings.render(alice)
     props = files.read_java_properties(own / "config.properties")
-    check("a bot set to it plays as its player, offline",
+    check("its player name is a setting of its own: it plays as it, offline",
           alice.name == "Dave" and props.get("hmc.offline") == "true"
           and props.get("hmc.offline.username") == "Dave", props)
     check("...with no login to link", not (own / "auth").is_symlink())
     check("...-offline on its launch line", " -offline " in keeper.launch_line(alice, WS.server("test")))
-    check("...and nothing to log in", ops.login_command(alice) is None)
-    settings.set_value(bob.bot, "account", "dave")
-    check("an offline account is not kept to one game at a time, as a Microsoft one is",
+    check("a name no player could have is refused", fails(settings.set_value, alice, "name", "Da ve") is not None)
+    check("an offline player is not kept to one game at a time, as a Microsoft account is",
           ops.account_of(bob) == "offline")
-    text, code = run_cli("account")
-    check("`account` lists it, as offline", code == 0 and "dave" in text and "offline" in text, text)
-    text, code = run_cli("account", "remove", "dave")
-    check("in use, it is not removed", code == 1 and acc.exists(), text)
-    for b in (alice.bot, bob.bot):
-        settings.set_value(b, "account", "offline")
-    text, code = run_cli("account", "remove", "dave")
-    check("unused, it is removed", code == 0 and not acc.dir.exists(), text)
+    text, code = run_cli("set", "alice", "name", "Alice")
+    check("`set <instance> name <player>` changes it back", code == 0 and alice.name == "Alice", text)
     text, code = run_cli("account", "add", "--offline", "Erin")
-    check("`account add --offline NAME` adds one", code == 0 and WS.account("erin").offline, text)
-    shutil.rmtree(WS.account("erin").dir)
+    check("offline accounts are no more: an offline instance has its name", code != 0, text)
 
     server = WS.server("test")
     check("by default a game runs on the launcher's java", settings.java_command(alice) == WS.java_command()[:1])
@@ -2035,7 +2013,7 @@ def tests_offline_and_java():
 
 
 def tests_delete():
-    print("\nDeleting an instance: its folder goes, its bot stays")
+    print("\nDeleting an instance: its folder goes, and all it is")
     layout()
     quick_server_env()
     _, gone = said(ops.create, WS, "Gone", "test", "offline")
@@ -2055,7 +2033,6 @@ def tests_delete():
     check("stopped, it is deleted, folder and all, and leaves its group",
           not gone.dir.exists() and "gone" not in WS.instance_keys()
           and "gone" not in WS.group("leaving").instance_keys(), text)
-    check("...and its bot stays", WS.bot("gone").exists() and "bot gone stays" in text, text)
     _, lead = said(ops.create, WS, "Lead", "test", "offline")
     ops.create_group(WS, "lead-guards", leader="lead")
     e = fails(ops.delete_instance, WS, "lead")
@@ -2066,12 +2043,9 @@ def tests_delete():
     text, _ = said(ops.delete_instance, WS, "sentry")
     check("a guard deleted leaves its group, and is not told how to start again",
           "sentry" not in WS.group("lead-guards").guards and "still a guard" not in text, text)
-    remove_tree(WS.bot("sentry").dir)
     said(ops.delete_group, WS, "lead-guards")
     said(ops.delete_group, WS, "leaving")
     said(ops.delete_instance, WS, "lead")
-    for key in ("gone", "lead"):
-        remove_tree(WS.bot(key).dir)
 
 
 def tests_lead_in_place():
@@ -2101,7 +2075,6 @@ def tests_lead_in_place():
         said(ops.delete_group, WS, key)
     for key in ("chief", "aide"):
         said(ops.delete_instance, WS, key)
-        remove_tree(WS.bot(key).dir)
 
 
 def tests_claude_update():
@@ -2146,85 +2119,78 @@ OLD_PORT = FIRST_PORT + 12
 
 
 def tests_migrate():
-    print("\nMigrate: bots/<name>/ with the game inside becomes a bot and an instance")
+    print("\nMigrate: bots kept apart fold into their instances")
     layout()
-    old = TMP / "bots" / "old"
-    (old / "hmc" / "HeadlessMC").mkdir(parents=True)
-    (old / "gamedir" / "config").mkdir(parents=True)
-    (old / "run").mkdir()
-    for f, v in (("port", str(OLD_PORT)), ("server", "test"), ("account", "offline"), ("language", "es"),
-                 ("model", "haiku low"), ("owner", "Someone"), ("gender", "f")):
-        (old / f).write_text(v + "\n")
-    (old / "personality.txt").write_text("You are Old.\n")
-    (old / "hmc" / "HeadlessMC" / "config.properties").write_text(
-        f"hmc.offline=true\nhmc.offline.username=Old\nhmc.gamedir={old / 'gamedir'}\n")
-    (old / "gamedir" / "config" / "masurium-places-test.txt").write_text("home 1 2 3\n")
-    (old / "run" / "client.log").write_text("an old log\n")
-    state = TMP / "state"
-    state.mkdir(exist_ok=True)
-    for f in ("session_old", "pending_old.json", "internal_old.jsonl", "calls_old.log",
-              "horse_old_test.json", "internal_olden.jsonl"):
-        (state / f).write_text("x\n")
+    quick_server_env()
+    _, old = said(ops.create, WS, "Old", "test")
+    _, twin = said(ops.create, WS, "Other", "test")
+    _, lone = said(ops.create, WS, "Lone", "test")
+    # The layout before: a bot in bots/ that the instance names, an offline
+    # account one plays with, and a server's rules.
+    bot_dir = TMP / "bots" / "old"
+    bot_dir.mkdir(parents=True)
+    (bot_dir / "bot.json").write_text(json.dumps({"name": "Old", "account": "offline", "model": "haiku low",
+                                                  "owner": "Someone", "rules": {"food": {"ban": ["beef"]}}}))
+    (bot_dir / "personality.txt").write_text("You are Old.\n")
+    (bot_dir / "icon.png").write_bytes(b"png")
+    (TMP / "bots" / "unused").mkdir()
+    (TMP / "bots" / "unused" / "bot.json").write_text(json.dumps({"name": "Unused"}))
+    for inst, data in ((old, {"bot": "old", "server": "test", "port": old.port, "model": "sonnet"}),
+                       (twin, {"bot": "other", "server": "test", "port": twin.port, "account": "dave"})):
+        inst.save(data)
+    dave = WS.account("dave")
+    dave.dir.mkdir(parents=True)
+    dave.json.write_text(json.dumps({"name": "Dave", "offline": True}))
+    (TMP / "servers" / "test" / "rules.json").write_text(json.dumps({"prefs": {"tame_wolves": False}}))
 
-    check("the old layout is recognized", WS.legacy_bots() == ["old"] and "old" not in WS.bot_keys())
-    check("an instance command on it says to migrate", "migrate" in told(fails(WS.instance, "old")))
-    text, code = run_cli("status")
-    check("...and so does status", "masurium.py migrate" in text or code == 0, text)
     checks = doctor.checks(WS)
-    check("...and doctor", any(l == "layout" and ok is False and "old" in d for l, ok, d in checks))
-
-    import socket
-    busy = socket.socket()
-    busy.bind(("127.0.0.1", OLD_PORT))
-    busy.listen(1)
-    try:
-        e = fails(ops.migrate, WS)
-        check("a bot that is running is not migrated: stop it first",
-              e is not None and e.code == "running" and (old / "port").exists(), told(e))
-    finally:
-        busy.close()
+    check("doctor says what is from before, and to migrate",
+          any(l == "layout" and ok is False and "bots old, unused" in d and "offline accounts dave" in d
+              and "servers' rules test" in d for l, ok, d in checks))
+    text, result = said(ops.start, old)
+    check("an instance of a bot kept apart does not start: migrate first",
+          isinstance(result, Fail) and result.code == "not_migrated", text)
 
     text, made = said(ops.migrate, WS, dry_run=True)
     check("a dry run says what it would do and does nothing",
-          made == [] and f"old: bot old (plays as Old) + instance old on test, port {OLD_PORT}" in text
-          and (old / "port").exists() and not (TMP / "instances" / "old").exists(), text)
+          made == [] and "old: plays as Old, with bot old's settings and personality" in text
+          and "bot" in old.data and bot_dir.exists(), text)
 
     text, made = said(ops.migrate, WS)
-    inst = WS.instance("old")
-    bot = WS.bot("old")
-    check("migrated: a bot and an instance", [i.key for i in made] == ["old"] and bot.exists(), text)
-    check("the bot keeps its name, account, model and owner",
-          bot.data == {"name": "Old", "account": "offline", "model": "haiku low", "owner": "Someone"},
-          bot.data)
-    check("...and language and gender, no longer settings, are pointed at its personality",
-          "language es, gender f are no longer settings: say them in its personality.txt" in text, text)
-    check("...and its personality, where it was", bot.personality.read_text() == "You are Old.\n")
-    check("the instance keeps its server and its port",
-          inst.data == {"bot": "old", "server": "test", "port": OLD_PORT})
-    check("its game, HeadlessMC and logs were moved, not copied",
-          (inst.gamedir / "config" / "masurium-places-test.txt").exists()
-          and (inst.run / "client.log").exists() and not (old / "gamedir").exists())
-    check("HeadlessMC now points at the game folder where it is",
-          files.read_java_properties(inst.hmc / "HeadlessMC" / "config.properties").get("hmc.gamedir")
-          == str(inst.gamedir))
-    check("the old one-value files left the bot's folder",
-          sorted(p.name for p in old.iterdir()) == ["bot.json", "personality.txt"])
-    backups = list((state / "backups").glob("bots-before-instances-*.tar.gz"))
+    old, twin, lone = WS.instance("old"), WS.instance("other"), WS.instance("lone")
+    check("migrated: every instance on the server with rules, and the ones that named a bot",
+          sorted(i.key for i in made) == ["alice", "bob", "lone", "old", "other"], text)
+    check("the instance takes its bot's name and the settings it did not set itself, and names no bot",
+          old.data == {"server": "test", "port": old.port, "model": "sonnet", "name": "Old", "owner": "Someone"},
+          old.data)
+    check("...its personality and its picture", old.personality.read_text() == "You are Old.\n"
+          and old.icon.read_bytes() == b"png")
+    check("...and its bot's rules and its server's, as changes that go on its next start",
+          {"kind": "food", "key": "beef", "value": "ban"} in rules.pending(old)
+          and {"kind": "pref", "key": "tame_wolves", "value": "off"} in rules.pending(old), rules.pending(old))
+    check("an instance with an offline account plays offline, as that account's player",
+          twin.name == "Dave" and settings.get(twin, "account") == "offline" and "account" not in twin.data,
+          twin.data)
+    check("one that named no bot still gets its server's rules",
+          rules.pending(lone) == [{"kind": "pref", "key": "tame_wolves", "value": "off"}], rules.pending(lone))
+    check("the bot folded in is gone; one with no instance stays, and it is said",
+          not bot_dir.exists() and (TMP / "bots" / "unused").exists() and "bot unused has no instance" in text,
+          text)
+    check("the offline account and the server's rules are gone",
+          not dave.dir.exists() and not (TMP / "servers" / "test" / "rules.json").exists())
+    backups = list((WS.state_dir / "backups").glob("bots-into-instances-*.tar.gz"))
     import tarfile
     names = tarfile.open(backups[0]).getnames() if backups else []
-    check("a backup of the small files was made first",
-          "old/port" in names and "old/personality.txt" in names
-          and "old/hmc/HeadlessMC/config.properties" in names, names)
-    moved = sorted(p.name for p in (state / "servers" / "test").iterdir() if p.is_file())
-    check("its state moved to its server's state folder",
-          moved == sorted(["session_old", "pending_old.json", "internal_old.jsonl", "calls_old.log",
-                           "horse_old_test.json"]), moved)
-    check("...and another bot's, whose name starts the same, did not",
-          (state / "internal_olden.jsonl").exists())
-    check("nothing is left to migrate", WS.legacy_bots() == [] and
-          "nothing to migrate" in said(ops.migrate, WS)[0])
-    remove_tree(inst.dir)
-    remove_tree(bot.dir)
+    check("a backup of all of it was made first",
+          "bots/old/bot.json" in names and "bots/old/personality.txt" in names and "accounts/dave/account.json"
+          in names and "servers/test/rules.json" in names and "instances/old/instance.json" in names, names)
+    check("nothing is left to migrate but the bot with no instance",
+          said(ops.migrate, WS)[0].count("migrating 0 instance(s)") == 1)
+    for inst in (old, twin, lone):
+        remove_tree(inst.dir)
+    for key in ("alice", "bob"):
+        rules.keep_pending(WS.instance(key), [])
+    remove_tree(TMP / "bots" / "unused")
 
 
 if __name__ == "__main__":

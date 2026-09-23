@@ -5,9 +5,9 @@ applies without it, what a menu would offer, when a change counts, and at
 which layers it may be set. The command line, doctor and a window check a
 value the same way.
 
-The layers, weakest first: the bot (bot.json), the instance
-(instance.json), the groups it is in, from its own outwards (group.json,
-"settings"), and the global config (launcher.json, "settings"). A layer sets
+The layers, weakest first: the instance (instance.json), the groups it is
+in, from its own outwards (group.json, "settings"), and the global config
+(launcher.json, "settings"). A layer sets
 only what it names; what no layer names takes the default. The outer ones
 IMPOSE: a group's model is the model of every instance inside it, unless an
 instance or a group on the way has a `lock` (the groups outside it stop
@@ -27,14 +27,14 @@ from dataclasses import dataclass
 import pathlib
 
 from . import groups
-from .bots import Character, Instance
+from .instances import Instance, check_name
 from .events import Fail
 from .files import read_java_properties, unlink_quietly
 
 PLAYER_NAME = re.compile(r"^[A-Za-z0-9_]{1,16}$")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-BOT, INSTANCE, GROUP, GLOBAL = "bot", "instance", "group", "global"
-EVERYWHERE = (BOT, INSTANCE, GROUP, GLOBAL)
+INSTANCE, GROUP, GLOBAL = "instance", "group", "global"
+EVERYWHERE = (INSTANCE, GROUP, GLOBAL)
 
 
 @dataclass(frozen=True)
@@ -78,10 +78,18 @@ def _check_port(target, value):
 
 
 def _check_account(target, value):
-    if value in ("offline", "online") or target.ws.account(value).exists():
+    if value == "offline" or target.ws.account(value).exists():
         return None
-    return ("offline, online, or one of the accounts: "
+    return ("offline, or one of the Microsoft accounts: "
             + (", ".join(target.ws.account_keys()) or "(none yet: masurium.py account add)"))
+
+
+def _check_name(target, value):
+    try:
+        check_name(value)
+    except Fail as e:
+        return str(e).rstrip(".")
+    return None
 
 
 def _check_owner(target, value):
@@ -144,14 +152,16 @@ def _heap_default(target):
 
 
 SETTINGS = {s.key: s for s in [
-    Setting("account", "one of the launcher's accounts (masurium.py account add), offline "
-            "(private servers with online-mode=false), or online (a login kept in the instance)",
-            "online", ("offline", "online"), applies="start", layers=(BOT, INSTANCE)),
+    Setting("name", "its player name when it plays offline (with a Microsoft account it is the "
+            "account's player)", lambda target: target.key, applies="start", layers=(INSTANCE,)),
+    Setting("account", "offline (private servers with online-mode=false: it plays as its name), or one "
+            "of the Microsoft accounts logged in with  masurium.py account add",
+            "offline", ("offline",), applies="start", layers=(INSTANCE,)),
     Setting("heap", "the game's memory (Java heap)", _heap_default, ("2g", "3g", "4g", "6g"),
             applies="start"),
     Setting("port", "the local port of the bot mod: its hands", "", applies="start", layers=(INSTANCE,)),
     Setting("role", "main (takes orders, does jobs) or guard (follows and protects the leader of its "
-            "dependency group)", "main", ("main", "guard"), applies="start", layers=(BOT, INSTANCE, GROUP)),
+            "dependency group)", "main", ("main", "guard"), applies="start", layers=(INSTANCE, GROUP)),
     Setting("model", "its brain's model and effort: an alias of Claude Code (opus, sonnet, haiku, fable, "
             "each always the newest of its family; opus[1m] and the like for a million tokens of context) or "
             "a model's full id, and optionally an effort", "opus medium",
@@ -171,7 +181,7 @@ SETTINGS = {s.key: s for s in [
             "no", ("no", "yes"), applies="now", layers=(INSTANCE, GROUP), inherited=False),
 ]}
 
-CHECKS = {"account": _check_account, "port": _check_port, "owner": _check_owner,
+CHECKS = {"name": _check_name, "account": _check_account, "port": _check_port, "owner": _check_owner,
           "model": _check_model, "heap": _check_heap, "java": _check_java, "java_args": _check_java_args}
 # Case matters in names (a player, a bot as the game shows it); in codes and
 # sizes it does not.
@@ -230,8 +240,6 @@ def setting(key):
 def layer_of(target):
     if isinstance(target, Instance):
         return INSTANCE
-    if isinstance(target, Character):
-        return BOT
     if isinstance(target, groups.Group):
         return GROUP
     if isinstance(target, groups.Global):
@@ -240,8 +248,8 @@ def layer_of(target):
 
 
 def own_values(target):
-    """What a target's own layer says: the top of bot.json and instance.json,
-    the "settings" of group.json and launcher.json (which hold more)."""
+    """What a target's own layer says: the top of instance.json, the
+    "settings" of group.json and launcher.json (which hold more)."""
     data = target.data
     if isinstance(target, (groups.Group, groups.Global)):
         values = data.get("settings")
@@ -312,10 +320,10 @@ def group_chain(target):
 
 def resolve(target, key, own_layer=True):
     """(the value that applies, the layer it comes from: "global",
-    "group <name>", "instance", "bot" or "default"). For an instance the
-    strongest first: the global config, its groups from the outermost in,
-    itself, its bot. With `own_layer` False, what would apply if the
-    target's own layer said nothing: what a window offers as "not set here"."""
+    "group <name>", "instance" or "default"). For an instance the strongest
+    first: the global config, its groups from the outermost in, itself. With
+    `own_layer` False, what would apply if the target's own layer said
+    nothing: what a window offers as "not set here"."""
     s = setting(key)
     own = layer_of(target) if own_layer else None
     if not s.inherited:
@@ -330,10 +338,6 @@ def resolve(target, key, own_layer=True):
             return found
         if own in s.layers and _raw(target, key):
             return _raw(target, key), own
-        if isinstance(target, Instance):
-            bot = target.bot
-            if BOT in s.layers and bot.exists() and _raw(bot, key):
-                return _raw(bot, key), BOT
     elif own in s.layers and _raw(target, key):
         return _raw(target, key), own
     return s.default_for(target), "default"
@@ -349,7 +353,7 @@ def is_set(target, key):
 
 
 def who(target):
-    return target.id if not isinstance(target, Character) else f"the bot {target.key}"
+    return target.id
 
 
 def set_value(target, key, value):
@@ -383,8 +387,8 @@ def problems(target):
     edited by hand."""
     out = []
     for key, value in own_values(target).items():
-        # Not settings: who it is, and its rules (checked in rules.py).
-        if key in ("name", "bot", "server", "rules") or value in (None, ""):
+        # Not settings: where it plays, and its rules (checked in rules.py).
+        if key in ("server", "rules") or value in (None, ""):
             continue
         if key in RETIRED:
             gone = RETIRED[key]
@@ -413,9 +417,9 @@ STALE = ("language", "gender")
 
 def render(inst):
     """Write what the bridge reads, from the layers: one file per setting,
-    the port, the server's slug, the personality, and HeadlessMC's own config
-    (the player name, offline or not, and the game folder, which moves with
-    the instance)."""
+    the port, the server's slug, and HeadlessMC's own config (the player
+    name, offline or not, and the game folder, which moves with the
+    instance). Its personality is its own file, read as it is."""
     inst.dir.mkdir(parents=True, exist_ok=True)
 
     def put(name, text):
@@ -443,27 +447,21 @@ def render(inst):
         unlink_quietly(inst.dir / "escort")
     put("port", inst.port)
     put("server", inst.slug)
-    bot = inst.bot
-    if bot.personality.is_file():
-        shutil.copyfile(bot.personality, inst.dir / "personality.txt")
-    else:
-        unlink_quietly(inst.dir / "personality.txt")
     cfg = inst.hmc / "HeadlessMC" / "config.properties"
     if cfg.parent.is_dir():
         props = read_java_properties(cfg)
         props.setdefault("hmc.jline.enabled", "false")
-        from .accounts import plays_offline
-        props["hmc.offline"] = "true" if plays_offline(inst.ws, get(inst, "account")) else "false"
+        props["hmc.offline"] = "true" if get(inst, "account") == "offline" else "false"
         # The Java HeadlessMC launches the game with: the instance's.
         props["hmc.java.versions"] = shutil.which(get(inst, "java")) or get(inst, "java")
         props["hmc.offline.username"] = inst.name
         props.setdefault("hmc.invert.command.modifiers", "false")
         props["hmc.gamedir"] = str(inst.gamedir)
         cfg.write_text("".join(f"{k}={v}\n" for k, v in props.items()), encoding="utf-8")
-    # Its login: the account's, through a link, or one of its own.
-    from .accounts import kind, link_login, unlink_login
+    # Its login: its Microsoft account's, through a link; offline, none.
+    from .accounts import link_login, unlink_login
     value = get(inst, "account")
-    if kind(value) == "account" and inst.ws.account(value).exists() and not inst.ws.account(value).offline:
+    if value != "offline" and inst.ws.account(value).exists():
         link_login(inst, inst.ws.account(value))
     elif (inst.hmc / "HeadlessMC").is_dir():
         unlink_login(inst)

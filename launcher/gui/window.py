@@ -12,10 +12,10 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, Q
                                QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from .. import __version__, groups, operations, settings
-from ..bots import Instance
+from ..instances import Instance
 from ..events import Cancelled, Fail
 from . import anim, dialogs, icons, state, theme
-from .common import ConsoleDialog, MessageBox, ask, muted, open_help, title
+from .common import MessageBox, ask, muted, open_help, title
 from .tasks import Background, Tasks
 from .widgets import DependencySection, GroupSection, InstanceTile, icon_of
 
@@ -154,10 +154,8 @@ class MainWindow(QMainWindow):
         self.search.setFixedWidth(220)
         self.search.textChanged.connect(self._filter)
         bar.addWidget(self.search)
-        button("Bots", "bot", lambda: dialogs.BotsDialog(self).exec(), "The characters: settings, rules, "
-                                                                        "personality")
-        button("Accounts", "account", lambda: self.open_settings("Accounts"), "Minecraft accounts, "
-                                                                               "Microsoft and offline")
+        button("Accounts", "account", lambda: self.open_settings("Accounts"), "Microsoft accounts, logged in "
+                                                                               "once")
         quit_ = QAction(icons.icon("quit"), "Quit", self)
         quit_.setToolTip("Close the launcher (Ctrl+Q). The bots keep running.")
         quit_.setShortcut(QKeySequence("Ctrl+Q"))
@@ -171,7 +169,7 @@ class MainWindow(QMainWindow):
         launcher runs, which a machine without a screen (reached through
         waypipe) has not: their paths can be copied instead."""
         ws = self.ws
-        places = [("Instances", ws.instances_dir), ("Bots", ws.bots_dir), ("Groups", ws.groups_dir),
+        places = [("Instances", ws.instances_dir), ("Groups", ws.groups_dir),
                   ("Servers", ws.servers_dir), ("Shared", ws.shared_dir), ("Accounts", ws.accounts_dir)]
         menu = QMenu(self)
         for name, path in places:
@@ -381,12 +379,12 @@ class MainWindow(QMainWindow):
         face = QToolButton()
         face.setObjectName("face")
         face.setIconSize(QSize(72, 72))
-        face.setIcon(QIcon(theme.avatar(view.bot or view.name if view else group.key, 72,
+        face.setIcon(QIcon(theme.avatar(view.name if view else group.key, 72,
                                         image=icon_of(view) if view else None)))
-        if view and view.bot:
+        if view:
             face.setCursor(Qt.PointingHandCursor)
-            face.setToolTip(f"{view.bot}'s picture: click to change it")
-            face.clicked.connect(lambda: self._face_menu(view.bot, face))
+            face.setToolTip(f"{view.key}'s picture: click to change it")
+            face.clicked.connect(lambda: self._face_menu(view.key, face))
         s.addWidget(face, 0, Qt.AlignHCenter)
         name = title(what[1])
         name.setAlignment(Qt.AlignHCenter)
@@ -516,8 +514,6 @@ class MainWindow(QMainWindow):
                    tip="The same bot again, here or on another server"),
             Action("Delete", "delete", lambda: self.delete_instance(key), not busy and not running),
         ]
-        if settings.get(inst, "account") == "online":
-            out.append(Action("Log its account in", "key", lambda: self._login(inst), not running))
         return out
 
     def _lead_action(self, inst):
@@ -626,16 +622,6 @@ class MainWindow(QMainWindow):
         if not self.tasks.run(target, title, fn):
             self.alert("Busy", f"{target} is busy: {self.tasks.busy(target)}")
 
-    def _login(self, inst):
-        try:
-            argv, cwd, env = operations.login_command(inst)
-        except Fail as e:
-            self.fail(e)
-            return
-        ConsoleDialog(self, f"Log in the account of {inst.key}",
-                      "HeadlessMC: press `login`, open the link in a browser and sign in; when it says the account "
-                      "is saved, press `quit`.", argv, cwd, env, lambda code: self.refresh()).exec()
-
     # --- right-click menus ----------------------------------------------------------------------
 
     def _menu_of(self, actions):
@@ -712,24 +698,24 @@ class MainWindow(QMainWindow):
             self.just_moved = ref
         self.refresh()
 
-    def _face_menu(self, bot, button):
+    def _face_menu(self, key, button):
         menu = QMenu(self)
-        menu.addAction("Choose a picture…", lambda: self._pick_face(bot))
-        menu.addAction("Paste a copied picture", lambda: self.set_face(bot, QApplication.clipboard().image()))
-        if self.ws.bot(bot).dir.joinpath("icon.png").is_file():
-            menu.addAction("Remove the picture", lambda: self.set_face(bot, None))
+        menu.addAction("Choose a picture…", lambda: self._pick_face(key))
+        menu.addAction("Paste a copied picture", lambda: self.set_face(key, QApplication.clipboard().image()))
+        if self.ws.instance(key).icon.is_file():
+            menu.addAction("Remove the picture", lambda: self.set_face(key, None))
         menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
 
-    def _pick_face(self, bot):
-        path, _ = QFileDialog.getOpenFileName(self, f"A picture for {bot}", str(self.ws.home),
+    def _pick_face(self, key):
+        path, _ = QFileDialog.getOpenFileName(self, f"A picture for {key}", str(self.ws.home),
                                               "Pictures (*.png *.jpg *.jpeg *.webp *.gif *.bmp)")
         if path:
-            self.set_face(bot, QImage(path))
+            self.set_face(key, QImage(path))
 
-    def set_face(self, bot, image):
-        """A bot's picture: bots/<bot>/icon.png, cut down to 256 pixels; None
-        takes it away (its letter again)."""
-        target = self.ws.bot(bot).dir / "icon.png"
+    def set_face(self, key, image):
+        """An instance's picture: instances/<key>/icon.png, cut down to 256
+        pixels; None takes it away (its letter again)."""
+        target = self.ws.instance(key).icon
         if image is None:
             target.unlink(missing_ok=True)
         elif image.isNull():
@@ -853,5 +839,5 @@ class MainWindow(QMainWindow):
         box.exec()
 
 
-_BAR_ICONS = {"Add Instance": "plus", "Folders": "folder", "Settings": "gear", "Help": "help", "Bots": "bot",
+_BAR_ICONS = {"Add Instance": "plus", "Folders": "folder", "Settings": "gear", "Help": "help",
               "Accounts": "account"}

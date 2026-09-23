@@ -54,28 +54,29 @@ setting ignored it without a word.
 
 ### Launcher
 - One command, `launcher/masurium.py`, in Python with no dependencies and no
-  shell: `servers`, `create`, `login`, `start`, `connect`, `bridge`, `stop`,
+  shell: `servers`, `create`, `start`, `connect`, `bridge`, `stop`,
   `restart`, `status`, `deploy-mod`, `doctor`. It replaced eight bash scripts.
 - Behind the command, a core that never prints: it reports what it does as
   events and fails with the reason and its evidence, so a window can sit on
   the same functions the command line uses (`launcher/`, a package).
 - A start, restart or connect can be cancelled while it waits, and a
   cancelled start stops the client it had launched. Ctrl+C does exactly that.
-- `set` sees and changes a bot's settings (owner, model, role, heap,
-  account, port) through one table that says what each
+- `set` sees and changes an instance's settings (name, account, owner, model,
+  role, heap, port) through one table that says what each
   accepts and when a change counts; a setting read at start is refused while
   the client runs. `doctor` names hand-edited values `set` would refuse.
   `MASURIUM_HEAP` and `MASURIUM_VERSION` replace the old `HEAP` and
   `VERSION`, names generic enough to be set by something else.
-- Bots and instances. A bot is a character (`bots/<bot>/bot.json` and its
-  personality); an instance is a bot on a server and is what runs
-  (`instances/<instance>/`: its game, HeadlessMC, logs, port, extra mods and
-  its own settings, which win over the bot's). Instances and bots are cloned
-  without questions (`clone`, `clone-bot`); `start` refuses to run one player
-  twice (the same player on one server, or an online account already playing
-  anywhere) and says which instance is in the way. Each server's bridges keep
-  their state apart, so two instances of one bot on two servers share nothing.
-  `migrate` moves bots from the layout before instances, with a backup first.
+- Each bot is an instance: a player on a server, and everything it is
+  (`instances/<instance>/`: its player name, account, personality, picture,
+  settings, game, HeadlessMC, logs, port and extra mods). There are no bots
+  apart from instances, which was one place too many to set one thing: the
+  same character on two servers is a copy of the instance, on its own from
+  then on. Instances are copied without questions (`clone`); `start` refuses
+  to run one player twice (the same player on one server, or a Microsoft
+  account already playing anywhere) and says which instance is in the way.
+  Each server's bridges keep their state apart. `migrate` folds the bots of
+  before into their instances, with a backup first.
 - No Masurium on the server, no bot there. `start` asks the server's mod
   before it loads a game and says what is wrong (not there or not up, or a
   wrong token); and the bot mod itself, a few seconds after joining a server
@@ -83,8 +84,8 @@ setting ignored it without a word.
   bot started without the launcher. A start that sees its client close while
   joining stops waiting at once.
 - Accounts, logged in once. `account add` opens HeadlessMC to log a Minecraft
-  account in and keeps it in `accounts/<player>/`; a bot set to that account
-  plays as its player, and each of its instances links to that one login
+  account in and keeps it in `accounts/<player>/`; an instance set to that
+  account plays as its player, and each of its instances links to that one login
   instead of holding a copy that would go stale when HeadlessMC renews it.
   One account plays in one game at a time and its instances start one after
   another. `account` lists them (logged in or not, who uses them), `account
@@ -92,8 +93,9 @@ setting ignored it without a word.
 - `rules`: a bot's rules from the launcher. `rules <instance>` shows every
   toggle and both lists, each with who decides it; with a change it edits the
   instance's own, on its server (waiting for its next start if the server is
-  away). `--bot` and `--server` edit the config under it, `--global` what is
-  imposed on every instance (`launcher.json`; `ignore_global` exempts one).
+  away). `--group` edits what a group imposes on everything in it, `--global`
+  what is imposed on every instance (`launcher.json`; `ignore_global` exempts
+  one).
   They are sent on every start and to running instances when they change; a
   rule written wrong stops the start and `doctor` names it.
 - Groups. A normal group holds instances and other groups, started and
@@ -131,12 +133,14 @@ setting ignored it without a word.
   create:cog`. A name alone is that name in whatever mod has it, and named on
   the server it is looked up: `cog` is kept as `create:cog` when only Create
   has one; a name two mods share, or none has, is refused, saying why.
-- Offline accounts (`account add --offline NAME`): a player name, listed and
-  chosen like a Microsoft account, which may play in several games at once.
+- Offline or a Microsoft account, one switch: an offline instance plays as the
+  name it was given (`name`, for private servers), and may play in several
+  games at once; one set to a Microsoft account plays as its player. In the
+  window, Add Instance and an instance's settings have that switch.
 - `java` and `java_args`: the Java an instance's game runs on and extra JVM
   flags, per instance, per group or globally.
 - `delete <instance> --yes` (and Delete in the window): an instance out of the
-  launcher, its folder and all (its bot stays); refused while it runs or leads
+  launcher, its folder and all; refused while it runs or leads
   a dependency group.
 - `fast_responses`: whether a bot's brain writes its fast responses (what it
   says without thinking) ahead of time; they are written again when its
@@ -230,7 +234,7 @@ setting ignored it without a word.
 - Internal channel between a bot and its guards.
 
 ### Launchers and tests
-- Online (a logged-in Minecraft account, `masurium.py login`) or offline bot accounts.
+- Offline bots with a name of their own, or a logged-in Microsoft account.
 - Launchers to create, start, connect, restart and stop bots, with shared game
   files, per-server mod packs through hard links and safe mod deployment.
 - Tests that need no Minecraft: path finder, logbook, request parsing, bridge and

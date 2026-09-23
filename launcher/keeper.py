@@ -48,7 +48,7 @@ def launch_line(inst, server):
     from a language flag: the mod speaks plain English otherwise."""
     ws = inst.ws
     from .accounts import plays_offline
-    offline = " -offline" if plays_offline(ws, settings.get(inst, "account")) else ""
+    offline = " -offline" if plays_offline(settings.get(inst, "account")) else ""
     # A heap edited by hand is not trusted onto the JVM's command line:
     # anything but a size falls back to the default (doctor says why).
     heap = settings.get(inst, "heap")

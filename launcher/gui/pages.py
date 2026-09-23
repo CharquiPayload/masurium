@@ -1,9 +1,9 @@
 """The pages of the paged windows: an instance's (Edit Instance), a
-group's, a bot's, and the launcher's own Settings. Each page is a plain
+group's, and the launcher's own Settings. Each page is a plain
 widget with its own Apply or Save; a window stacks them, Prism's way, with
 their names down the left.
 """
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QFrame, QGridLayout,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFormL
                                QTableWidgetItem, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .. import accounts, operations, rules, settings
-from ..bots import Instance
+from ..instances import Instance
 from ..events import Fail
 from ..files import tail_lines
 from . import anim, icons, theme
@@ -50,12 +50,12 @@ SWITCH_LABELS = {"ignore_global": "ignore the global config", "lock": "keep the 
 
 class RulesPage(QWidget):
     """A bot's rules as they come out, each thing with who decides it, and
-    changes to one layer: an instance's own (kept on its server), or a bot's,
-    a server's, a group's or the global ones (kept by the launcher). The
-    changes are collected, shown as they would come out, and sent with Apply;
-    what is imposed from above cannot be touched, and says by whom.
+    changes to one layer: an instance's own (kept on its server), or a
+    group's or the global ones (kept by the launcher). The changes are
+    collected, shown as they would come out, and sent with Apply; what is
+    imposed from above cannot be touched, and says by whom.
 
-    `kind` is "instance", "bot", "server", "group" or "global"."""
+    `kind` is "instance", "group" or "global"."""
 
     def __init__(self, win, kind, obj=None):
         super().__init__()
@@ -67,7 +67,7 @@ class RulesPage(QWidget):
         self.head = title(self._title())
         v.addWidget(self.head)
         v.addWidget(muted("In bold, what has been changed from what every bot starts with; “set by” says where: "
-                          "the bot's config, this instance, or a group or the global config, which lock it."))
+                          "this instance, or a group or the global config, which lock it."))
         self.note = muted("")
         v.addWidget(self.note)
         self.tabs = QTabWidget()
@@ -139,8 +139,7 @@ class RulesPage(QWidget):
     def _load(self):
         def read():
             if self.kind != "instance":
-                layer = {"bot": lambda: rules.of_bot(self.obj), "server": lambda: rules.of_server(self.ws, self.obj),
-                         "group": lambda: rules.of_group(self.obj), "global": lambda: rules.of_global(self.ws)}
+                layer = {"group": lambda: rules.of_group(self.obj), "global": lambda: rules.of_global(self.ws)}
                 return rules.empty(), layer[self.kind](), rules.empty(), ""
             inst = self.obj
             base, imposed = rules.base_of(inst), rules.imposed_of(inst)
@@ -165,9 +164,7 @@ class RulesPage(QWidget):
         self.base, self.own, self.imposed, note = got
         if self.kind != "instance":
             note = ("What this layer says, over what every bot starts with. "
-                    + {"bot": "It is the base of every instance of the bot.",
-                       "server": "It is the base of every bot on the server, over each bot's own.",
-                       "group": "It is imposed on everything in the group.",
+                    + {"group": "It is imposed on everything in the group.",
                        "global": "It is imposed on every instance that does not ignore it."}[self.kind])
         self.note.setText(note)
         self.setEnabled(True)
@@ -287,9 +284,7 @@ class RulesPage(QWidget):
                 if kind == "instance":
                     operations.edit_rules(obj, words, on_event=on_event)
                 else:
-                    operations.edit_layer(ws, words, bot=obj if kind == "bot" else None,
-                                          slug=obj if kind == "server" else None,
-                                          group=obj if kind == "group" else None, on_event=on_event)
+                    operations.edit_layer(ws, words, group=obj if kind == "group" else None, on_event=on_event)
 
         target = obj.key if kind == "instance" else f"{kind} {obj.key if hasattr(obj, 'key') else obj or ''}".strip()
         if self.win.tasks.run(target, "rules", work, then=self._sent):
@@ -305,7 +300,7 @@ class RulesPage(QWidget):
 
 # The settings in sections, each with its icon and a name a person reads;
 # the key the command line knows it by goes under the name.
-SECTIONS = (("The game", "cube", ("account", "heap", "port", "java", "java_args")),
+SECTIONS = (("The game", "cube", ("account", "name", "heap", "port", "java", "java_args")),
             ("The brain", "spark", ("model", "fast_responses", "owner", "role")),
             ("Groups", "group", ("ignore_global", "lock")))
 NAMES = {"account": ("Account", "account"), "heap": ("Memory", "chip"), "port": ("Port", "connect"),
@@ -314,9 +309,81 @@ NAMES = {"account": ("Account", "account"), "heap": ("Memory", "chip"), "port": 
          "ignore_global": ("Global config", "globe"), "lock": ("Lock", "lock")}
 
 
+NEW_ACCOUNT = "__new__"
+
+
+class AccountChoice(QWidget):
+    """How an instance plays, Prism's way: offline, as a player name written
+    here, or with one of the Microsoft accounts of Settings, Accounts; a
+    switch between the two. `on_new` opens the place to add an account."""
+
+    changed = Signal()
+
+    def __init__(self, ws, account="offline", name="", on_new=None):
+        super().__init__()
+        self.ws, self.on_new = ws, on_new
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(6)
+        row, self.microsoft = switch_row("Microsoft account", account != "offline")
+        v.addWidget(row)
+        self.name = QLineEdit(name)
+        self.name.setMaxLength(16)
+        self.name.setPlaceholderText("its player name, like Alice_42")
+        self.name.setToolTip("Its name in the game, offline: letters, digits and underscore, up to 16. "
+                             "Only for private servers with online-mode=false.")
+        self.name.textChanged.connect(lambda _: self.changed.emit())
+        v.addWidget(self.name)
+        self.accounts = QComboBox()
+        self.accounts.setToolTip("One of the Microsoft accounts of Settings, Accounts: it plays as its player")
+        self.accounts.activated.connect(self._chosen)
+        v.addWidget(self.accounts)
+        self._fill(None if account == "offline" else account)
+        self.microsoft.toggled.connect(lambda _: self._show())
+        self._show()
+
+    def _fill(self, choose=None):
+        self.accounts.clear()
+        for key in self.ws.account_keys():
+            a = self.ws.account(key)
+            if not a.offline:
+                self.accounts.addItem(f"{a.name}   ·   {key}", key)
+        self.accounts.addItem("+ New account…", NEW_ACCOUNT)
+        if choose:
+            self.accounts.setCurrentIndex(max(0, self.accounts.findData(choose)))
+
+    def _show(self):
+        on = self.microsoft.isChecked()
+        self.name.setVisible(not on)
+        self.accounts.setVisible(on)
+        self.changed.emit()
+
+    def _chosen(self, index):
+        if self.accounts.itemData(index) == NEW_ACCOUNT and self.on_new:
+            before = set(self.ws.account_keys())
+            self.on_new()
+            added = sorted(set(self.ws.account_keys()) - before)
+            self._fill(added[-1] if added else None)
+        self.changed.emit()
+
+    def account(self):
+        """"offline", an account's key, or None while none is chosen."""
+        if not self.microsoft.isChecked():
+            return "offline"
+        key = self.accounts.currentData()
+        return None if key in (None, NEW_ACCOUNT) else key
+
+    def player(self):
+        """The player it would be."""
+        account = self.account()
+        if account == "offline":
+            return self.name.text().strip()
+        return self.ws.account(account).name if account else ""
+
+
 class SettingsPage(QWidget):
-    """The settings of one layer: an instance's, a bot's, a group's or the
-    global ones. Each row shows what applies now and where it comes from;
+    """The settings of one layer: an instance's, a group's or the global
+    ones. Each row shows what applies now and where it comes from;
     what is changed here goes into this layer only."""
 
     def __init__(self, win, target, keys=None, heading=None):
@@ -327,8 +394,7 @@ class SettingsPage(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(6)
         v.addWidget(title(heading or f"Settings of {self._name()}"))
-        v.addWidget(muted({"instance": "Its own layer: over its bot's, under its groups and the global config.",
-                           "bot": "The bot's: under the settings of each of its instances.",
+        v.addWidget(muted({"instance": "Its own layer: under its groups and the global config, which impose.",
                            "group": "The group's: imposed on everything inside it.",
                            "global": "Imposed on every instance that does not ignore it."}[self.layer]))
         scroll = QScrollArea()
@@ -393,10 +459,31 @@ class SettingsPage(QWidget):
         line.setFrameShape(QFrame.HLine)
         grid.addWidget(line, 1, 0, 1, 4)
         for r, key in enumerate(keys, start=2):
+            if key == "name" and "account" in keys:
+                continue                # the account's row says it: offline, it is the name there
             s = settings.SETTINGS[key]
             label, icon_name = NAMES.get(key, (key, "gear"))
             current = "" if own.get(key) is None else str(own.get(key))
             under, from_ = settings.resolve(self.target, key, own_layer=False)
+            if key == "account":
+                # Prism's way: a switch between offline, with a name, and a
+                # Microsoft account of the launcher's.
+                editor = widget = AccountChoice(self.target.ws, settings.get(self.target, "account"),
+                                                self.target.own_name, on_new=self._new_account)
+                self.editors["name"] = (editor, str(own.get("name") or ""), self.target.key)
+                self.editors[key] = (editor, current, under)
+                value, source = self.target.name, (
+                    "offline" if settings.get(self.target, "account") == "offline"
+                    else f"the account {settings.get(self.target, 'account')}")
+                name = QLabel(f"<b>{label}</b><br><span style='color:{theme.FAINT}; font-size:8pt'>"
+                              "account, name</span>")
+                name.setToolTip(s.help)
+                grid.addWidget(picture(icon_name, 18), r, 0)
+                grid.addWidget(name, r, 1)
+                grid.addWidget(widget, r, 2)
+                grid.addWidget(muted(f"plays as {value}  ·  {source}  ·  counts {settings.APPLIES[s.applies]}"),
+                               r, 3)
+                continue
             if tuple(s.choices) == ("no", "yes"):
                 # Yes or no is a switch. Off where nothing above says yes is
                 # simply not set here.
@@ -443,12 +530,24 @@ class SettingsPage(QWidget):
 
     def _name(self):
         t = self.target
-        return {"instance": f"the instance {getattr(t, 'key', '')}", "bot": f"the bot {getattr(t, 'key', '')}",
+        return {"instance": f"the instance {getattr(t, 'key', '')}",
                 "group": f"the group {getattr(t, 'key', '')}", "global": "everything (global)"}[self.layer]
+
+    def _new_account(self):
+        from .dialogs import SettingsWindow
+        SettingsWindow(self.win, start="Accounts").exec()
 
     def value_of(self, key):
         """What the row says for this layer: a value, or "" for nothing here."""
         editor, current, under = self.editors[key]
+        if isinstance(editor, AccountChoice):
+            if key == "account":
+                account = editor.account()
+                return current if account is None else ("" if account == "offline" else account)
+            if editor.account() != "offline":
+                return current          # a Microsoft account's player plays: the name is kept
+            name = editor.name.text().strip()
+            return "" if name in ("", under) else name
         if isinstance(editor, Switch):
             # Untouched, it says what it said; moved to what applies anyway
             # without this layer, it says nothing here.
@@ -484,17 +583,17 @@ class PersonalityPage(QWidget):
     start of its prompt. Saving can also have it write again, in its new
     voice, what it says without its brain."""
 
-    def __init__(self, win, bot):
+    def __init__(self, win, inst):
         super().__init__()
-        self.win, self.bot = win, bot
+        self.win, self.inst = win, inst
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
-        v.addWidget(title(f"{bot.key} · plays as {bot.name}"))
+        v.addWidget(title(f"{inst.key} · plays as {inst.name}"))
         v.addWidget(muted("Who it is, in second person, including the language it speaks and how. It goes at the "
                           "start of its prompt; a running bridge reads it when it restarts."))
         self.text = QPlainTextEdit()
         try:
-            self.text.setPlainText(bot.personality.read_text(encoding="utf-8"))
+            self.text.setPlainText(inst.personality.read_text(encoding="utf-8"))
         except OSError:
             pass
         v.addWidget(self.text, 1)
@@ -509,10 +608,8 @@ class PersonalityPage(QWidget):
         v.addLayout(row)
 
     def _save(self):
-        self.bot.personality.write_text(self.text.toPlainText().rstrip() + "\n", encoding="utf-8")
-        for inst in self.bot.instances():
-            settings.render(inst)
-        self.win.say_text(f"personality of {self.bot.key} saved")
+        self.inst.personality.write_text(self.text.toPlainText().rstrip() + "\n", encoding="utf-8")
+        self.win.say_text(f"personality of {self.inst.key} saved")
 
 
 class LogsPage(QWidget):
@@ -559,32 +656,32 @@ class AccountsPage(QWidget):
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         v.addWidget(title("Accounts"))
-        v.addWidget(muted("A Microsoft account is a purchased Minecraft Java account, logged in once here; an "
-                          "offline one is only a player name, for private servers. A bot or an instance set to "
-                          "an account plays as its player; a Microsoft account plays in one game at a time."))
+        v.addWidget(muted("A Microsoft account is a purchased Minecraft Java account, logged in once here. An "
+                          "instance set to one plays as its player, in one game at a time; an offline instance "
+                          "only needs a player name, and plays on private servers."))
         row = QHBoxLayout()
         self.list = QTreeWidget()
-        self.list.setHeaderLabels(["Player", "Type", "Used by"])
+        self.list.setHeaderLabels(["Player", "Login", "Used by"])
         self.list.setRootIsDecorated(False)
         self.list.setColumnWidth(0, 200)
         self.list.setColumnWidth(1, 260)
         row.addWidget(self.list, 1)
-        row.addLayout(side_buttons(("Add Microsoft", "plus", self._add), ("Add Offline", "account", self._add_offline),
-                                   ("Remove", "delete", self._remove)))
+        row.addLayout(side_buttons(("Add Microsoft", "plus", self._add), ("Remove", "delete", self._remove)))
         v.addLayout(row, 1)
         self._fill()
 
     def _fill(self):
         self.list.clear()
         rows = operations.account_list(self.ws)
-        for account, logged, bots_, insts in rows:
-            kind = ("Offline" if account.offline else
-                    "Microsoft" if logged else "Microsoft · LOGIN GONE: remove it and add it again")
-            it = QTreeWidgetItem([account.name, kind, ", ".join(bots_ + insts) or "nobody yet"])
+        for account, logged, users in rows:
+            if account.offline:
+                continue                # from before: migrate folds it into its instances
+            state = "logged in" if logged else "GONE: remove it and add it again"
+            it = QTreeWidgetItem([account.name, state, ", ".join(users) or "nobody yet"])
             it.setIcon(0, icons.icon("account"))
             it.setData(0, Qt.UserRole, account.key)
             self.list.addTopLevelItem(it)
-        if not rows:
+        if not self.list.topLevelItemCount():
             self.list.addTopLevelItem(QTreeWidgetItem(["(none yet)", "", ""]))
 
     def _add(self):
@@ -607,23 +704,13 @@ class AccountsPage(QWidget):
                       "sign in with the Microsoft account; when it says the account is saved, press `quit`.",
                       argv, cwd, env, finished).exec()
 
-    def _add_offline(self):
-        name, ok = QInputDialog.getText(self, "An offline account", "Its player name (letters, digits, _):")
-        if not ok or not name.strip():
-            return
-        try:
-            operations.add_offline_account(self.ws, name.strip(), on_event=self.win.say)
-        except Fail as e:
-            self.win.fail(e)
-        self._fill()
-
     def _remove(self):
         chosen = self.list.selectedItems()
         key = chosen[0].data(0, Qt.UserRole) if chosen else None
         if not key:
             self.win.alert("Nothing chosen", "Choose an account in the list first.")
             return
-        if not ask(self, "Remove", f"Remove the account {key}" + (", and its login?" if not self.ws.account(key).offline else "?")):
+        if not ask(self, "Remove", f"Remove the account {key}, and its login?"):
             return
         try:
             operations.remove_account(self.ws, key, on_event=self.win.say)

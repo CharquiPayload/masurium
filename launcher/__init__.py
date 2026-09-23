@@ -11,14 +11,14 @@ the command line (cli.py, reached through masurium.py) today, a window
 tomorrow, both on the same functions.
 
     workspace.py   the three folders, server.env, the environment; the server registry
-    accounts.py    Minecraft accounts: logged in once, linked into each instance
-    bots.py        bots (characters) and instances (a bot on a server), and the lock
-                   that keeps two commands off an instance
+    accounts.py    Microsoft accounts: logged in once, linked into each instance
+    instances.py   instances (each one a bot: a player on a server, and everything it
+                   is), and the lock that keeps two commands off one
     groups.py      groups: instances started together, a leader and its guards, and the
                    global config; the tree that decides what imposes on an instance
-    settings.py    settings in layers (bot < instance < groups < global), what each
+    settings.py    settings in layers (instance < groups < global), what each
                    accepts, when it counts, and what is rendered for the bridge
-    rules.py       a bot's rules (toggles, food, blocks) in three layers, kept on its server
+    rules.py       a bot's rules (toggles, food, blocks), its own kept on its server
     packs.py       what a pack is made of, read from the jars; the pack owns gamedir/mods
     api.py         the server mod's HTTP API
     keeper.py      the process that holds a game's console
@@ -43,9 +43,9 @@ A program uses it like this:
 __version__ = "1.0.0"
 
 from . import doctor, operations, settings
-from .bots import Character, Instance
+from .instances import Instance
 from .events import Cancel, Event, Fail
 from .workspace import Server, Workspace
 
-__all__ = ["Cancel", "Character", "Event", "Fail", "Instance", "Server", "Workspace",
+__all__ = ["Cancel", "Event", "Fail", "Instance", "Server", "Workspace",
            "doctor", "operations", "settings"]

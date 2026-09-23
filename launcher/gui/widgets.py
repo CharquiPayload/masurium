@@ -241,7 +241,7 @@ class InstanceTile(Dragger, QFrame):
         signature = (view.icon, colour, theme.current["name"])
         if self.face != signature:
             self.face = signature
-            self.base = theme.avatar(view.bot or view.name, 52, image=icon_of(view))
+            self.base = theme.avatar(view.name, 52, image=icon_of(view))
             self.colour = colour
             self.pic.setPixmap(face_with_state(self.base, colour))
         self.set_pulsing(bool(busy) or view.state == "loading")

@@ -1,7 +1,7 @@
-"""What the launcher does: create bots and instances, clone them, start an
-instance and put it on its server, give it a voice (the bridge), stop it,
+"""What the launcher does: create instances (each one a bot), copy them, start
+an instance and put it on its server, give it a voice (the bridge), stop it,
 restart it, look at every instance, change settings, deploy a new mod, and
-move a workspace from the layout before instances.
+fold the bots that were kept apart into their instances.
 
 Every operation reports what it does through `on_event` (see events.py) and
 fails by raising Fail; none of them prints. The command line and, later, a
@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from . import accounts, brain, groups, rules, settings
 from .api import UNREACHABLE
-from .bots import Character, Instance, check_key, check_name, operating, write_json
+from .instances import Instance, check_key, check_name, operating, read_json, write_json
 from .diagnosis import complaints, crash_report, explain_crash
 from .events import Cancelled, Fail, pause, report_to, wait_for
 from .files import (LogWatch, link_dir, link_or_copy, link_target, log_has, read_java_properties,
@@ -44,47 +44,26 @@ PERSONALITY_TEMPLATE = (
     "flourishes.\n")
 
 
-# --- bots and instances -------------------------------------------------------
+# --- instances --------------------------------------------------------------------
 
-def create_bot(ws, name, key=None, account=None, on_event=None):
-    """A character: bots/<key>/bot.json and a personality to fill in.
-    `name` is its player name in the game, with its capitals."""
+def create(ws, name, slug, account=None, key=None, on_event=None):
+    """A bot: an instance on a server, playing as `name` (its player name in
+    the game, with its capitals) offline, or as the player of a Microsoft
+    `account`. Its folder, a port of its own, HeadlessMC, a game folder with
+    the server's pack linked in, and a personality to fill in. What
+    `masurium.py create <name> <server>` does. Returns the instance."""
     report = report_to(on_event)
     check_name(name)
-    key = (key or name).lower()
-    check_key(key)
-    bot = ws.bot(key)
-    if bot.dir.exists():
-        raise Fail(f"{bot.dir} already exists.", code="exists")
-    account = account or ws.environ.get("MASURIUM_ACCOUNT") or "online"
-    if account not in ("online", "offline") and not ws.account(account).exists():
-        raise Fail(f"the account is online, offline or one of the accounts ({', '.join(ws.account_keys()) or 'none yet'}),"
-                   f" not '{account}'.", code="bad_account")
-    try:
-        bot.dir.mkdir(parents=True)
-    except FileExistsError:
-        raise Fail(f"{bot.dir} already exists.", code="exists")
-    # Its character, in its own file from minute one, the language it speaks
-    # included. A template instead of an empty file, because a bot without a
-    # written character sounds like a manual.
-    bot.save({"name": name, "account": account})
-    bot.personality.write_text(PERSONALITY_TEMPLATE.format(name=name), encoding="utf-8")
-    report.step(f"bot {key} created (plays as {name}, {account} account)", stage="created")
-    return bot
-
-
-def create_instance(ws, bot_key, slug, key=None, on_event=None):
-    """An instance of a bot on a server: its folder, a port of its own,
-    HeadlessMC and a game folder with the server's pack linked in."""
-    report = report_to(on_event)
-    bot = ws.bot(bot_key).require()
     server = ws.server(slug)
+    account = account or "offline"
+    if account != "offline":
+        ws.account(account).require()
     launcher_jar = ws.shared_dir / "headlessmc-launcher.jar"
     if not (ws.shared_dir / "mods").is_dir() or not launcher_jar.is_file():
         raise Fail(f"missing {ws.shared_dir}: it holds HeadlessMC and the Masurium mods.",
                    code="no_shared")
-    key = (key or ws.free_key(bot.key, ws.instance_keys())).lower()
-    check_key(key, "instance")
+    key = (key or ws.free_key(name.lower(), ws.instance_keys())).lower()
+    check_key(key)
     inst = Instance(ws, key)
     if inst.dir.exists():
         raise Fail(f"{inst.dir} already exists.", code="exists")
@@ -99,55 +78,27 @@ def create_instance(ws, bot_key, slug, key=None, on_event=None):
     # name used to join and the login are kept there.
     link_or_copy(launcher_jar, inst.hmc / "headlessmc-launcher.jar")
     (inst.hmc / "HeadlessMC" / "config.properties").write_text("", encoding="utf-8")
-    inst.save({"bot": bot.key, "server": server.slug, "port": port})
+    data = {"name": name, "server": server.slug, "port": port}
+    if account != "offline":
+        data["account"] = account
+    inst.save(data)
+    # Its character, in its own file from minute one, the language it speaks
+    # included. A template instead of an empty file, because a bot without a
+    # written character sounds like a manual.
+    inst.personality.write_text(PERSONALITY_TEMPLATE.format(name=inst.name), encoding="utf-8")
     settings.render(inst)
     n = sync_mods(ws, inst.gamedir, server.pack, inst.extra_mods)
-    report.step(f"instance {key}: {bot.name} on {server.slug}, port {port}", stage="created")
+    how = "offline" if account == "offline" else f"the account {account}"
+    report.step(f"instance {key}: {inst.name} on {server.slug} ({how}), port {port}", stage="created")
     report.detail(f"{n} mods linked from {server.mods_dir} and {ws.shared_dir / 'mods'}")
     return inst
 
 
-def create(ws, name, slug, account=None, bot_key=None, key=None, on_event=None):
-    """The bot (if it is not there yet) and an instance of it on a server:
-    what `masurium.py create <name> <server>` does. Returns the instance."""
-    report = report_to(on_event)
-    bot_key = (bot_key or name).lower()
-    bot = ws.bot(bot_key)
-    if bot.exists():
-        if bot.name.lower() != name.lower():
-            raise Fail(f"the bot {bot_key} plays as {bot.name}, not as {name}.", code="exists")
-    else:
-        ws.server(slug)                  # an unknown server is said before anything is made
-        bot = create_bot(ws, name, bot_key, account, report)
-    return create_instance(ws, bot.key, slug, key, report)
-
-
-def clone_bot(ws, key, new_key=None, on_event=None):
-    """A new character from another: its settings and personality, under a
-    name of its own (alice -> alice-1, playing as Alice_1)."""
-    report = report_to(on_event)
-    src = ws.bot(key).require()
-    new_key = (new_key or ws.free_key(src.key, ws.bot_keys())).lower()
-    check_key(new_key)
-    dst = ws.bot(new_key)
-    if dst.dir.exists():
-        raise Fail(f"{dst.dir} already exists.", code="exists")
-    suffix = new_key[len(src.key):].replace("-", "_") if new_key.startswith(src.key) else ""
-    name = (src.name[:16 - len(suffix)] + suffix) if suffix else new_key.replace("-", "_")[:16]
-    check_name(name)
-    shutil.copytree(src.dir, dst.dir)
-    data = dst.data
-    data["name"] = name
-    dst.save(data)
-    report.step(f"bot {new_key} cloned from {src.key} (plays as {name})", stage="created")
-    return dst
-
-
 def delete_instance(ws, key, on_event=None):
-    """An instance out of the launcher, its game folder and all: what it
-    keeps about its world, its logs, its extra mods. Its bot stays. Refused
-    while it runs, and while it leads a dependency group (the group goes
-    first, or gets another leader). A guard leaves its group."""
+    """An instance out of the launcher, its folder and all: its personality,
+    what it keeps about its world, its logs, its extra mods. Refused while it
+    runs, and while it leads a dependency group (the group goes first, or
+    gets another leader). A guard leaves its group."""
     report = report_to(on_event)
     inst = ws.instance(key)
     if client_running(inst) or bridge_pid(inst):
@@ -156,20 +107,20 @@ def delete_instance(ws, key, on_event=None):
     if place == "leader":
         raise Fail(f"{inst.key} leads {group.id}: delete that group first, or it would guard nobody.",
                    code="leader")
-    bot = inst.data.get("bot", "?")          # read before its instance.json goes with the folder
     parent = groups.parent_of(ws, inst)
     if parent is not None:
         group_remove(ws, parent.key, [f"instance:{inst.key}"], on_event=on_event, deleting=True)
     leave_place(inst)
     shutil.rmtree(inst.dir)
-    report.step(f"instance {inst.key} deleted (its bot {bot} stays)", stage="deleted")
+    report.step(f"instance {inst.key} deleted", stage="deleted")
 
 
 def clone_instance(ws, key, new_key=None, slug=None, on_event=None):
-    """The same bot again, on this server or another: the instance's own
-    settings, extra mods, and what it keeps about its world (its config
-    folder: places, chests, orders), with a port of its own. Not its login:
-    two copies of a login would drift apart, so a clone logs in again.
+    """The same bot again, on this server or another: its player name, its
+    settings, personality and picture, its extra mods, and, on the same
+    server, what it keeps about its world (its config folder: places,
+    chests, orders), with a port of its own. On another server the world is
+    another one, and it starts knowing nothing of it.
 
     Two instances that would be the same player on the same server may
     exist; `start` is what refuses to run both."""
@@ -190,6 +141,9 @@ def clone_instance(ws, key, new_key=None, slug=None, on_event=None):
     (dst.hmc / "HeadlessMC" / "config.properties").write_text("", encoding="utf-8")
     if src.extra_mods.is_dir():
         shutil.copytree(src.extra_mods, dst.extra_mods)
+    for f in (src.personality, src.icon):
+        if f.is_file():
+            shutil.copy2(f, dst.dir / f.name)
     if slug == data.get("server") and (src.gamedir / "config").is_dir():
         shutil.copytree(src.gamedir / "config", dst.gamedir / "config")
     if (src.gamedir / "options.txt").is_file():
@@ -202,36 +156,14 @@ def clone_instance(ws, key, new_key=None, slug=None, on_event=None):
     report.step(f"instance {new_key} cloned from {src.key}: {dst.name} on {slug}, port {dst.port}",
                 stage="created")
     _copy_own_rules(src, dst, report)
-    if settings.get(dst, "account") == "online":
-        report.detail(f"online account: log it in once:  masurium.py login {new_key}")
     return dst
 
 
-def login_command(inst):
-    """Online bots use a real, purchased Minecraft Java account (a Microsoft
-    account), like any player. With `account online` HeadlessMC keeps the
-    login in the instance's own hmc folder: what to run, interactively, to
-    log it in there, (argv, cwd, env). None for an offline bot. An instance
-    of one of the launcher's accounts is logged in through the account
-    (`account add`), and is refused here."""
+def account_of(inst):
+    """"offline", or the Account an instance plays with. An offline player
+    may play in two games at once, on two servers."""
     value = settings.get(inst, "account")
-    if accounts.plays_offline(inst.ws, value):
-        return None
-    if accounts.kind(value) == "account":
-        raise Fail(f"{inst.key} plays with the account {value}: its login is the account's, "
-                   "made once with  masurium.py account add", code="has_account")
-    return (inst.ws.java_command() + ["-jar", "headlessmc-launcher.jar"],
-            inst.hmc, inst.ws.child_env())
-
-
-def account_of(target):
-    """("offline" | "online" | an Account) for what a bot or instance plays
-    with. An offline account is "offline": an offline player may play in two
-    games at once, on two servers."""
-    value = settings.get(target, "account")
-    if accounts.plays_offline(target.ws, value):
-        return "offline"
-    return target.ws.account(value) if accounts.kind(value) == "account" else value
+    return "offline" if accounts.plays_offline(value) else inst.ws.account(value)
 
 
 @contextlib.contextmanager
@@ -452,9 +384,9 @@ def bring_up(inst, on_event=None, cancel=None):
 
 def _start_steps(inst, report, cancel, launched):
     ws = inst.ws
-    if not inst.bot.exists():
-        raise Fail(f"the instance {inst.key} is of the bot {inst.data.get('bot')}, which is not there.",
-                   code="no_bot")
+    if "bot" in inst.data:
+        raise Fail(f"{inst.key} is still an instance of a bot kept apart from it: bots live in their "
+                   "instances now.", lines=["masurium.py migrate"], code="not_migrated")
     server = ws.server(inst.slug)
     api = ws.api_for(server)
 
@@ -581,8 +513,6 @@ def _start_steps(inst, report, cancel, launched):
             lines, code = crash[1], "crashed"
         else:
             lines, code = [], "not_initialized"
-            if settings.get(inst, "account") == "online":
-                lines.append(f"(online account: if HeadlessMC asked for a login, run masurium.py login {inst.key})")
             lines += tail_lines(inst.client_log, 5) + tail_lines(inst.keeper_log, 3)
         raise Fail("the hmc-specifics mod did not initialize. Without it there is no connect.",
                    lines=lines, code=code)
@@ -829,11 +759,11 @@ def restart(inst, on_event=None, cancel=None):
 # --- settings -----------------------------------------------------------------
 
 def configure(target, key, value=None, clear=False, on_event=None):
-    """Set one setting in a bot's layer or an instance's (see settings.py), or
-    with `clear` take it out of that layer. Returns the value that applies
-    now (for a bot: in its own layer, or the default). A setting read when
-    the client starts is refused while a client it concerns runs: the file
-    would say one thing and the running game another."""
+    """Set one setting in an instance's layer, a group's or the global one
+    (see settings.py), or with `clear` take it out of that layer. Returns the
+    value that applies now. A setting read when the client starts is refused
+    while a client it concerns runs: the file would say one thing and the
+    running game another."""
     report = report_to(on_event)
     target.require()
     s = settings.setting(key)
@@ -841,10 +771,8 @@ def configure(target, key, value=None, clear=False, on_event=None):
         affected = [target]
     elif isinstance(target, groups.Group):
         affected = groups.flatten(target)
-    elif isinstance(target, groups.Global):
-        affected = target.ws.instances()
     else:
-        affected = target.instances()
+        affected = target.ws.instances()
     if s.at_start:
         running = [i.key for i in affected if client_running(i)]
         if running:
@@ -859,8 +787,7 @@ def configure(target, key, value=None, clear=False, on_event=None):
     if key in ("ignore_global", "lock"):
         _push_running(affected, report)
     now, layer = settings.resolve(target, key)
-    who = target.key if isinstance(target, Instance) else (
-        f"bot {target.key}" if isinstance(target, Character) else target.id)
+    who = target.key if isinstance(target, Instance) else target.id
     report.step(f"{who}: {key} = {now or '(nothing)'}" + ("" if layer == settings.layer_of(target)
                                                           else f"  (from the {layer})"), stage="configured")
     report.detail(f"it counts {settings.APPLIES[s.applies]}")
@@ -886,26 +813,13 @@ def add_account(ws, run_login, key=None, on_event=None):
         raise
     account = accounts.finish_login(ws, folder, key)
     report.step(f"account {account.key}: plays as {account.name}", stage="added")
-    report.detail(f"a bot plays with it with:  masurium.py set --bot <bot> account {account.key}")
-    return account
-
-
-def add_offline_account(ws, name, key=None, on_event=None):
-    """An offline account: a player name, for private servers."""
-    report = report_to(on_event)
-    account = accounts.add_offline(ws, name, key)
-    report.step(f"offline account {account.key}: plays as {account.name}", stage="added")
+    report.detail(f"an instance plays with it with:  masurium.py set <instance> account {account.key}")
     return account
 
 
 def account_list(ws):
-    """[(account, logged in, bots, instances)] for every account."""
-    out = []
-    for key in ws.account_keys():
-        account = ws.account(key)
-        bots, insts = account.users()
-        out.append((account, account.logged_in(), bots, insts))
-    return out
+    """[(account, logged in, instances)] for every account."""
+    return [(a, a.logged_in(), a.users()) for a in (ws.account(k) for k in ws.account_keys())]
 
 
 def remove_account(ws, key, on_event=None):
@@ -1361,31 +1275,20 @@ def _push_running(instances, report):
         report.detail(f"{rest} not running: on their next start")
 
 
-def edit_layer(ws, words, bot=None, slug=None, group=None, on_event=None):
-    """One change to the rules this launcher holds: a bot's (bot.json), a
-    server's (servers/<slug>/rules.json), a group's (group.json), which it
-    imposes on what is inside it, or, with none of them, the global ones
+def edit_layer(ws, words, group=None, on_event=None):
+    """One change to the rules this launcher holds: a group's (group.json),
+    which it imposes on what is inside it, or, without one, the global ones
     (launcher.json), imposed on every instance. The running instances they
     concern get them at once."""
     report = report_to(on_event)
-    if bot is not None:
-        bot.require()
-        layer, where, concerned = rules.of_bot(bot), f"bot {bot.key}", bot.instances()
-    elif slug is not None:
-        ws.server(slug)
-        layer, where, concerned = rules.of_server(ws, slug), f"server {slug}", ws.instances(slug)
-    elif group is not None:
+    if group is not None:
         group.require()
         layer, where, concerned = rules.of_group(group), group.id, groups.flatten(group)
     else:
         layer, where = rules.of_global(ws), "global"
         concerned = [i for i in ws.instances() if settings.get(i, "ignore_global") != "yes"]
     layer, change = rules.edit(layer, words)
-    if bot is not None:
-        rules.save_bot(bot, layer)
-    elif slug is not None:
-        rules.save_server(ws, slug, layer)
-    elif group is not None:
+    if group is not None:
         rules.save_group(group, layer)
     else:
         rules.save_global(ws, layer)
@@ -1394,14 +1297,8 @@ def edit_layer(ws, words, bot=None, slug=None, group=None, on_event=None):
     return layer
 
 
-def layer_lines(ws, bot=None, slug=None, group=None):
+def layer_lines(ws, group=None):
     """(where it is kept, the layer in a few lines)."""
-    if bot is not None:
-        bot.require()
-        return str(bot.json), rules.describe(rules.of_bot(bot))
-    if slug is not None:
-        ws.server(slug)
-        return str(ws.servers_dir / slug / "rules.json"), rules.describe(rules.of_server(ws, slug))
     if group is not None:
         group.require()
         return str(group.json), rules.describe(rules.of_group(group))
@@ -1481,37 +1378,36 @@ def survey(ws, key=None):
     return problems, [status_of(i, api_of(i)) for i in instances]
 
 
-# --- the layout before instances ------------------------------------------------
-
-# The files of a bot folder from before instances, and where each one goes.
-LEGACY_BOT = ("account", "model", "owner", "heap")
-# What was once a setting and is now the personality's to say.
-LEGACY_RETIRED = ("language", "gender")
-LEGACY_INSTANCE = ("escort",)
-
+# --- migrating: bots into their instances ---------------------------------------
 
 def migrate(ws, dry_run=False, on_event=None):
-    """bots/<name>/, which held the bot and its game in one folder, becomes a
-    bot (bots/<name>/bot.json and its personality) and an instance
-    (instances/<name>/: instance.json, and hmc/, gamedir/ and run/ MOVED, not
-    copied, so it takes a second and no space). The state its bridge kept
-    in the state folder moves to its server's. Before anything, a backup of
-    every small file (not the games) goes to state/backups/. A bot that is
-    running is left alone: stop it first.
+    """Bots kept apart from their instances fold into them. Each instance of
+    a bot (bots/<bot>/bot.json) gets its player name, the settings the
+    instance did not set itself, its personality and its picture; its rules,
+    and its server's (servers/<slug>/rules.json), become changes to the
+    instance's own rules, which go to its server on its next start. An
+    instance that played with an offline account plays offline as that
+    account's player. Then bots/, the servers' rules and the offline
+    accounts go; before anything, a backup of all of them goes to
+    state/backups/.
 
     And an instance that names an `escort` (a guard, from before groups)
     goes into a dependency group led by that player's instance on its server.
 
-    Returns the instances made."""
+    Returns the instances it changed."""
     report = report_to(on_event)
-    legacy = ws.legacy_bots()
-    if not legacy and not _escorted(ws):
-        report.step("nothing to migrate: no bot folder in the layout from before instances, "
-                    "and no escort to turn into a group")
+    old = ws.old_bots()
+    folded = [i for i in ws.instances() if "bot" in i.data]
+    offline_accounts = [a for a in (ws.account(k) for k in ws.account_keys()) if a.offline]
+    server_rules = [s for s in ws.server_slugs() if (ws.servers_dir / s / "rules.json").is_file()]
+    if not (old or folded or offline_accounts or server_rules or _escorted(ws)):
+        report.step("nothing to migrate: no bots apart from their instances, no offline accounts, "
+                    "no servers' rules and no escort to turn into a group")
         return []
-    made = _migrate_legacy(ws, legacy, dry_run, report) if legacy else []
+    changed = _fold_bots(ws, old, folded, offline_accounts, server_rules, dry_run, report) \
+        if (old or folded or offline_accounts or server_rules) else []
     _escorts_to_groups(ws, dry_run, report)
-    return made
+    return changed
 
 
 def _escorted(ws):
@@ -1567,102 +1463,85 @@ def _escorts_to_groups(ws, dry_run, report):
         report.detail(f"{inst.key}: guard of {leader.key}, in the dependency group {key}")
 
 
-def _migrate_legacy(ws, legacy, dry_run, report):
-    plan = []
-    for key in legacy:
-        d = ws.bots_dir / key
-        props = read_java_properties(d / "hmc" / "HeadlessMC" / "config.properties")
-        name = props.get("hmc.offline.username") or key
-        slug = _read(d / "server")
-        try:
-            port = int(_read(d / "port"))
-        except ValueError:
-            port = None
-        game_port_busy = port is not None and (port_in_use(port) or bool(game_pids(port)))
-        if game_port_busy or is_ours(read_pid(d / "run" / "keeper.pid"), "keeper"):
-            raise Fail(f"{key} is running: stop it before migrating (with the launcher of before, "
-                       "or by closing its game).", code="running")
-        plan.append((key, name, slug, port))
-    report.step(f"migrating {len(plan)} bot(s): " + ", ".join(k for k, *_ in plan), stage="migrating")
+def _fold_bots(ws, old, folded, offline_accounts, server_rules, dry_run, report):
+    bots = {}
+    for key in old:
+        path = ws.bots_dir / key / "bot.json"
+        bots[key] = (read_json(path), rules.of_old_bot(path), ws.bots_dir / key)
+    offline = {a.key: a.name for a in offline_accounts}
+    changes = []
+    for inst in ws.instances():
+        data = inst.data
+        key = data.get("bot")
+        if key is None and data.get("account") not in offline and not any(s == inst.slug for s in server_rules):
+            continue
+        bot_data, bot_rules, bot_dir = bots.get(key, ({}, rules.empty(), None))
+        new = {k: v for k, v in data.items() if k != "bot"}
+        new.setdefault("name", bot_data.get("name") or key or inst.key)
+        for k, v in bot_data.items():
+            if k not in ("name", "rules") and k not in new:
+                new[k] = v
+        account = new.get("account")
+        if account in offline:
+            new["name"], new["account"] = offline[account], "offline"
+        elif account == "online":
+            new["account"] = "offline"
+            report.warning(f"{inst.key}: it played with a login of its own (online), which is no "
+                           "more; it plays offline now. For a Microsoft account:  masurium.py account "
+                           f"add, then  masurium.py set {inst.key} account <account>")
+        if new.get("account") == "offline":
+            new.pop("account")
+        layer = rules.merge(rules.of_server(ws, inst.slug), bot_rules)
+        queued = rules.changes_of(layer)
+        changes.append((inst, new, bot_dir, queued))
+        report.detail(f"{inst.key}: plays as {new['name']}"
+                      + (f", with bot {key}'s settings and personality" if key in bots else "")
+                      + (f"; {len(queued)} rule(s) go to its server on its next start" if queued else ""))
+    for a in offline_accounts:
+        report.detail(f"offline account {a.key} goes: an offline instance has a name of its own")
+    for slug in server_rules:
+        report.detail(f"{slug}'s rules go into its instances' own")
+    kept = [k for k in old if not any(bot_dir == ws.bots_dir / k for _, _, bot_dir, _ in changes)]
+    for k in kept:
+        report.warning(f"bot {k} has no instance: it stays in {ws.bots_dir / k}. Make it one with  "
+                       f"masurium.py create <name> <server>, then copy its personality.txt")
+    report.step(f"migrating {len(changes)} instance(s): the bots go into them", stage="migrating")
     if dry_run:
-        for key, name, slug, port in plan:
-            report.detail(f"{key}: bot {key} (plays as {name}) + instance {key} on {slug or '(no server!)'}, "
-                          f"port {port}")
         return []
 
     backups = ws.state_dir / "backups"
     backups.mkdir(parents=True, exist_ok=True)
-    backup = backups / time.strftime("bots-before-instances-%Y%m%d-%H%M%S.tar.gz")
+    backup = backups / time.strftime("bots-into-instances-%Y%m%d-%H%M%S.tar.gz")
     with tarfile.open(backup, "w:gz") as tar:
-        for key, *_ in plan:
-            for f in sorted((ws.bots_dir / key).iterdir()):
-                if f.is_file():
-                    tar.add(f, arcname=f"{key}/{f.name}")
-            cfg = ws.bots_dir / key / "hmc" / "HeadlessMC" / "config.properties"
-            if cfg.is_file():
-                tar.add(cfg, arcname=f"{key}/hmc/HeadlessMC/config.properties")
-    report.detail(f"backup of the small files: {backup}")
+        for key in old:
+            tar.add(ws.bots_dir / key, arcname=f"bots/{key}")
+        for a in offline_accounts:
+            tar.add(a.dir, arcname=f"accounts/{a.key}")
+        for slug in server_rules:
+            tar.add(ws.servers_dir / slug / "rules.json", arcname=f"servers/{slug}/rules.json")
+        for inst, *_ in changes:
+            tar.add(inst.json, arcname=f"instances/{inst.key}/instance.json")
+    report.detail(f"backup: {backup}")
 
-    made = []
-    for key, name, slug, port in plan:
-        d = ws.bots_dir / key
-        bot_data = {"name": name}
-        for k in LEGACY_BOT:
-            v = _read(d / k)
-            if v:
-                bot_data[k] = v
-        inst_key = ws.free_key(key, ws.instance_keys())
-        inst = Instance(ws, inst_key)
-        inst.dir.mkdir(parents=True, exist_ok=True)
-        for sub in ("hmc", "gamedir", "run"):
-            if (d / sub).exists():
-                shutil.move(str(d / sub), str(inst.dir / sub))
-        inst_data = {"bot": key, "server": slug, "port": port or ws.free_port(inst_key)}
-        for k in LEGACY_INSTANCE:
-            v = _read(d / k)
-            if v:
-                inst_data[k] = v
-        write_json(ws.bots_dir / key / "bot.json", bot_data)
-        inst.save(inst_data)
-        retired = {k: _read(d / k) for k in LEGACY_RETIRED if _read(d / k)}
-        for k in LEGACY_BOT + LEGACY_INSTANCE + LEGACY_RETIRED + ("port", "server"):
-            unlink_quietly(d / k)
-        moved = _move_state(ws, name.lower(), slug) if slug else 0
+    for inst, new, bot_dir, queued in changes:
+        inst.save(new)
+        if bot_dir is not None:
+            for f in ("personality.txt", "icon.png"):
+                if (bot_dir / f).is_file():
+                    shutil.copy2(bot_dir / f, inst.dir / f)
+        if queued:
+            rules.keep_pending(inst, queued + rules.pending(inst))
         settings.render(inst)
-        made.append(inst)
-        report.detail(f"{key}: bot {key} (plays as {name}) + instance {inst_key} on {slug or '(no server!)'}"
-                      + (f"; {moved} state file(s) moved to {ws.server_state(slug)}" if moved else ""))
-        if retired:
-            report.warning(f"{key}: " + ", ".join(f"{k} {v}" for k, v in retired.items())
-                           + " are no longer settings: say them in its personality.txt",
-                           [str(ws.bot(key).personality)])
-    report.step("migrated. `masurium.py status` lists the instances.", stage="migrated")
-    return made
-
-
-def _read(path):
-    try:
-        return pathlib.Path(path).read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
-
-
-def _move_state(ws, player, slug):
-    """What a bridge and its MCP server kept about this player in the state
-    folder (session, jobs left pending, the internal channel, the marks,
-    the horse, the call log) moves to its server's state folder, where the
-    bridge of the instance looks now."""
-    src, dst = ws.state_dir, ws.server_state(slug)
-    rx = re.compile(rf"^[a-z]+_{re.escape(player)}(\.[A-Za-z.]+|_.+)?$")
-    moved = 0
-    if not src.is_dir():
-        return 0
-    for f in sorted(src.iterdir()):
-        if f.is_file() and rx.match(f.name) and not f.name.endswith(".lock"):
-            dst.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(f), str(dst / f.name))
-            moved += 1
-    return moved
+    for key in old:
+        if key not in kept:
+            shutil.rmtree(ws.bots_dir / key)
+    for a in offline_accounts:
+        shutil.rmtree(a.dir)
+    for slug in server_rules:
+        (ws.servers_dir / slug / "rules.json").unlink()
+    report.step("migrated: every instance is its own bot now. `masurium.py status` lists them.",
+                stage="migrated")
+    return [inst for inst, *_ in changes]
 
 
 # --- deploy -------------------------------------------------------------------

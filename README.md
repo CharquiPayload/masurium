@@ -107,13 +107,14 @@ inline, a lambda, or a return type that no `import` would reveal.
 - A per-bot configuration file generated on first start, with the behaviour
   toggles as `true`/`false`.
 - Release builds of the jar.
-- **Masurium Launcher**: the command line is done (`launcher/masurium.py`: bots, which
-  are characters, and instances, a bot on a server, created, cloned, started,
-  stopped and watched; settings in layers, bot < instance; each server with its
-  own server mod; it compares the pack with the server's `/mods` before
-  joining, and refuses to run one player twice; accounts logged in once and
-  shared by a bot's instances; a bot's rules — toggles, food, blocks — in three
-  layers kept on the server and editable from the launcher and the game, live;
+- **Masurium Launcher**: the command line is done (`launcher/masurium.py`: bots,
+  each one an instance — a player on a server, with its name, account,
+  personality and settings — created, copied, started, stopped and watched;
+  each server with its own server mod; it compares the pack with the server's
+  `/mods` before joining, and refuses to run one player twice; offline, or
+  Microsoft accounts logged in once and shared through a link; a bot's rules —
+  toggles, food, blocks — kept on the server and editable from the launcher and
+  the game, live;
   groups, plain ones that start together and a leader with its guards, nested,
   with settings and rules that impose on what is inside them, and a global
   config over all). A window on the same code (`masurium.py gui`, PySide6):

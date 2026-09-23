@@ -7,7 +7,6 @@ import subprocess
 import threading
 
 from . import doctor, operations, settings
-from .bots import operating
 from .events import Cancel, Cancelled, Fail
 from .keeper import keeper_main
 from .processes import detached
@@ -73,31 +72,17 @@ def cmd_servers(ws, args):
         say("  " + line)
 
 
-def cmd_bots(ws, args):
-    bots = ws.bots()
-    if not bots:
-        say(f"no bots under {ws.bots_dir}")
-    for bot in bots:
-        insts = ", ".join(i.key for i in bot.instances()) or "no instances"
-        say(f"  {bot.key:<16} plays as {bot.name:<16} {settings.get(bot, 'account'):<8} {insts}")
-    for key in ws.legacy_bots():
-        say(f"  {key:<16} (layout from before instances: masurium.py migrate)")
-
-
 def next_steps(inst):
     say()
-    say(f"==> files you may want to edit: {inst.bot.personality}")
-    say(f"    settings:  masurium.py set {inst.key}   (the bot's, for every instance: set --bot {inst.bot.key})")
-    if settings.get(inst, "account") == "online":
-        say(f"log in its Minecraft account once:  masurium.py login {inst.key}")
-        say(f"then start it with:                 masurium.py start {inst.key}")
-    else:
-        say("offline account: only for private servers with online-mode=false.")
-        say(f"start it with:  masurium.py start {inst.key}")
+    say(f"==> its personality, to write:  {inst.personality}")
+    say(f"    its settings:  masurium.py set {inst.key}")
+    if settings.get(inst, "account") == "offline":
+        say("    offline: only for private servers with online-mode=false.")
+    say(f"    start it with:  masurium.py start {inst.key}")
 
 
 def cmd_create(ws, args):
-    inst = operations.create(ws, args.name, args.server, args.account, args.bot, args.as_, print_event)
+    inst = operations.create(ws, args.name, args.server, args.account, args.as_, print_event)
     next_steps(inst)
 
 
@@ -107,31 +92,11 @@ def cmd_clone(ws, args):
 
 
 def cmd_delete(ws, args):
-    """masurium.py delete alice --yes   the instance, its game folder and all; its bot stays"""
+    """masurium.py delete alice --yes   the instance, its folder and all"""
     if not args.yes:
-        raise Fail(f"this deletes the instance {args.instance}, its game folder and all (what it keeps about its "
-                   "world, its logs, its extra mods); its bot stays. Say it again with --yes.", code="confirm")
+        raise Fail(f"this deletes the instance {args.instance}, its folder and all (its personality, what it "
+                   "keeps about its world, its logs, its extra mods). Say it again with --yes.", code="confirm")
     operations.delete_instance(ws, args.instance, print_event)
-
-
-def cmd_clone_bot(ws, args):
-    bot = operations.clone_bot(ws, args.bot, args.as_, print_event)
-    say(f"    an instance of it:  masurium.py create {bot.name} <server> --bot {bot.key}")
-
-
-def cmd_login(ws, args):
-    """Opens HeadlessMC interactively: type `login`, follow its instructions,
-    and `quit`."""
-    inst = ws.instance(args.name)
-    command = operations.login_command(inst)
-    if command is None:
-        say(f"{inst.key} uses an offline account; there is nothing to log in.")
-        return 0
-    argv, cwd, env = command
-    with operating(inst):
-        say(f"==> HeadlessMC for {inst.key} ({inst.name}). Type:  login   (then follow the instructions)")
-        say("    and when the account is saved:  quit")
-        return subprocess.call(argv, cwd=str(cwd), env=env)
 
 
 def cmd_start(ws, args):
@@ -160,8 +125,8 @@ def cmd_restart(ws, args):
 def cmd_status(ws, args):
     if not args.name and not ws.instance_keys():
         say(f"no instances under {ws.instances_dir}")
-        if ws.legacy_bots():
-            say("(there are bots in the layout from before instances: masurium.py migrate)")
+        if ws.old_bots():
+            say("(there are bots apart from their instances: masurium.py migrate)")
         return 0
     problems, statuses = operations.survey(ws, args.name)
     for problem in problems:
@@ -179,8 +144,8 @@ def cmd_set(ws, args):
     """masurium.py set alice                  every setting of the instance, and where it comes from
     masurium.py set alice heap               one
     masurium.py set alice heap 4g            change it, for this instance
-    masurium.py set alice heap --default     take it out of the instance: the bot's, or the default
-    masurium.py set --bot alice model sonnet      the bot's, for all its instances
+    masurium.py set alice heap --default     take it out of the instance: back to the default
+    masurium.py set alice name Alice_2       its player name, offline
     masurium.py set --group team model haiku      imposed on everything in the group
     masurium.py set --global model sonnet         imposed on every instance (launcher.json)"""
     if args.global_:
@@ -189,10 +154,8 @@ def cmd_set(ws, args):
         args.name, args.key, args.value = None, (words[0] if words else None), words[1:]
         target = ws.global_config()
     elif not args.name:
-        raise Fail("say whose:  masurium.py set <instance>, or --bot <bot>, --group <group>, --global",
+        raise Fail("say whose:  masurium.py set <instance>, or --group <group>, --global",
                    code="bad_setting")
-    elif args.bot:
-        target = ws.bot(args.name).require()
     elif args.group:
         target = ws.group(args.name).require()
     else:
@@ -223,14 +186,10 @@ def cmd_set(ws, args):
 
 
 def cmd_account(ws, args):
-    """masurium.py account                  every account, whether it is logged in, who uses it
+    """masurium.py account                  every Microsoft account, whether it is logged in, who uses it
     masurium.py account add [--as KEY]       log one in, once (HeadlessMC opens: login, then quit)
-    masurium.py account add --offline NAME an offline one: a player name, for private servers
     masurium.py account remove KEY           out of the launcher, login and all"""
     if args.action == "add":
-        if args.offline:
-            operations.add_offline_account(ws, args.offline, args.as_, print_event)
-            return 0
         operations.add_account(ws, lambda argv, cwd, env: subprocess.call(argv, cwd=str(cwd), env=env),
                                args.as_, print_event)
         return 0
@@ -243,10 +202,9 @@ def cmd_account(ws, args):
     if not rows:
         say(f"no accounts under {ws.accounts_dir}: masurium.py account add")
         return 0
-    for account, logged, bots, insts in rows:
-        users = ", ".join([f"bot {b}" for b in bots] + [f"instance {i}" for i in insts]) or "nobody"
+    for account, logged, users in rows:
         say(f"  {account.key:<16} plays as {account.name:<16} "
-            f"{'offline' if account.offline else 'logged in' if logged else 'NOT logged in':<14} used by {users}")
+            f"{'logged in' if logged else 'NOT logged in':<14} used by {', '.join(users) or 'nobody'}")
     return 0
 
 
@@ -254,25 +212,22 @@ def cmd_rules(ws, args):
     """masurium.py rules alice                        its rules as they come out, and who decides each
     masurium.py rules alice food ban rotten_flesh      a change to its own (the same as /masurium bot)
     masurium.py rules alice pref hunt_players on       ... on, off or default
-    masurium.py rules --bot alice break allow oak_log     the bot's config, for all its instances
-    masurium.py rules --server create food ban beef       a server's, for every bot on it
+    masurium.py rules --group team break allow oak_log   imposed on everything in the group
     masurium.py rules --global food replace               imposed on every instance"""
-    layered = args.bot or args.server or args.group or args.global_
+    layered = args.group or args.global_
     words = ([args.name] if args.name and layered else []) + list(args.words)
     if layered:
-        bot = ws.bot(args.bot) if args.bot else None
         group = ws.group(args.group) if args.group else None
         if not words:
-            where, lines = operations.layer_lines(ws, bot=bot, slug=args.server, group=group)
+            where, lines = operations.layer_lines(ws, group=group)
             say(f"{where}:")
             for line in lines or ["(nothing: it decides nothing)"]:
                 say(f"  {line}")
             return 0
-        operations.edit_layer(ws, words, bot=bot, slug=args.server, group=group, on_event=print_event)
+        operations.edit_layer(ws, words, group=group, on_event=print_event)
         return 0
     if not args.name:
-        raise Fail("say whose:  masurium.py rules <instance>, or --bot <bot>, --server <slug>, "
-                   "--group <group>, --global", code="bad_rules")
+        raise Fail("say whose:  masurium.py rules <instance>, or --group <group>, --global", code="bad_rules")
     inst = ws.instance(args.name)
     if words:
         operations.edit_rules(inst, words, on_event=print_event)
@@ -401,43 +356,33 @@ def cmd_spawn(ws, args):
 def build_parser():
     p = argparse.ArgumentParser(
         prog="masurium.py",
-        description="Create, start, stop and watch Masurium bots. A bot is a character; an "
-                    "instance is a bot on a server, and is what starts and stops.")
+        description="Create, start, stop and watch Masurium bots. Each bot is an instance: a player "
+                    "on a server, with its personality and settings, and what starts and stops.")
     sub = p.add_subparsers(dest="command", metavar="command")
     sub.required = True
 
     sub.add_parser("servers", help="list the servers in the registry").set_defaults(fn=cmd_servers)
-    sub.add_parser("bots", help="list the bots (the characters) and their instances").set_defaults(fn=cmd_bots)
 
-    c = sub.add_parser("create", help="create a bot (if new) and an instance of it on a server")
-    c.add_argument("name", help="its player name in the game")
+    c = sub.add_parser("create", help="create a bot: an instance on a server")
+    c.add_argument("name", help="its player name in the game (offline); with --account, the account's player "
+                   "plays and this only names the instance")
     c.add_argument("server", help="a slug from `servers`")
-    c.add_argument("--account", choices=("online", "offline"),
-                   help="for a new bot: online (default: a purchased account, logged in once) "
-                        "or offline (private servers with online-mode=false)")
-    c.add_argument("--bot", help="the bot's name here (default: the player name in lowercase)")
-    c.add_argument("--as", dest="as_", metavar="INSTANCE", help="the instance's name (default: the bot's)")
+    c.add_argument("--account", metavar="ACCOUNT", help="a Microsoft account from  masurium.py account "
+                   "(default: offline, for private servers with online-mode=false)")
+    c.add_argument("--as", dest="as_", metavar="INSTANCE", help="the instance's name (default: the player "
+                   "name in lowercase)")
     c.set_defaults(fn=cmd_create)
 
-    c = sub.add_parser("clone", help="another instance of the same bot, on this server or another")
+    c = sub.add_parser("clone", help="a copy of an instance, on this server or another")
     c.add_argument("instance")
     c.add_argument("--server", help="where the clone plays (default: the same server)")
     c.add_argument("--as", dest="as_", metavar="INSTANCE", help="its name (default: <instance>-1, -2...)")
     c.set_defaults(fn=cmd_clone)
 
-    c = sub.add_parser("delete", help="an instance out of the launcher, its folder and all (its bot stays)")
+    c = sub.add_parser("delete", help="an instance out of the launcher, its folder and all")
     c.add_argument("instance")
     c.add_argument("--yes", action="store_true", help="yes, delete it")
     c.set_defaults(fn=cmd_delete)
-
-    c = sub.add_parser("clone-bot", help="a new bot from another: its settings and personality")
-    c.add_argument("bot")
-    c.add_argument("--as", dest="as_", metavar="BOT", help="its name (default: <bot>-1, -2...)")
-    c.set_defaults(fn=cmd_clone_bot)
-
-    c = sub.add_parser("login", help="log an instance's Minecraft account in, once")
-    c.add_argument("name", metavar="instance")
-    c.set_defaults(fn=cmd_login)
 
     c = sub.add_parser("start", help="start an instance's client and put it on its server")
     c.add_argument("name", metavar="instance")
@@ -465,13 +410,12 @@ def build_parser():
     c.set_defaults(fn=cmd_status)
 
     c = sub.add_parser("set", help="see or change settings (model, heap, owner, role...), per instance, "
-                                   "bot, group or globally")
-    c.add_argument("name", nargs="?", metavar="instance", help="an instance, or a bot with --bot, a group "
-                   "with --group; nothing with --global")
+                                   "group or globally")
+    c.add_argument("name", nargs="?", metavar="instance", help="an instance, or a group with --group; "
+                   "nothing with --global")
     c.add_argument("key", nargs="?", help="one setting; without it, all of them")
     c.add_argument("value", nargs="*", help="its new value (a model may be two words: haiku low)")
     c.add_argument("--default", action="store_true", help="take it out of this layer")
-    c.add_argument("--bot", action="store_true", help="NAME is a bot: its settings, for all its instances")
     c.add_argument("--group", action="store_true", help="NAME is a group: imposed on everything in it")
     c.add_argument("--global", dest="global_", action="store_true",
                    help="imposed on every instance (launcher.json)")
@@ -489,21 +433,17 @@ def build_parser():
     c.add_argument("--as", dest="as_", metavar="GROUP", help="for clone: its name (default: <group>-1...)")
     c.set_defaults(fn=cmd_group)
 
-    c = sub.add_parser("account", help="Minecraft accounts: list, add (log in once), remove")
+    c = sub.add_parser("account", help="Microsoft accounts: list, add (log in once), remove")
     c.add_argument("action", nargs="?", choices=("list", "add", "remove"), default="list")
     c.add_argument("key", nargs="?", metavar="account", help="for remove: which")
     c.add_argument("--as", dest="as_", metavar="ACCOUNT", help="for add: its name here (default: the player's)")
-    c.add_argument("--offline", metavar="PLAYER", help="for add: an offline account with this player name")
     c.set_defaults(fn=cmd_account)
 
     c = sub.add_parser("rules", help="see or change a bot's rules: toggles, food it will not eat, "
                                      "blocks it may break")
-    c.add_argument("name", nargs="?", metavar="instance", help="an instance (or none, with --bot, "
-                   "--server or --global)")
+    c.add_argument("name", nargs="?", metavar="instance", help="an instance (or none, with --global)")
     c.add_argument("words", nargs="*", help="a change: pref <toggle> on|off|default, food ban|allow|default "
                    "<item>, break allow|forbid|default <block>, food|break replace|add")
-    c.add_argument("--bot", metavar="BOT", help="the bot's config, under every instance of it")
-    c.add_argument("--server", metavar="SLUG", help="a server's, over the config of every bot on it")
     c.add_argument("--group", metavar="GROUP", help="a group's, imposed on everything in it")
     c.add_argument("--global", dest="global_", action="store_true",
                    help="imposed on every instance (launcher.json)")
@@ -518,7 +458,7 @@ def build_parser():
     c.set_defaults(fn=cmd_deploy_mod)
     sub.add_parser("doctor", help="check the machine, the folders and the servers").set_defaults(fn=cmd_doctor)
 
-    c = sub.add_parser("migrate", help="move bots from the layout before instances (a backup first)")
+    c = sub.add_parser("migrate", help="fold the bots kept apart into their instances (a backup first)")
     c.add_argument("--dry-run", action="store_true", help="only say what it would do")
     c.set_defaults(fn=cmd_migrate)
 

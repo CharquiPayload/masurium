@@ -20,14 +20,14 @@ from PySide6.QtCore import QEvent, QSettings, Qt, QVariantAnimation  # noqa: E40
 from PySide6.QtGui import QColor, QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QToolButton  # noqa: E402
 
-from .. import bots, brain, groups, operations as ops, rules, workspace  # noqa: E402
+from .. import brain, groups, instances, operations as ops, rules, workspace  # noqa: E402
 from ..workspace import Workspace  # noqa: E402
 from . import anim, dialogs, icons, theme, window as window_module  # noqa: E402
 from .widgets import Switch  # noqa: E402
 
 # Ports of their own, far from real bots': stopping an instance stops whatever
 # java carries its port on the whole machine (see launcher/tests.py).
-workspace.FIRST_PORT = bots.FIRST_PORT = 18478
+workspace.FIRST_PORT = instances.FIRST_PORT = 18478
 brain.fetch_latest = lambda: "v2.1.280"
 from .window import MainWindow  # noqa: E402
 
@@ -116,15 +116,15 @@ def tests(app):
     win.show()
 
     print("\nThe main window, laid out as Prism's")
-    check("the bar on top: Add Instance, Folders, Settings, Help; Bots and Accounts on the right",
-          list(win.bar_buttons) == ["Add Instance", "Folders", "Settings", "Help", "Bots", "Accounts"],
+    check("the bar on top: Add Instance, Folders, Settings, Help; Accounts on the right",
+          list(win.bar_buttons) == ["Add Instance", "Folders", "Settings", "Help", "Accounts"],
           list(win.bar_buttons))
     add = win.bar_buttons["Add Instance"]
     check("...Add Instance with Add Group under its arrow",
           [a.text() for a in add.menu().actions()] == ["Add Instance…", "Add Group…"])
     folders = [a.text() for a in win.bar_buttons["Folders"].menu().actions() if a.text()]
     check("...Folders opens each folder, or copies its path (for a machine with no file manager)",
-          folders[:6] == ["Instances", "Bots", "Groups", "Servers", "Shared", "Accounts"]
+          folders[:5] == ["Instances", "Groups", "Servers", "Shared", "Accounts"]
           and "Copy a folder's path" in folders, folders)
     check("...Help has Doctor and the documentation",
           {"Doctor…", "Documentation", "About Masurium Launcher"}
@@ -251,8 +251,11 @@ def tests(app):
     box, _, _ = d.editors["model"]
     check("nothing is a blank box: what applies without it is there, and where it comes from",
           box.currentText() == "opus medium   ·   default" and d.value_of("model") == "", box.currentText())
-    check("...the bot's, when the bot says it", d.editors["account"][0].currentText() == "offline   ·   bot",
-          d.editors["account"][0].currentText())
+    choice = d.editors["account"][0]
+    check("how it plays is a switch: offline, with its player name, or a Microsoft account",
+          isinstance(choice, dialogs.AccountChoice) and not choice.microsoft.isChecked()
+          and choice.name.text() == "Alice" and d.value_of("account") == "" and d.value_of("name") == "Alice",
+          (choice.name.text(), d.value_of("account"), d.value_of("name")))
     check("yes or no is a switch", isinstance(d.editors["lock"][0], Switch)
           and isinstance(d.editors["ignore_global"][0], Switch))
     check("...fast responses too, on by default", isinstance(d.editors["fast_responses"][0], Switch)
@@ -281,7 +284,8 @@ def tests(app):
     g.close()
 
     print("\nRules")
-    r = dialogs.EditBotDialog(win, ws.bot("alice")).pages["Rules"]
+    ops.create_group(ws, "tidy")
+    r = dialogs.EditGroupDialog(win, ws.group("tidy")).pages["Rules"]
     check("a layer's rules load", wait(lambda: r.isEnabled()))
     cell = r.toggles.cellWidget(list(rules.TOGGLES).index("hunt_players"), 0)
     box = cell.findChild(Switch)
@@ -294,10 +298,11 @@ def tests(app):
           r.changes == [["pref", "hunt_players", "on"], ["food", "ban", "rotten_flesh"]]
           and "food ban rotten_flesh" in r.pending.text(), r.changes)
     r._apply()
-    check("Apply sends them: the bot's config has them",
-          wait(lambda: ws.bot("alice").data.get("rules") == {"prefs": {"hunt_players": True},
-                                                               "food": {"ban": ["rotten_flesh"]}}),
-          ws.bot("alice").data)
+    check("Apply sends them: the group's rules have them",
+          wait(lambda: ws.group("tidy").data.get("rules") == {"prefs": {"hunt_players": True},
+                                                              "food": {"ban": ["rotten_flesh"]}}),
+          ws.group("tidy").data)
+    ops.delete_group(ws, "tidy")
     ops.edit_layer(ws, ["pref", "tame_wolves", "off"])
     ri = dialogs.EditInstanceDialog(win, alice, start="Rules").pages["Rules"]
     check("an instance's rules load, and say its server does not answer",
@@ -358,11 +363,16 @@ def tests(app):
     sw.hide()
     check("accounts: none yet, said", acc.list.topLevelItemCount() == 1
           and "none" in acc.list.topLevelItem(0).text(0))
-    ops.add_offline_account(ws, "Dave")
+    dave = ws.account("dave")
+    (dave.auth).mkdir(parents=True)
+    dave.json.write_text('{"name": "Dave"}')
+    dave.logins.write_text('{"accounts": [{"mcProfile": {"name": "Dave"}}]}')
     acc._fill()
     first = acc.list.topLevelItem(0)
-    check("an offline account is an account too", acc.list.topLevelItemCount() == 1
-          and (first.text(0), first.text(1)) == ("Dave", "Offline"), first.text(1))
+    check("a Microsoft account is listed with its player and its login", acc.list.topLevelItemCount() == 1
+          and (first.text(0), first.text(1)) == ("Dave", "logged in"), first.text(1))
+    check("...and offline ones are no more: an offline instance only has a name",
+          "Add Offline" not in buttons_of(acc))
     acc._remove()
     check("...Remove with nothing chosen says so", "Choose an account" in said["alerts"][-1])
     shot(sw, "settings-accounts")
@@ -370,19 +380,28 @@ def tests(app):
 
     print("\nAdding, grouping, copying, deleting")
     n = dialogs.NewInstanceDialog(win)
-    accounts_offered = [n.account.itemData(i) for i in range(n.account.count())]
-    check("the account is chosen from the accounts, or a new one is added",
-          accounts_offered == ["dave", dialogs.NEW_ACCOUNT], accounts_offered)
-    check("...nothing is asked that cannot be changed: no player name field",
-          not any(isinstance(w, QLineEdit) and "player" in (w.placeholderText() + w.toolTip()).lower()
-                  for w in n.findChildren(QLineEdit)))
+    check("a new instance plays offline by default, with its player name to write",
+          not n.account.microsoft.isChecked() and not n.account.name.isHidden() and n.account.accounts.isHidden())
     check("...with Help, as every dialog", "Help" in buttons_of(n))
-    n.account.setCurrentIndex(n.account.findData("dave"))
-    n._suggest()
-    check("the new instance's name is filled in as it would be chosen", n.key.text() == "dave", n.key.text())
+    n.account.name.setText("Erin")
+    check("its name in the launcher is filled in from the player's", n.key.text() == "erin", n.key.text())
     n._create()
+    check("an offline instance is created, playing as that name",
+          wait(lambda: "erin" in ws.instance_keys()) and ws.instance("erin").name == "Erin"
+          and ws.instance("erin").data.get("name") == "Erin", ws.instance_keys())
+    wait(lambda: win.tasks.busy("new instance") is None, 5)
+    ms = dialogs.NewInstanceDialog(win)
+    ms.account.microsoft.setChecked(True)
+    offered = [ms.account.accounts.itemData(i) for i in range(ms.account.accounts.count())]
+    check("switched to Microsoft, it plays with one of the accounts, or a new one is added",
+          offered == ["dave", dialogs.NEW_ACCOUNT] and ms.account.name.isHidden(), offered)
+    ms.account.accounts.setCurrentIndex(ms.account.accounts.findData("dave"))
+    ms._suggest()
+    check("...and its name comes from the account's player", ms.key.text() == "dave", ms.key.text())
+    ms._create()
     check("a new instance is created, playing as that account",
-          wait(lambda: "dave" in ws.instance_keys()) and ws.instance("dave").name == "Dave", ws.instance_keys())
+          wait(lambda: "dave" in ws.instance_keys()) and ws.instance("dave").name == "Dave"
+          and ws.instance("dave").data.get("account") == "dave", ws.instance_keys())
     check("...and gets its tile", wait(lambda: "dave" in win.tiles), list(win.tiles))
     here = dialogs.NewInstanceDialog(win, group="team")
     check("added from a group's right-click, it goes into that group", here.group.currentData() == "team")
@@ -438,14 +457,14 @@ def tests(app):
     image = QImage(64, 64, QImage.Format_ARGB32)
     image.fill(QColor("#e0a040"))
     win.set_face("alice", image)
-    check("a bot's picture is kept with the bot", (ws.bot("alice").dir / "icon.png").is_file())
+    check("an instance's picture is kept in its folder", ws.instance("alice").icon.is_file())
     check("...and its tiles show it", wait(lambda: win.tiles["alice"].face and win.tiles["alice"].face[0]))
     win.set_face("alice", QImage())
     check("pasting with no picture copied says so", said["alerts"] and "no picture" in said["alerts"][-1].lower())
     win.select(("instance", "alice"))
     shot(win, "picture")
     win.set_face("alice", None)
-    check("...and it can be taken away", not (ws.bot("alice").dir / "icon.png").exists()
+    check("...and it can be taken away", not ws.instance("alice").icon.exists()
           and wait(lambda: not win.tiles["alice"].face[0]))
     ops.create_group(ws, "night shift")
     check("a group's name may have spaces: it is no player", ws.group("night shift").exists())
@@ -455,12 +474,8 @@ def tests(app):
     check("doctor lists its checks", wait(lambda: doc.list.count() > 5), doc.list.count())
     check("...and can be closed from a button", "Close" in buttons_of(doc))
     shot(doc, "doctor")
-    bots = dialogs.BotsDialog(win)
-    shot(bots, "bots")
-    check("bots: each with its instances", bots.list.count() == 4
-          and any("alice" in bots.list.item(i).text() for i in range(bots.list.count())))
-    bots._edit()
-    check("...Edit with nothing chosen says so", said["alerts"] and "Choose a bot" in said["alerts"][-1])
+    check("there are no bots apart from the instances: no Bots window",
+          not hasattr(dialogs, "BotsDialog") and not hasattr(dialogs, "EditBotDialog"))
     shot(win, "main-after")
     win.close()
 

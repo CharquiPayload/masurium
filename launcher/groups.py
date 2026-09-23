@@ -23,7 +23,7 @@ orders at once.
 """
 import re
 
-from .bots import read_json, write_json
+from .instances import read_json, write_json
 from .events import Fail
 
 NORMAL, DEPENDENCY = "normal", "dependency"
@@ -128,7 +128,7 @@ class Global:
 
 def parent_of(ws, node):
     """The group an instance or a group is in, or None."""
-    from .bots import Instance
+    from .instances import Instance
     for g in ws.groups():
         if isinstance(node, Instance) and node.key in g.instance_keys():
             return g
@@ -175,7 +175,7 @@ def leader_of(inst):
     g, role = dependency_of(inst)
     if role != "guard" or not g.leader:
         return None
-    from .bots import Instance
+    from .instances import Instance
     leader = Instance(inst.ws, g.leader)
     return leader if leader.exists() else None
 
@@ -185,14 +185,14 @@ def guards_of(inst):
     g, role = dependency_of(inst)
     if role != "leader":
         return []
-    from .bots import Instance
+    from .instances import Instance
     return [i for i in (Instance(inst.ws, k) for k in g.guards) if i.exists()]
 
 
 def flatten(group, seen=None):
     """Every instance inside a group, at any depth, each once, leaders
     before their guards."""
-    from .bots import Instance
+    from .instances import Instance
     seen = set() if seen is None else seen
     if group.key in seen:
         return []
@@ -227,7 +227,7 @@ def subgroups(group, seen=None):
 def problems(ws):
     """(where, what is wrong) for every group: what `doctor` reports and what
     the commands that change groups refuse to leave behind."""
-    from .bots import Instance
+    from .instances import Instance
     from . import settings
     out = []
     parents = {}

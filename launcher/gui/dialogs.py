@@ -12,14 +12,13 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFormLayout, QHBoxL
                                QListWidget, QListWidgetItem, QPushButton, QRadioButton, QStackedWidget, QVBoxLayout)
 
 from .. import doctor, groups, operations
-from ..bots import Instance
+from ..instances import Instance
 from ..events import Fail
 from . import anim, icons, theme
 from .common import Dialog, close_row, muted, ok_row, title
-from .pages import (AccountsPage, LauncherPage, LogsPage, ModsPage, PersonalityPage, RulesPage, ServersPage,
-                    SettingsPage)
+from .pages import (NEW_ACCOUNT, AccountChoice, AccountsPage, LauncherPage, LogsPage, ModsPage, PersonalityPage,
+                    RulesPage, ServersPage, SettingsPage)
 
-NEW_ACCOUNT = "__new__"
 PAGE_ICONS = {"Settings": "gear", "Rules": "rules", "Personality": "bot", "Mods": "cube", "Logs": "logs",
               "Launcher": "window", "Java": "cup", "Global settings": "globe", "Global rules": "rules",
               "Accounts": "account", "Servers": "server"}
@@ -71,16 +70,15 @@ class PagedDialog(Dialog):
 
 
 class EditInstanceDialog(PagedDialog):
-    """Prism's Edit Instance: its settings, its rules, its bot's personality,
-    its extra mods and its logs; Launch and Kill at the bottom, as in Prism's
+    """Prism's Edit Instance: its settings, its rules, its personality, its
+    extra mods and its logs; Launch and Kill at the bottom, as in Prism's
     console window."""
 
     def __init__(self, win, inst, start=None):
         pages = [("Settings", lambda: SettingsPage(win, inst)),
-                 ("Rules", lambda: RulesPage(win, "instance", inst))]
-        if inst.bot.exists():
-            pages.append(("Personality", lambda: PersonalityPage(win, inst.bot)))
-        pages += [("Mods", lambda: ModsPage(win, inst)), ("Logs", lambda: LogsPage(win, inst))]
+                 ("Rules", lambda: RulesPage(win, "instance", inst)),
+                 ("Personality", lambda: PersonalityPage(win, inst)),
+                 ("Mods", lambda: ModsPage(win, inst)), ("Logs", lambda: LogsPage(win, inst))]
         super().__init__(win, f"Edit instance · {inst.key}  ({inst.name} on {inst.slug})", pages, start,
                          help="configuring-a-bot")
         self.kill = QPushButton("Kill")
@@ -101,14 +99,6 @@ class EditGroupDialog(PagedDialog):
             ("Rules", lambda: RulesPage(win, "group", group))], start, help="groups")
 
 
-class EditBotDialog(PagedDialog):
-    def __init__(self, win, bot, start=None):
-        super().__init__(win, f"Edit bot · {bot.key}  (plays as {bot.name})", [
-            ("Settings", lambda: SettingsPage(win, bot)),
-            ("Rules", lambda: RulesPage(win, "bot", bot)),
-            ("Personality", lambda: PersonalityPage(win, bot))], start, help="configuring-a-bot")
-
-
 class SettingsWindow(PagedDialog):
     """The launcher's Settings, Prism's way: the launcher itself, Java, what
     is imposed on every instance, accounts and servers."""
@@ -127,9 +117,9 @@ class SettingsWindow(PagedDialog):
 
 
 class NewInstanceDialog(Dialog):
-    """A bot on a server: a new bot, playing as one of the accounts, or one
-    that exists (which may play with another account on this instance). Its
-    name, and the group it goes into, come filled in."""
+    """A new bot: a player on a server, offline with a name or with one of
+    the Microsoft accounts, and the group it goes into. Its name in the
+    launcher comes filled in."""
 
     def __init__(self, win, group=None):
         super().__init__(win)
@@ -137,15 +127,9 @@ class NewInstanceDialog(Dialog):
         self.setWindowTitle("Add instance")
         form = QFormLayout(self)
         form.addRow(title("Add instance"))
-        self.bot = QComboBox()
-        self.bot.addItem("(a new bot)", None)
-        for b in self.ws.bots():
-            self.bot.addItem(f"{b.name}   ·   bot {b.key}", b.key)
-        self.bot.currentIndexChanged.connect(self._bot_changed)
-        form.addRow("Bot", self.bot)
-        self.account = QComboBox()
-        self.account.activated.connect(self._account_chosen)
-        form.addRow("Account", self.account)
+        self.account = AccountChoice(self.ws, on_new=lambda: SettingsWindow(self.win, start="Accounts").exec())
+        self.account.changed.connect(self._suggest)
+        form.addRow("Plays as", self.account)
         self.server = QComboBox()
         for s in self.ws.servers():
             self.server.addItem(f"{s.slug}   ·   {s.description or s.address}", s.slug)
@@ -159,80 +143,38 @@ class NewInstanceDialog(Dialog):
             self.group.setCurrentIndex(max(0, self.group.findData(group)))
         form.addRow("Group", self.group)
         self.key = QLineEdit()
-        self.key.setToolTip("Its name in the launcher: the bot's, or <bot>-1, -2… when that is taken")
+        self.key.setToolTip("Its name in the launcher: the player's, or <player>-1, -2… when that is taken")
         self.key.textEdited.connect(lambda _: setattr(self, "key_edited", True))
         self.key_edited = False
         form.addRow("Instance name", self.key)
         buttons = ok_row(self, "Create", self._create, help=HELP_CREATE)
         form.addRow(buttons)
-        self._fill_accounts()
         self._suggest()
-
-    def _fill_accounts(self, choose=None):
-        """The accounts, offline and Microsoft, and a way to add one; for a
-        bot that exists, its own first."""
-        self.account.clear()
-        bot_key = self.bot.currentData()
-        if bot_key:
-            self.account.addItem(f"the bot's ({self.ws.bot(bot_key).name})", None)
-        for key in self.ws.account_keys():
-            a = self.ws.account(key)
-            self.account.addItem(f"{a.name}   ·   {'offline' if a.offline else 'Microsoft'}", key)
-        self.account.addItem("+ New account…", NEW_ACCOUNT)
-        if choose:
-            self.account.setCurrentIndex(max(0, self.account.findData(choose)))
-        self._suggest()
-
-    def _account_chosen(self, index):
-        if self.account.itemData(index) != NEW_ACCOUNT:
-            self._suggest()
-            return
-        before = set(self.ws.account_keys())
-        SettingsWindow(self.win, start="Accounts").exec()
-        added = sorted(set(self.ws.account_keys()) - before)
-        self._fill_accounts(choose=added[-1] if added else None)
-
-    def _bot_changed(self):
-        self._fill_accounts()
-
-    def _player(self):
-        """The player it will be: the account's, or the bot's."""
-        key = self.account.currentData()
-        if key and key != NEW_ACCOUNT:
-            return self.ws.account(key).name
-        bot_key = self.bot.currentData()
-        return self.ws.bot(bot_key).name if bot_key else ""
 
     def _suggest(self):
         """Its name, filled in as it would be chosen, until it is edited by hand."""
         if self.key_edited:
             return
-        base = (self.bot.currentData() or self._player()).lower()
+        base = self.account.player().lower()
         self.key.setText(self.ws.free_key(base, self.ws.instance_keys()) if base else "")
 
     def _create(self):
-        ws, bot_key = self.ws, self.bot.currentData()
-        account = self.account.currentData()
+        ws, account = self.ws, self.account.account()
         slug, group = self.server.currentData(), self.group.currentData()
+        name = self.account.player()
         key = self.key.text().strip() or None
-        if account == NEW_ACCOUNT or (bot_key is None and not account):
-            self.win.alert("Missing", "Choose the account it plays with (or add one).")
+        if account is None:
+            self.win.alert("Missing", "Choose the Microsoft account it plays with (or add one).")
+            return
+        if not name:
+            self.win.alert("Missing", "Write its player name: letters, digits and underscore, up to 16.")
             return
         if not slug:
             self.win.alert("Missing", "Choose a server (a folder under servers/: see Settings, Servers).")
             return
-        name = self._player()
-        existing = ws.bot(name.lower())
-        if bot_key is None and existing.exists():
-            bot_key = existing.key          # that player's bot is there already: another instance of it
 
         def work(on_event, cancel):
-            from .. import settings
-            inst = operations.create(ws, name, slug, account=account if bot_key is None else None,
-                                     bot_key=bot_key, key=key, on_event=on_event)
-            if bot_key is not None and account:
-                settings.set_value(inst, "account", account)
-                settings.render(inst)
+            inst = operations.create(ws, name, slug, account=account, key=key, on_event=on_event)
             if group:
                 operations.group_add(ws, group, [f"instance:{inst.key}"], on_event=on_event)
             return inst
@@ -451,66 +393,6 @@ class DoctorDialog(Dialog):
             it.setToolTip(c.detail)
             self.list.addItem(it)
         self.summary.setText("Everything checks out." if not bad else f"{bad} problem(s).")
-
-
-class BotsDialog(Dialog):
-    def __init__(self, win):
-        super().__init__(win)
-        self.win, self.ws = win, win.ws
-        self.setWindowTitle("Bots")
-        self.resize(820, 440)
-        v = QVBoxLayout(self)
-        v.addWidget(title("Bots"))
-        v.addWidget(muted("A bot is a character: its player name, personality, settings and rules. Its "
-                          "instances are that bot on a server."))
-        self.list = QListWidget()
-        v.addWidget(self.list, 1)
-        row = QHBoxLayout()
-        for text, fn in (("Edit…", self._edit), ("Clone", self._clone)):
-            b = QPushButton(text)
-            b.clicked.connect(fn)
-            row.addWidget(b)
-        row.addStretch()
-        row.addWidget(close_row(self))
-        v.addLayout(row)
-        self._fill()
-
-    def _fill(self):
-        self.list.clear()
-        for b in self.ws.bots():
-            insts = [i.key for i in b.instances()]
-            # Its player name first; the bot's folder name only when it says something else.
-            text = b.name + (f"   (bot {b.key})" if b.key != b.name.lower() else "")
-            text += "   ·   " + (f"{len(insts)} instance(s): {', '.join(insts)}" if insts else "no instances")
-            icon = b.dir / "icon.png"
-            it = QListWidgetItem(QIcon(theme.avatar(b.key, 24, image=icon if icon.is_file() else None)), text)
-            it.setSizeHint(QSize(0, 34))
-            it.setData(Qt.UserRole, b.key)
-            self.list.addItem(it)
-
-    def _bot(self):
-        """The bot chosen in the list; nothing is chosen by itself, and a
-        button pressed with nothing chosen says so."""
-        chosen = self.list.selectedItems()
-        if not chosen:
-            self.win.alert("Nothing chosen", "Choose a bot in the list first.")
-            return None
-        return self.ws.bot(chosen[0].data(Qt.UserRole))
-
-    def _edit(self):
-        bot = self._bot()
-        if bot:
-            EditBotDialog(self.win, bot).exec()
-            self._fill()
-
-    def _clone(self):
-        bot = self._bot()
-        if bot:
-            try:
-                operations.clone_bot(self.ws, bot.key, on_event=self.win.say)
-            except Fail as e:
-                self.win.fail(e)
-            self._fill()
 
 
 def theme_icon(name):

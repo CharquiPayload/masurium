@@ -1,15 +1,14 @@
-"""Bots and instances.
+"""Instances, and the lock that keeps two launcher commands off one.
 
-A bot (a Character here, to keep it apart from the running thing) is who it
-is: its name in the game, its personality, its settings. It lives in
-bots/<bot>/: bot.json and personality.txt.
+An instance is a bot: a player on a server, and everything it is. Its name
+in the game, its account, its personality, its settings, its picture, and
+what runs: its own game folder, its HeadlessMC, its logs, its port, its
+extra mods. It lives in instances/<key>/: instance.json (its player name,
+its server, its port, its settings), personality.txt and icon.png.
 
-An instance is a bot on a server, and it is what runs: its own game folder,
-its HeadlessMC, its logs, its port, extra mods, and settings of its own that
-win over the bot's. It lives in instances/<name>/, and instance.json says
-which bot and which server.
-
-Plus the lock that keeps two launcher commands off one instance at a time.
+There used to be bots apart from instances, a character that several
+instances played; two places to set one thing was one too many, and
+`migrate` folds a bot into its instances.
 """
 import contextlib
 import json
@@ -37,9 +36,9 @@ def check_name(name):
         raise Fail(f"'{name}' has {len(name)} characters; Minecraft allows 16.", code="bad_name")
 
 
-def check_key(key, what="bot"):
-    """A bot's name in the launcher: its folder. Lowercase letters, digits,
-    underscore and dash (a clone of alice is alice-1)."""
+def check_key(key, what="instance"):
+    """An instance's name in the launcher: its folder. Lowercase letters,
+    digits, underscore and dash (a copy of alice is alice-1)."""
     if not KEY_RULE.match(key or ""):
         raise Fail(f"'{key}' is not a valid {what} name here: lowercase letters, digits, "
                    "underscore and dash, up to 32.", code="bad_name")
@@ -65,58 +64,8 @@ def write_json(path, data):
     tmp.replace(path)
 
 
-class Character:
-    """A bot: bots/<key>/bot.json and personality.txt."""
-
-    def __init__(self, ws, key):
-        self.ws = ws
-        self.key = key.lower()
-        self.dir = ws.bots_dir / self.key
-        self.json = self.dir / "bot.json"
-        self.personality = self.dir / "personality.txt"
-
-    def __repr__(self):
-        return f"Character({self.key!r})"
-
-    def __eq__(self, other):
-        return isinstance(other, Character) and other.dir == self.dir
-
-    def __hash__(self):
-        return hash(self.dir)
-
-    def exists(self):
-        return self.json.is_file()
-
-    def require(self):
-        if not self.exists():
-            raise Fail(f"there is no bot {self.key} (no {self.json}).", code="no_bot")
-        return self
-
-    @property
-    def data(self):
-        return read_json(self.json)
-
-    def save(self, data):
-        write_json(self.json, data)
-
-    @property
-    def own_name(self):
-        """The name it was given, which is its name in the game when it plays
-        offline."""
-        return self.data.get("name") or self.key
-
-    @property
-    def name(self):
-        """Its name in the game, with its capitals: its account's player when
-        it plays with one of the launcher's accounts."""
-        return _account_name(self) or self.own_name
-
-    def instances(self):
-        return [i for i in self.ws.instances() if i.data.get("bot") == self.key]
-
-
 class Instance:
-    """A bot on a server: instances/<key>/, with instance.json naming both."""
+    """A bot on a server: instances/<key>/."""
 
     def __init__(self, ws, key):
         self.ws = ws
@@ -127,6 +76,8 @@ class Instance:
         self.gamedir = self.dir / "gamedir"
         self.run = self.dir / "run"
         self.extra_mods = self.dir / "mods"
+        self.personality = self.dir / "personality.txt"
+        self.icon = self.dir / "icon.png"
 
     def __repr__(self):
         return f"Instance({self.key!r})"
@@ -161,14 +112,16 @@ class Instance:
         return self.data.get("server", "")
 
     @property
-    def bot(self):
-        return self.ws.bot(self.data.get("bot") or self.key)
+    def own_name(self):
+        """The player name it was given: its name in the game when it plays
+        offline."""
+        return self.data.get("name") or self.key
 
     @property
     def name(self):
-        """The player name in the game, with its capitals: its account's player
-        when it plays with one of the launcher's accounts, else the bot's."""
-        return _account_name(self) or (self.bot.own_name if self.bot.exists() else self.key)
+        """The player name in the game, with its capitals: its Microsoft
+        account's player when it plays with one, else its own."""
+        return _account_name(self) or self.own_name
 
     @property
     def player(self):
@@ -236,15 +189,14 @@ class Instance:
             return json.loads(r.read().decode("utf-8", "replace"))
 
 
-def _account_name(target):
-    """The player of the account that applies to a bot or an instance, when it
-    is one of the launcher's accounts and it has been logged in."""
+def _account_name(inst):
+    """The player of the Microsoft account an instance plays with, when it
+    has one and it has been logged in."""
     from . import settings
-    from .accounts import kind
-    value = settings.get(target, "account")
-    if kind(value) != "account":
+    value = settings.get(inst, "account")
+    if value == "offline":
         return None
-    account = target.ws.account(value)
+    account = inst.ws.account(value)
     return account.data.get("name") if account.exists() else None
 
 

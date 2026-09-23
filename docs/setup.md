@@ -144,8 +144,7 @@ comments on their own lines.
 ~/shared/mods/                  masurium-*.jar and hmc-specifics-*.jar
 ~/servers/<slug>/server.conf    one folder per server you connect to
 ~/servers/<slug>/mods/          client-side mods that server requires (may be empty)
-~/bots/                         created by the launcher: one folder per bot (a character)
-~/instances/                    created by the launcher: one folder per instance (a bot on a server)
+~/instances/                    created by the launcher: one folder per bot (an instance)
 ```
 
 `~/.masurium/server.env`:
@@ -184,7 +183,7 @@ the file's path, never the token). A server without a file of its own uses
 `doctor` checks each server's mod, and that each such file is readable by you
 alone.
 
-The folders can be moved with `MASURIUM_BOTS_DIR`, `MASURIUM_INSTANCES_DIR`,
+The folders can be moved with `MASURIUM_INSTANCES_DIR`,
 `MASURIUM_SERVERS_DIR`, `MASURIUM_COMMON_DIR` and `MASURIUM_STATE_DIR`
 (where the bridges keep their sessions and channels, `~/.masurium` by
 default), either in the environment or as more lines of `server.env`
@@ -196,41 +195,44 @@ the one on the PATH is not 21.
 
 ### 4. Create and start a bot
 
-Two things to tell apart. A **bot** is a character: its name in the game, its
-personality, its settings (`bots/<bot>/`). An **instance** is a bot on a
-server, and it is what starts and stops: its game folder, its HeadlessMC, its
-logs, its port (`instances/<instance>/`). One bot can have several instances,
-on several servers.
+A bot is an **instance**: a player on a server, and everything it is. Its
+name in the game, its account, its personality, its settings and its picture,
+and what runs: its game folder, its HeadlessMC, its logs, its port. It all
+lives in `instances/<instance>/`, and it is what starts and stops. The same
+character on two servers is two instances; copy one to make the other.
 
 Everything goes through one command, `launcher/masurium.py`, the command line of
 Masurium Launcher:
 
 ```bash
-launcher/masurium.py doctor            # the machine, the folders, the server: what is missing
-launcher/masurium.py account add      # once per Minecraft account: type `login`, follow the steps, then `quit`
-launcher/masurium.py create Alice <slug>   # the bot Alice and the instance alice on that server
-launcher/masurium.py set --bot alice account <account>   # it plays with that account
-launcher/masurium.py restart alice     # starts the client and, once it is in, its bridge
+launcher/masurium.py doctor                 # the machine, the folders, the server: what is missing
+launcher/masurium.py create Alice <slug>    # Alice, offline, on that server: the instance alice
+launcher/masurium.py restart alice          # starts the client and, once it is in, its bridge
 ```
 
-For an offline bot on a private server with `online-mode=false`, create it with
-`--account offline` and skip the account. Or add an **offline account**,
-`account add --offline Name`: only a player name, listed and chosen like the
-others, which gives every bot set to it that name. Unlike a Microsoft
-account, it may play in several games at once.
+**Offline or a Microsoft account.** An instance plays **offline** by default,
+as the name it was created with: only for private servers with
+`online-mode=false`, and an offline player may play in several games at once.
+To play with a real, purchased Minecraft Java account instead, log the
+account in once and set it:
 
-**Accounts.** An online bot plays with a real, purchased Minecraft Java
-account. `account add` opens HeadlessMC in a folder of its own: type `login`,
-follow its steps in a browser, and `quit` once it says the account is saved;
-it becomes `accounts/<player>/`. A bot set to that account plays as its player,
-and every instance of it uses that one login, through a link: HeadlessMC
-renews a login each time it launches the game and Microsoft replaces the key
-each time, so copies would go stale. For the same reason one account plays in
-one game at a time (`start` refuses a second one, wherever it would play) and
-its instances start one after another. `account` lists the accounts, whether
-each is still logged in and who uses it; `account remove` takes one out, once
-nobody uses it. (`account online` still means a login kept in the instance's
-own HeadlessMC, made with `masurium.py login <instance>`.)
+```bash
+launcher/masurium.py account add                     # type `login`, follow the steps, then `quit`
+launcher/masurium.py create alice <slug> --account steve   # or, for one that exists:
+launcher/masurium.py set alice account steve
+```
+
+`account add` opens HeadlessMC in a folder of its own: type `login`, follow its
+steps in a browser, and `quit` once it says the account is saved; it becomes
+`accounts/<player>/`. An instance set to that account plays as its player, and
+every instance of it uses that one login, through a link: HeadlessMC renews a
+login each time it launches the game and Microsoft replaces the key each time,
+so copies would go stale. For the same reason one account plays in one game at
+a time (`start` refuses a second one, wherever it would play) and its
+instances start one after another. `account` lists the accounts, whether each
+is still logged in and who uses it; `account remove` takes one out, once
+nobody uses it. `set alice account offline` goes back to its own name, and
+`set alice name Alice_2` changes that name.
 
 Then say its name in the chat: `Alice, come here`.
 
@@ -244,9 +246,9 @@ launcher/masurium.py gui
 It is laid out as [Prism Launcher](https://prismlauncher.org/)'s, so it feels
 familiar to anyone who has used it (Masurium is not affiliated with Prism;
 see the README). Across the top: **Add Instance** (with Add Group under its
-arrow), **Folders**, **Settings**, **Help** (doctor, this guide), and **Bots**
-and **Accounts** on the right. In the middle, every instance by group: its
-bot's face with a dot saying how it is doing (in the server, loading, stopped,
+arrow), **Folders**, **Settings**, **Help** (doctor, this guide), and
+**Accounts** on the right. In the middle, every instance by group: its
+face with a dot saying how it is doing (in the server, loading, stopped,
 in the game with no bridge), its name under it. On the right, for the one
 selected: **Launch** (client, then bridge; Restart, Connect again and Start its
 bridge under its arrow), **Kill**, **Edit**, **Change Group**, **Folder**,
@@ -254,13 +256,16 @@ bridge under its arrow), **Kill**, **Edit**, **Change Group**, **Folder**,
 Add instance here, and the same. Right-click on a group's empty space adds an
 instance or a group right there; on the background, in no group.
 
-**Edit** opens an instance's own window, with its pages down the left:
-Settings, Rules, Personality, Mods (jars of its own) and Logs, and Launch and
-Kill at the bottom; a double click on an instance opens it at its logs.
-**Settings** has the launcher's own page (its colour style, animations, how
-often it looks at the instances), Java, the global settings and rules,
-accounts (Microsoft ones, logged in from the window through HeadlessMC's own
-questions, and offline ones) and the servers. Long operations run in the
+**Add Instance** asks how it plays with a switch: offline, with the player
+name to write, or a **Microsoft account**, chosen from the ones in Settings,
+Accounts (or added right there); then its server and its group. **Edit**
+opens an instance's own window, with its pages down the left: Settings (the
+same switch for its account, and the rest in sections), Rules, Personality,
+Mods (jars of its own) and Logs, and Launch and Kill at the bottom; a double
+click on an instance opens it at its logs. **Settings** has the launcher's own
+page (its colour style, animations, how often it looks at the instances),
+Java, the global settings and rules, the Microsoft accounts (logged in from
+the window through HeadlessMC's own questions) and the servers. Long operations run in the
 background and can be cancelled; what they report is listed under the
 instance. Motion is on by default and off in Settings, Launcher: switches that
 slide, windows and panels that fade in, icons that make a small gesture when
@@ -269,10 +274,10 @@ the pointer is over them, and a dot that pulses while its instance works.
 Instances and groups are dragged onto a group to move them there, or onto
 "In no group" to take them out; a leader or a guard takes its dependency group
 along. A dependency group is drawn as a small map: its leader on top, always
-shown, and its guards below, each joined to it by an arrow. A bot's picture is
-set by clicking its face in the side panel: from a file, or pasted from a
-copied image (handy when the window is shown from another machine, whose files
-the launcher cannot see). It lives in `bots/<bot>/icon.png`.
+shown, and its guards below, each joined to it by an arrow. An instance's
+picture is set by clicking its face in the side panel: from a file, or pasted
+from a copied image (handy when the window is shown from another machine,
+whose files the launcher cannot see). It lives in `instances/<instance>/icon.png`.
 
 **Showing it from another machine.** The window runs where the bots run. On a
 machine without a screen, it can be shown on a Linux desktop with
@@ -284,22 +289,22 @@ waypipe -n ssh user@bots-machine /path/to/masurium/launcher/masurium.py gui
 ```
 
 The rest of the subcommands: `status` (every instance: client, hands, in the
-server, bridge), `bots`, `servers`, `start` (the client only), `connect`
+server, bridge), `servers`, `start` (the client only), `connect`
 (rejoin after a log off), `bridge` (the bridge only), `stop` (client, bridge and
 its running guards; `--keep-guards` leaves the guards), `set`, `deploy-mod` and
-`delete <instance> --yes` (its folder and all; its bot stays).
+`delete <instance> --yes` (its folder and all).
 
-**Cloning.** `clone alice` makes `alice-1`, the same bot on the same server;
-`clone alice --server other` puts it on another. `clone-bot alice` makes a new
-bot from Alice (`alice-1`, playing as `Alice_1`) with her settings and
-personality; `create Alice_1 <slug> --bot alice-1` then gives it an instance.
-Clones are made without questions: two instances may even be the same player
+**Copying.** `clone alice` makes `alice-1`, the same bot on the same server:
+its name, settings, personality and picture, and what it keeps about that
+world. `clone alice --server other` puts it on another, where it starts
+knowing nothing of the world. The copy is on its own from then on: changing
+one does not change the other. Copies are made without questions: two instances may even be the same player
 on the same server. What cannot happen is both **running**, and `start` is
 where that is refused, saying which instance is in the way:
 
 - the same player on the same server;
-- an **online** account already playing anywhere: one Microsoft account plays
-  in one game at a time (an offline player may be on two servers at once);
+- a Microsoft account already playing anywhere: one account plays in one game
+  at a time (an offline player may be on two servers at once);
 - on one server, two players whose names contain one another: the bridge
   reacts when its name is said, and calling one would wake both.
 
@@ -316,47 +321,50 @@ starting it twice. While a command works on an instance it holds
 `run/launcher.lock`, and a second command on it is refused until the first one
 ends.
 
-**From the layout before instances.** Bots created before instances existed
-kept their game in their own folder. `masurium.py migrate --dry-run` says
-what it would do, and `masurium.py migrate` turns each one into a bot and an
-instance of the same name: the game folders are moved, not copied; what its
-bridge kept goes to its server's state folder; and a backup of every small file
-goes first to `<state>/backups/`. A bot that is running is left alone until it
-is stopped.
+**From before bots lived in their instances.** A bot used to be a character
+of its own, in `bots/<bot>/`, that its instances played. `masurium.py migrate
+--dry-run` says what it would do, and `masurium.py migrate` folds each bot into
+its instances: its name, the settings the instance did not set itself, its
+personality and its picture; its rules, and its server's
+(`servers/<slug>/rules.json`), become changes to the instance's own rules, which
+go on its next start; and an instance that played with an offline account
+plays offline as that account's player. A backup of all of it goes first to
+`<state>/backups/`, and an instance that still names a bot does not start
+until then.
 
 ## Configuring a bot
 
-Settings come in layers, weakest first: the **bot's** (`bots/<bot>/bot.json`),
-for every instance of it; the **instance's** (`instances/<instance>/instance.json`);
-its **groups'**, from its own outwards (see [Groups](#groups)); and the
-**global** config (`launcher.json`, next to `server.env`). A stronger layer
+Settings come in layers, weakest first: the **instance's**
+(`instances/<instance>/instance.json`); its **groups'**, from its own outwards
+(see [Groups](#groups)); and the **global** config (`launcher.json`, next to
+`server.env`). A stronger layer
 wins where it says something. `masurium.py set` changes them with a check
 first and says when the change counts; `doctor` names any value, edited by
 hand, that `set` would refuse.
 
 ```bash
 launcher/masurium.py set alice                        # every setting, its value, and where it comes from
-launcher/masurium.py set --bot alice model sonnet     # for every instance of the bot
-launcher/masurium.py set alice model haiku low        # for this instance only
-launcher/masurium.py set alice heap --default         # out of the instance: what is under, or the default
+launcher/masurium.py set alice model haiku low        # for this instance
+launcher/masurium.py set alice heap --default         # out of the instance: back to the default
 launcher/masurium.py set --group team model sonnet    # imposed on everything in the group
 launcher/masurium.py set --global heap 4g             # imposed on every instance
 ```
 
-The personality is a text file of its own, `bots/<bot>/personality.txt`: who
+The personality is a text file of its own, `instances/<instance>/personality.txt`: who
 the bot is, in second person, **including the language it speaks** with
 players and how; it goes at the start of its prompt.
 
 | setting | layers | meaning |
 |---|---|---|
-| `account` | bot, instance | one of the launcher's accounts (`account add`), `offline` (private servers only), or `online` (a login kept in the instance) |
-| `owner` | all | the player the bot belongs to: it accepts their delicate orders, and they control it with `/masurium bot` on any server. It cannot be changed from inside the game |
-| `model` | all | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`). The aliases `opus`, `sonnet`, `haiku` and `fable` always mean the newest of their family; `opus[1m]` and the like, a million tokens of context |
-| `heap` | all | the game's memory, e.g. `3g` (default `MASURIUM_HEAP`, else `3g`) |
+| `name` | instance | its player name when it plays offline (with a Microsoft account, the account's player plays) |
+| `account` | instance | `offline` (the default: private servers only), or one of the Microsoft accounts (`account add`) |
+| `owner` | instance, group, global | the player the bot belongs to: it accepts their delicate orders, and they control it with `/masurium bot` on any server. It cannot be changed from inside the game |
+| `model` | instance, group, global | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`). The aliases `opus`, `sonnet`, `haiku` and `fable` always mean the newest of their family; `opus[1m]` and the like, a million tokens of context |
+| `heap` | instance, group, global | the game's memory, e.g. `3g` (default `MASURIUM_HEAP`, else `3g`) |
 | `java` | instance, group, global | the Java its game runs on: a path to a `java`, or a name on the PATH (default `MASURIUM_JAVA`, else `java`); NeoForge 21.1 wants Java 21 |
 | `java_args` | instance, group, global | extra JVM flags, e.g. `-XX:+UseZGC` (the heap is `heap`, not a flag here) |
-| `role` | bot, instance, group | `main` (takes orders, does jobs) or `guard` (see [Groups](#groups)) |
-| `fast_responses` | all | `yes` (default): its brain writes ahead of time, in its voice and language, the few things it says without thinking; `no`: plain English |
+| `role` | instance, group | `main` (takes orders, does jobs) or `guard` (see [Groups](#groups)) |
+| `fast_responses` | instance, group, global | `yes` (default): its brain writes ahead of time, in its voice and language, the few things it says without thinking; `no`: plain English |
 | `port` | instance | the local port of the bot mod, chosen by the launcher |
 | `lock` | instance, group | `yes`: the groups around it do not impose on it (the global config still does) |
 | `ignore_global` | instance, group | `yes`: the global config (settings and rules) leaves it alone |
@@ -437,17 +445,16 @@ A bot's **rules** are its behaviour toggles (`hunt_players`,
 on its own, and the blocks it may break on its own to make its way. The
 **server** enforces them: its mod keeps them for each bot, and the bridge makes
 the body hold what they come to, at start and within a second of any change.
-They come in three layers, the stronger one winning where two name the same
+They come in two layers, the stronger one winning where both name the same
 thing:
 
 | layer | where it is kept | who changes it |
 |---|---|---|
-| **base** | the bot's `bot.json` (`"rules"`), with its server's `servers/<slug>/rules.json` on top | the launcher: `rules --bot`, `rules --server` |
 | **own** | on the server, per player | the launcher (`rules <instance> ...`) **and** `/masurium bot` in the game: one copy, the server's |
-| **imposed** | the launcher's `launcher.json` (`"rules"`), next to `server.env` | the launcher only: `rules --global`. The game refuses to change it, and says who imposes it |
+| **imposed** | its groups' `group.json` (`"rules"`), and the global `launcher.json` (`"rules"`), next to `server.env` | the launcher only: `rules --group`, `rules --global`. The game refuses to change them, and says who imposes them |
 
-Each layer names only what it decides; otherwise lists **add up** (the bot's
-config banning beef and the instance banning salmon ban both). A layer can
+Each layer names only what it decides; otherwise lists **add up** (a group
+banning beef and the instance banning salmon ban both). A layer can
 instead **replace** a list (`food replace`): its entries are then the whole
 list, and what is under it, the golden apples every bot starts with included,
 no longer counts.
@@ -456,8 +463,7 @@ no longer counts.
 launcher/masurium.py rules alice                            # every toggle and both lists, and who decides each
 launcher/masurium.py rules alice food ban rotten_flesh      # its own, like /masurium bot alice food ban ...
 launcher/masurium.py rules alice pref hunt_players default   # back to what is under
-launcher/masurium.py rules --bot alice break allow oak_log    # the bot's config, for all its instances
-launcher/masurium.py rules --server create food ban beef         # every bot on that server
+launcher/masurium.py rules --group team break allow oak_log     # imposed on everything in the group
 launcher/masurium.py rules --global pref hunt_players off        # imposed on every instance
 launcher/masurium.py rules --global food replace                 # ...the whole food list, not just additions
 ```
@@ -477,7 +483,7 @@ In a file, a layer reads:
  "break": {"allow": ["oak_log"], "forbid": ["dirt"], "replace": false}}
 ```
 
-The bot's config, its server's and the global rules are sent on every start,
+Its groups' and the global rules are sent on every start,
 and to the running instances as soon as they change. A change to an
 instance's own rules while its server is away waits in the instance's folder
 (`rules-pending.json`) and goes on its next start; `doctor` counts what waits.
@@ -498,7 +504,7 @@ player on the same server shares them, since the server keeps them per player.
 | `/masurium bot <bot> admins add\|remove <player>` | owner | edit the admins |
 | `/masurium bot <bot> pref` | anyone | every behaviour setting with its value, and who decides it |
 | `/masurium bot <bot> pref <key>` | anyone | what one setting does, and how it stands |
-| `/masurium bot <bot> pref <key> on\|off\|default` | owner, admins | switch a setting, or take it back to what its config says |
+| `/masurium bot <bot> pref <key> on\|off\|default` | owner, admins | switch a setting, or take it back to what applies without it |
 | `/masurium bot <bot> food` | anyone | what it will not eat on its own |
 | `/masurium bot <bot> food ban\|allow\|default <item>` | owner, admins | edit the food ban |
 | `/masurium bot <bot> break` | anyone | what it may break by itself to make its way |
