@@ -129,6 +129,15 @@ def tests_speaker():
     finally:
         bridge.request_bot = real_request_bot
 
+    # The final answer of a turn nobody asked for is a thought: it once went
+    # out to the chat, in English, in the middle of a fight.
+    check("a body notice's final answer is not said",
+          bridge.not_said(bridge.BODY, "I haven't found any zinc yet. I'm at Y=19.", False))
+    check("an answer to someone is said",
+          bridge.not_said("Bob", "Voy a buscar zinc.", False) is None)
+    check("...unless `say` was the last thing it did, or it chose silence",
+          bridge.not_said("Bob", "Voy.", True) and bridge.not_said("Bob", "(silence)", False))
+
     # A restart ordered from the game runs the launcher from the bridge. The
     # bridge's bots and state folders are its server's; the launcher needs its
     # own back, or it does not find the bot and leaves the bridge without a body.

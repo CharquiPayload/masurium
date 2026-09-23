@@ -956,7 +956,8 @@ BRAIN = (
     "did not hear. CAREFUL: if you used `say` in the turn, your final answer "
     "will NOT be said; everything you want heard afterwards (a problem, a "
     "result) say it with `say` too. If you did not use `say`, your final "
-    "answer is what is heard.\n"
+    "answer is what is heard, except after a notice from your body: nobody "
+    "asked, and that final answer is never said.\n"
     "If you are missing material, do NOT announce it and stand still: go and "
     "get it. You have `search_block` to find it, `go_to` to get close, `dig` "
     "to get it out and `pick_up` to take it from the ground. Saying 'I am "
@@ -1563,7 +1564,9 @@ def think(who, text, heard_at=None):
         # off" with the creeper already exploded. The body's snapshot of NOW
         # is attached so it does not tell as present a scare already over.
         errand = (f"[notice from your own body; nobody has said this to you: "
-                  f"{text}]{body_snapshot()}")
+                  f"{text}]{body_snapshot()}\n[Your final answer to a notice is "
+                  "NOT said: nobody asked, it stays yours. If someone should hear "
+                  "something, tell them with `say`.]")
     elif text.startswith(INTERNAL):
         errand = (f"{who} tells you THROUGH THE INTERNAL CHANNEL (private "
                   f"channel between bots; nobody else sees it): {text[len(INTERNAL):]}\n"
@@ -2514,6 +2517,29 @@ def silence_last(since_id, since_byte):
     return last == "say"
 
 
+def not_said(who, response, said_last):
+    """Why the final answer of a turn is NOT said in the chat, or None when it
+    is.
+
+    - `say` was the last thing it did: it already said what it had to, and the
+      final answer would repeat it. Mechanical on purpose: the "(silence)" rule
+      was obeyed sometimes and sometimes not ("on my way, going down to -58"
+      followed by "going down the staircase to -58").
+    - it chose silence, even reasoned aloud (is_silence).
+    - it was a notice from its own body: nobody asked, so the final answer is a
+      thought. One went out to the chat as it was, in English and mid-fight
+      ("I haven't found any zinc yet. I'm at Y=19, down to 2.6 health...").
+      What is meant for someone goes with `say`.
+    """
+    if said_last:
+        return "spoke with say and did nothing else: the final answer is not said"
+    if is_silence(response):
+        return "silence on purpose"
+    if who == BODY:
+        return "a body notice: the final answer is a thought, not said"
+    return None
+
+
 def main():
     # Before anything that writes: the session file is shared, and a second
     # bridge starting would leave the first one resuming a session that is no
@@ -2570,15 +2596,9 @@ def main():
                 say(phrase("confused"))
             continue
         log(f"-> {response[:120]}")
-        # If it already spoke with `say` in the turn, the final answer is NOT
-        # said. It is mechanical on purpose: the "(silence)" rule was obeyed
-        # sometimes and sometimes not ("on my way, going down to -58" followed
-        # by "going down the staircase to -58"). Whatever it wants heard after
-        # a say, it says with another say.
-        if silence_last(before, bytes_before):
-            log("spoke with say and did nothing else: the final answer is not said")
-        elif is_silence(response):
-            log("silence on purpose")
+        why = not_said(who, response, silence_last(before, bytes_before))
+        if why:
+            log(why)
         else:
             say(response)
 

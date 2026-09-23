@@ -2,6 +2,7 @@ package masurium.watut;
 
 import com.mojang.logging.LogUtils;
 import masurium.bot.Bot;
+import masurium.bot.Thinking;
 import net.minecraft.client.Minecraft;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.ModList;
@@ -19,7 +20,7 @@ import java.lang.reflect.Method;
  * and nowhere else, whatever the bot does counts as what a key press counts as for a
  * person: WATUT's own onAction(), the call its key and mouse hooks make. A bot that
  * stands still for long enough goes AFK like anyone. And while its brain thinks an
- * answer it is shown typing (see the mixin).
+ * answer it is shown typing, which is not being away either (see the mixin).
  *
  * <p>WATUT is reached by reflection, so the add-on needs no copy of it to be built. Its
  * mods.toml pins the WATUT it is for; without WATUT in the pack it does nothing.
@@ -52,7 +53,9 @@ public class MasuriumWatut {
         lastX = player.getX();
         lastY = player.getY();
         lastZ = player.getZ();
-        if (nudge.due(moved, player.swinging || player.isUsingItem(), player.tickCount)) {
+        // Thinking an answer counts as acting: a player typing one is not away either.
+        if (nudge.due(moved, player.swinging || player.isUsingItem() || Thinking.now(),
+                player.tickCount)) {
             act();
         }
     }

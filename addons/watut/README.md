@@ -13,10 +13,14 @@ the call its key and mouse hooks make, once a second at most. A bot that stands
 still for WATUT's minutes goes away like anyone.
 
 And while its brain thinks an answer to someone, the bot is shown **typing**, the
-bubble WATUT draws over a player with text in their chat box: the bridge tells
-the body when a turn starts and ends (`/thinking`), and a mixin answers WATUT's
-"is the local player typing?" with yes meanwhile. Nothing in WATUT's jar is
-touched, and players see WATUT as always.
+bubble WATUT draws over a player whose chat is open with text in it: the bridge
+tells the body when a turn starts and ends (`/thinking`), and a mixin tells
+WATUT meanwhile that the bot's chat is open and that it is typing. Both are
+needed: typing in a closed chat shows no bubble. Thinking also counts as
+activity, so a bot is not away while it thinks. Nothing in WATUT's jar is
+touched, and players see WATUT as always. The mixin is optional, so a WATUT
+that changed does not stop the game; the log says once when each part takes
+(`[masurium-watut] thinking: ...`).
 
 ```bash
 (cd ../../mod && ./gradlew build)   # the core first: the add-on compiles against it
@@ -28,8 +32,8 @@ The jar goes in `shared/mods/`, with the core. It is client side only.
 
 **One exact version.** This add-on is for WATUT **1.21.0-1.2.7**, declared in
 its `mods.toml`. WATUT is reached by reflection and a mixin (so building needs
-no copy of it), and a WATUT that moved `WatutMod.getPlayerStatusManagerClient()`,
-its `onAction()` or its `checkIfTyping` would leave the bot away again, or never
+no copy of it: the few names the mixin uses are stubbed in `src/stubs`), and a WATUT that moved `WatutMod.getPlayerStatusManagerClient()`,
+its `onAction()`, its `checkIfTyping` or its `sendGuiStatus` would leave the bot away again, or never
 typing: with any other version NeoForge
 refuses to load the add-on, and a new version of it is due. Without WATUT in
 the pack it loads and does nothing.

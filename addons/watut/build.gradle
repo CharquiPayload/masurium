@@ -22,10 +22,17 @@ neoForge {
 
 repositories { mavenCentral() }
 
+// WATUT's names the mixins use, to compile against without a copy of WATUT
+// (src/stubs). Never packaged: in the game WATUT's own classes answer.
+sourceSets {
+    stubs
+}
+
 dependencies {
     // The core, for Bot.isBot(): only a bot is nudged. Build the core first.
     // WATUT itself is reached by reflection, so building needs no copy of it.
     compileOnly fileTree(dir: '../../mod/build/libs', include: 'masurium-*.jar', exclude: '*-sources*')
+    compileOnly sourceSets.stubs.output
     testImplementation platform('org.junit:junit-bom:5.11.3')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

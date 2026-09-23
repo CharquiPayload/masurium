@@ -137,8 +137,9 @@ setting ignored it without a word.
   without a key or a mouse button, which a bot never presses, so a bot looked
   AFK while it worked. Now a bot that moves or acts is not away, and while its
   brain thinks an answer it is shown typing (the bridge tells the body when a
-  turn starts and ends, `/thinking`). Required, like Veil's, where the pack
-  carries WATUT.
+  turn starts and ends, `/thinking`): its chat counts as open and typed in,
+  since WATUT draws no bubble over a closed chat. Required, like Veil's, where
+  the pack carries WATUT.
 - A Memory page for each instance: the places it knows, with their
   coordinates and dimension, and the texts it wrote down, per server, to add,
   change and forget. While it plays a change goes to the bot, which holds its
@@ -247,6 +248,9 @@ setting ignored it without a word.
   thinking: the body notes when each thing reached its backpack (`/received`),
   and the bridge says when it heard the message. A gift handed over faster
   than the answer no longer leaves the bot waiting for another.
+- The final answer to a notice from the bot's own body is never said: nobody
+  asked, so it is a thought. One went out to the chat as it was, in English and
+  mid-fight. What is meant for someone goes with `say`.
 
 ### Launchers and tests
 - Offline bots with a name of their own, or a logged-in Microsoft account.
