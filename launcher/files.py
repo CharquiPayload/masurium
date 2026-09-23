@@ -66,6 +66,21 @@ def unlink_quietly(*paths):
             pass
 
 
+def fresh_logs(*paths):
+    """Logs that start empty: each one deleted, or, when that cannot be done,
+    emptied. Windows will not delete a file some process still has open (a
+    keeper on its way out, still holding its log), but lets another empty it;
+    a log left whole would show the next start the last one's lines."""
+    for p in paths:
+        try:
+            pathlib.Path(p).unlink(missing_ok=True)
+        except OSError:
+            try:
+                open(p, "w").close()
+            except OSError:
+                pass
+
+
 def write_private(path, text):
     """A file only this user can read, written whole or not at all: whoever
     reads it never sees half of it."""

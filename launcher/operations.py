@@ -23,8 +23,8 @@ from .api import UNREACHABLE
 from .instances import Instance, check_key, check_name, operating, read_json, write_json
 from .diagnosis import complaints, crash_report, explain_crash
 from .events import Cancelled, Fail, pause, report_to, wait_for
-from .files import (LogWatch, link_dir, link_or_copy, link_target, log_has, read_java_properties, same_path,
-                    read_pid, tail_lines, try_lock, unlink_quietly)
+from .files import (LogWatch, fresh_logs, link_dir, link_or_copy, link_target, log_has, read_java_properties,
+                    read_pid, same_path, tail_lines, try_lock, unlink_quietly)
 from .keeper import (GAME_OVER, HMC_READY, KEEPER_ENDED, KEEPER_FAILED, clear_run_files,
                      keeper_alive, keeper_ask, keeper_pid, launcher_pid)
 from .packs import CORE_JAR, compare_packs, jar_family, pack_mods, sync_mods
@@ -482,7 +482,7 @@ def _start_steps(inst, report, cancel, launched):
     inst.run.mkdir(parents=True, exist_ok=True)
     # Fresh logs: the signs waited for below ("initialized", "game exited")
     # must be this start's and not the last one's.
-    unlink_quietly(inst.client_log, inst.keeper_log)
+    fresh_logs(inst.client_log, inst.keeper_log)
     if cancel:
         cancel.check()
     take_place(inst)
@@ -655,7 +655,7 @@ def start_bridge(inst, on_event=None):
         settings.render(inst)
         inst.run.mkdir(parents=True, exist_ok=True)
         inst.state.mkdir(parents=True, exist_ok=True)
-        unlink_quietly(inst.bridge_log)
+        fresh_logs(inst.bridge_log)
         report.step(f"starting the bridge of {inst.key}", stage="bridge")
         fresh = brain.newer(inst.ws)
         if fresh:

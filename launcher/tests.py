@@ -1066,12 +1066,14 @@ def tests_server_mod_missing():
     print("\nNo Masurium on the server: said before a game is loaded for nothing")
     inst = WS.instance("alice")
     quick_server_env()
-    files.unlink_quietly(inst.keeper_log)
+    files.fresh_logs(inst.keeper_log)
     text, result = said(ops.start, inst)
+    # No keeper was started: its log has no line of its own (on Windows the
+    # last keeper, still leaving, may keep the file itself from going).
     check("a server mod that does not answer stops the start before the game",
           isinstance(result, Fail) and result.code == "server_mod_down"
           and "Is Masurium in that server's mods folder" in text
-          and "starting alice" not in text and not inst.keeper_log.exists(),
+          and "starting alice" not in text and not files.log_has(inst.keeper_log, "keeper of"),
           f"{text}\n         keeper.log there: {inst.keeper_log.exists()} "
           + " | ".join(files.tail_lines(inst.keeper_log, 4)))
     httpd = serve_a_server_mod(token="another")
