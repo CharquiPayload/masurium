@@ -18,7 +18,8 @@ import java.lang.reflect.Method;
  * fights through code, so WATUT had it "away" while it worked. Here, on a bot's client
  * and nowhere else, whatever the bot does counts as what a key press counts as for a
  * person: WATUT's own onAction(), the call its key and mouse hooks make. A bot that
- * stands still for long enough goes AFK like anyone.
+ * stands still for long enough goes AFK like anyone. And while its brain thinks an
+ * answer it is shown typing (see the mixin).
  *
  * <p>WATUT is reached by reflection, so the add-on needs no copy of it to be built. Its
  * mods.toml pins the WATUT it is for; without WATUT in the pack it does nothing.
@@ -41,7 +42,7 @@ public class MasuriumWatut {
             return;
         }
         NeoForge.EVENT_BUS.addListener(this::tick);
-        LOG.info("[masurium-watut] a bot that moves or acts is not away, for WATUT");
+        LOG.info("[masurium-watut] a bot that moves or acts is not away, and it types while it thinks");
     }
 
     private void tick(ClientTickEvent.Post event) {

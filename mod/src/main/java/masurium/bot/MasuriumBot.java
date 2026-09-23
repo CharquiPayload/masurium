@@ -232,6 +232,7 @@ public class MasuriumBot {
         try {
             http = HttpServer.create(new InetSocketAddress("127.0.0.1", PORT), 0);
             http.createContext("/state", x -> attend(x, this::state));
+            http.createContext("/thinking", x -> attend(x, this::thinking));
             http.createContext("/look", x -> attend(x, this::look));
             http.createContext("/attack", x -> attend(x, this::attack));
             http.createContext("/respawn", x -> attend(x, this::respawn));
@@ -853,6 +854,15 @@ public class MasuriumBot {
     }
 
     /** The diary: the memorable things of this world, which survive restarts. */
+    /**
+     * The bridge says a brain turn starts ({@code on=1}) or ended ({@code on=0}); add-ons
+     * show it (see {@link Thinking}).
+     */
+    private String thinking(Map<String, String> q) {
+        Thinking.set("1".equals(q.get("on")), System.currentTimeMillis());
+        return "{\"ok\":true,\"thinking\":" + Thinking.now() + "}";
+    }
+
     private String diary(Map<String, String> q) throws Exception {
         String memo = q.getOrDefault("annotate", "").trim();
         if (!memo.isEmpty()) {

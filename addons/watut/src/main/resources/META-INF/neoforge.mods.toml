@@ -6,14 +6,15 @@ license = "MIT"
 # menu, and away. "Away" is time without a key or a mouse button, and a bot
 # has neither: it walks, digs and fights through code, so WATUT marked it
 # AFK while it worked. This add-on tells WATUT a bot is active whenever it
-# moves or acts. The WATUT it is for, exactly: its internals are reached by
-# reflection, and another version could have moved them.
+# moves or acts, and shows it typing while its brain thinks an answer. The
+# WATUT it is for, exactly: its internals are reached by reflection and a
+# mixin, and another version could have moved them.
 
 [[mods]]
 modId = "masurium_watut"
 version = "1.0.0"
 displayName = "Masurium: WATUT for bots"
-description = "Tells WATUT that a bot that moves or acts is not away, as a key or a mouse click would. Client side only."
+description = "Tells WATUT that a bot that moves or acts is not away, and shows it typing while its brain thinks. Client side only."
 authors = "CharquiPayload"
 
 [[mods.dependencies.masurium_watut]]
@@ -43,3 +44,6 @@ type = "optional"
 versionRange = "[1.21.0-1.2.7]"
 ordering = "AFTER"
 side = "CLIENT"
+
+[[mixins]]
+config = "masurium_watut.mixins.json"

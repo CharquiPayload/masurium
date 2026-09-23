@@ -1351,6 +1351,16 @@ def request_bot(route):
         return json.loads(x.read().decode())
 
 
+def show_thinking(on):
+    """Tells the body a brain turn starts or ended, for whoever shows it (the
+    WATUT add-on draws a player typing). A body that does not know the route
+    (an older mod) or does not answer changes nothing here."""
+    try:
+        request_bot(f"/thinking?on={1 if on else 0}")
+    except Exception:
+        pass
+
+
 def request(route):
     r = urllib.request.Request(BASE + route, headers={"X-Masurium-Token": TOKEN})
     with urllib.request.urlopen(r, timeout=10) as x:
@@ -2532,6 +2542,11 @@ def main():
         who, text = inbox.get()
         WITH_AI[0] = text.startswith(INTERNAL)
         THINKING.set()
+        # An answer to someone is shown as typing; the body's own notices
+        # are thought about in silence.
+        shown = who != BODY
+        if shown:
+            show_thinking(True)
         before = last_note()
         bytes_before = _calls_so_far()
         try:
@@ -2539,6 +2554,8 @@ def main():
         finally:
             THINKING.clear()
             WITH_AI[0] = False
+            if shown:
+                show_thinking(False)
         if response is None:
             if spoke_with_say(before) or who == BODY:
                 log("no final text, and none was needed: it already spoke with "

@@ -110,6 +110,25 @@ def tests_speaker():
     # from its OWN backpack, so it stays the bot's to decide.
     check("trash: the bot still decides its own trash", bool(server.TOOLS["trash"][2]))
 
+    # A brain turn is shown on the body, as a player typing; a body that does
+    # not answer (an older mod) changes nothing.
+    asked = []
+    real_request_bot = bridge.request_bot
+    try:
+        bridge.request_bot = lambda route: asked.append(route) or {"ok": True}
+        bridge.show_thinking(True)
+        bridge.show_thinking(False)
+        check("a turn is told to the body when it starts and when it ends",
+              asked == ["/thinking?on=1", "/thinking?on=0"], asked)
+
+        def old_body(route):
+            raise OSError("404")
+        bridge.request_bot = old_body
+        bridge.show_thinking(True)
+        check("...and an older body that does not know it breaks nothing", True)
+    finally:
+        bridge.request_bot = real_request_bot
+
     # A restart ordered from the game runs the launcher from the bridge. The
     # bridge's bots and state folders are its server's; the launcher needs its
     # own back, or it does not find the bot and leaves the bridge without a body.

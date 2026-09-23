@@ -10,7 +10,12 @@ with it.
 On a bot's client, and nowhere else, the add-on tells WATUT that the bot is
 active whenever it moves, swings or uses something: WATUT's own `onAction()`,
 the call its key and mouse hooks make, once a second at most. A bot that stands
-still for WATUT's minutes goes away like anyone. Nothing in WATUT's jar is
+still for WATUT's minutes goes away like anyone.
+
+And while its brain thinks an answer to someone, the bot is shown **typing**, the
+bubble WATUT draws over a player with text in their chat box: the bridge tells
+the body when a turn starts and ends (`/thinking`), and a mixin answers WATUT's
+"is the local player typing?" with yes meanwhile. Nothing in WATUT's jar is
 touched, and players see WATUT as always.
 
 ```bash
@@ -22,9 +27,10 @@ touched, and players see WATUT as always.
 The jar goes in `shared/mods/`, with the core. It is client side only.
 
 **One exact version.** This add-on is for WATUT **1.21.0-1.2.7**, declared in
-its `mods.toml`. WATUT is reached by reflection (so building needs no copy of
-it), and a WATUT that moved `WatutMod.getPlayerStatusManagerClient()` or its
-`onAction()` would leave the bot away again: with any other version NeoForge
+its `mods.toml`. WATUT is reached by reflection and a mixin (so building needs
+no copy of it), and a WATUT that moved `WatutMod.getPlayerStatusManagerClient()`,
+its `onAction()` or its `checkIfTyping` would leave the bot away again, or never
+typing: with any other version NeoForge
 refuses to load the add-on, and a new version of it is due. Without WATUT in
 the pack it loads and does nothing.
 

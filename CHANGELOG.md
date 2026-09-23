@@ -133,6 +133,12 @@ setting ignored it without a word.
   create:cog`. A name alone is that name in whatever mod has it, and named on
   the server it is looked up: `cog` is kept as `create:cog` when only Create
   has one; a name two mods share, or none has, is refused, saying why.
+- A WATUT add-on (`addons/watut`): WATUT marks a player away after minutes
+  without a key or a mouse button, which a bot never presses, so a bot looked
+  AFK while it worked. Now a bot that moves or acts is not away, and while its
+  brain thinks an answer it is shown typing (the bridge tells the body when a
+  turn starts and ends, `/thinking`). Required, like Veil's, where the pack
+  carries WATUT.
 - A Memory page for each instance: the places it knows, with their
   coordinates and dimension, and the texts it wrote down, per server, to add,
   change and forget. While it plays a change goes to the bot, which holds its
