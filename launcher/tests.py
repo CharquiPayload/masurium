@@ -2058,6 +2058,12 @@ def tests_delete():
     e = fails(ops.delete_instance, WS, "lead")
     check("a leader is not deleted from under its guards", e is not None and e.code == "leader"
           and lead.dir.exists(), told(e))
+    said(ops.create, WS, "Sentry", "test", "offline")
+    said(ops.group_add, WS, "lead-guards", ["sentry"])
+    text, _ = said(ops.delete_instance, WS, "sentry")
+    check("a guard deleted leaves its group, and is not told how to start again",
+          "sentry" not in WS.group("lead-guards").guards and "still a guard" not in text, text)
+    remove_tree(WS.bot("sentry").dir)
     said(ops.delete_group, WS, "lead-guards")
     said(ops.delete_group, WS, "leaving")
     said(ops.delete_instance, WS, "lead")

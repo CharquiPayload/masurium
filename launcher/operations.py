@@ -159,7 +159,7 @@ def delete_instance(ws, key, on_event=None):
     bot = inst.data.get("bot", "?")          # read before its instance.json goes with the folder
     parent = groups.parent_of(ws, inst)
     if parent is not None:
-        group_remove(ws, parent.key, [f"instance:{inst.key}"], on_event=on_event)
+        group_remove(ws, parent.key, [f"instance:{inst.key}"], on_event=on_event, deleting=True)
     leave_place(inst)
     shutil.rmtree(inst.dir)
     report.step(f"instance {inst.key} deleted (its bot {bot} stays)", stage="deleted")
@@ -1045,7 +1045,9 @@ def group_add(ws, key, refs, on_event=None):
     return group
 
 
-def group_remove(ws, key, refs, on_event=None):
+def group_remove(ws, key, refs, on_event=None, deleting=False):
+    """Out of a group. `deleting`: what goes out is about to be deleted, so
+    nothing is written into it and nothing is said about starting it again."""
     report = report_to(on_event)
     group = ws.group(key).require()
     data = group.data
@@ -1060,10 +1062,10 @@ def group_remove(ws, key, refs, on_event=None):
             raise Fail(f"{node.id} is not in {group.id}.", code="not_in_group")
         data[field] = [k for k in data[field] if k != node.key]
         group.save(data)
-        if isinstance(node, Instance):
+        if isinstance(node, Instance) and not deleting:
             settings.render(node)
         report.step(f"{node.id} is out of {group.id}", stage="ungrouped")
-        if group.kind == groups.DEPENDENCY and settings.get(node, "role") == "guard":
+        if group.kind == groups.DEPENDENCY and not deleting and settings.get(node, "role") == "guard":
             report.detail(f"it is still a guard, with no leader: it will not start until it has one, or "
                           f"masurium.py set {node.key} role main")
     return group
