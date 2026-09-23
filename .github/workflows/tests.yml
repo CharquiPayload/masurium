@@ -70,9 +70,18 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
+      - name: the jars of the latest release, for the setup to bring
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-jars | Out-Null
+          $release = Invoke-RestMethod -Headers @{ Authorization = "Bearer ${{ github.token }}" } `
+              "https://api.github.com/repos/${{ github.repository }}/releases/latest"
+          $release.assets | Where-Object name -like "masurium*.jar" | ForEach-Object {
+              Invoke-WebRequest $_.browser_download_url -OutFile "release-jars/$($_.name)" }
+          Get-ChildItem release-jars | ForEach-Object Name
       - name: build the setup
         shell: pwsh
-        run: ./packaging/windows/build.ps1
+        run: ./packaging/windows/build.ps1 -Jars release-jars
       - name: install it silently, use it, take it away
         shell: pwsh
         run: ./packaging/windows/check-setup.ps1
