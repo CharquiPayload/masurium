@@ -41,6 +41,12 @@ DEFAULT_HEAP = "3g"
 JAVA = 21                  # what NeoForge 21.1 runs on
 # Where Linux keeps its Javas, several side by side (Arch, Fedora, Debian, Ubuntu).
 JVM_DIR = pathlib.Path("/usr/lib/jvm")
+# Where Windows installers put theirs: one folder per vendor under Program
+# Files, and in it one folder per Java (jdk-21.0.8.9-hotspot, zulu21...).
+WINDOWS_VENDORS = ("Eclipse Adoptium", "Java", "Microsoft", "Zulu", "Amazon Corretto", "BellSoft",
+                   "Semeru", "OpenJDK")
+# The program in a Java's bin/.
+JAVA_EXE = "java.exe" if os.name == "nt" else "java"
 
 # Each folder, and what in it says it is the launcher's: an old one straight in
 # the home counts only when it holds that (a ~/servers of someone's own does not).
@@ -56,6 +62,14 @@ def data_home(home, environ):
         return pathlib.Path(base) / "Masurium" if base else home / "AppData" / "Local" / "Masurium"
     base = environ.get("XDG_DATA_HOME")
     return (pathlib.Path(base) if base else home / ".local" / "share") / "masurium"
+
+
+def jvm_dirs(environ):
+    """The folders that hold Javas side by side on this platform."""
+    if os.name != "nt":
+        return [JVM_DIR]
+    roots = {environ.get(k) for k in ("ProgramW6432", "ProgramFiles")} - {None, ""}
+    return [pathlib.Path(r) / v for r in sorted(roots) for v in WINDOWS_VENDORS]
 
 
 def java_home_major(home):
@@ -122,7 +136,7 @@ class Workspace:
         self.state_dir = pathlib.Path(state_dir) if state_dir else self.env_file.parent
         self.accounts_dir = pathlib.Path(accounts_dir) if accounts_dir else self.bots_dir.parent / "accounts"
         self.groups_dir = pathlib.Path(groups_dir) if groups_dir else self.bots_dir.parent / "groups"
-        self.jvm_dir = JVM_DIR
+        self.jvm_dirs = jvm_dirs(self.environ)
 
     @classmethod
     def from_environment(cls, environ=None, home=None):
@@ -159,23 +173,26 @@ class Workspace:
 
     def java_command(self):
         """Whatever MASURIUM_JAVA says, or `java` from PATH. When that one is
-        another version and a Java 21 sits next to it in /usr/lib/jvm, that
-        one: a machine whose default is a newer Java (Arch makes the newest the
-        default) runs the bots on the 21 installed for them without changing
-        its default."""
+        another version, or there is none, and a Java 21 sits in /usr/lib/jvm
+        (under Program Files on Windows), that one: a machine whose default is
+        a newer Java (Arch makes the newest the default) runs the bots on the
+        21 installed for them without changing its default, and on Windows a
+        Java installed without touching PATH is found all the same."""
         custom = self.environ.get("MASURIUM_JAVA")
         if custom:
             return [custom]
         found = shutil.which("java", path=self.environ.get("PATH"))
         if found and java_home_major(pathlib.Path(os.path.realpath(found)).parent.parent) in (JAVA, None):
             return ["java"]
-        try:
-            homes = sorted(self.jvm_dir.iterdir())
-        except OSError:
-            homes = []
+        homes = []
+        for folder in self.jvm_dirs:
+            try:
+                homes += sorted(folder.iterdir())
+            except OSError:
+                pass
         for home in homes:
-            if java_home_major(home) == JAVA and (home / "bin" / "java").is_file():
-                return [str(home / "bin" / "java")]
+            if java_home_major(home) == JAVA and (home / "bin" / JAVA_EXE).is_file():
+                return [str(home / "bin" / JAVA_EXE)]
         return ["java"]
 
     def heap(self):

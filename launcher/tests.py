@@ -24,21 +24,35 @@ HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="masurium-test-"))
 
+
+
+def program(path, code):
+    """A Python script that runs as a program of its own, the way a java
+    does: on Linux the script itself, marked executable with its interpreter
+    on the first line; on Windows, which runs neither, a .cmd beside it that
+    hands it and its arguments to this Python. Returns what to run."""
+    path = pathlib.Path(path)
+    path.write_text("#!" + sys.executable + "\n" + code)
+    if os.name != "nt":
+        path.chmod(path.stat().st_mode | stat.S_IEXEC)
+        return path
+    cmd = path.with_suffix(".cmd")
+    cmd.write_text(f'@"{sys.executable}" "{path}" %*\r\n')
+    return cmd
+
+
 # A game that is not a game: it reads its stdin, echoes each line to stdout
 # with a prefix, and claims the mod initialized when told to launch. The keeper
 # is started with this as its java, through MASURIUM_JAVA.
-FAKE_JAVA = TMP / "fake_java.py"
-FAKE_JAVA.write_text(
-    "#!" + sys.executable + "\n"
-    "import sys\n"
-    "for line in sys.stdin:\n"
-    "    line = line.rstrip('\\n')\n"
-    "    print('got: ' + line, flush=True)\n"
-    "    if line.startswith('launch'):\n"
-    "        print('HMC-Specifics initialized', flush=True)\n"
-    "    if line == 'quit':\n"
-    "        break\n")
-FAKE_JAVA.chmod(FAKE_JAVA.stat().st_mode | stat.S_IEXEC)
+FAKE_JAVA = program(TMP / "fake_java.py",
+                    "import sys\n"
+                    "for line in sys.stdin:\n"
+                    "    line = line.rstrip('\\n')\n"
+                    "    print('got: ' + line, flush=True)\n"
+                    "    if line.startswith('launch'):\n"
+                    "        print('HMC-Specifics initialized', flush=True)\n"
+                    "    if line == 'quit':\n"
+                    "        break\n")
 
 sys.path.insert(0, str(REPO))
 from launcher import cli, doctor, operations as ops, settings  # noqa: E402
@@ -221,8 +235,11 @@ def tests_workspace():
                                      "MASURIUM_BOTS_DIR": "/from/the/environment"}, home=TMP)
     check("the environment wins", ws.bots_dir == pathlib.Path("/from/the/environment"))
     check("then server.env", ws.servers_dir == pathlib.Path("/from/the/file"))
+    # The platform's place for an application's data: XDG_DATA_HOME on Linux,
+    # LOCALAPPDATA on Windows (a Windows path compares without case).
     data = TMP / "xdg" / "masurium"
-    ws = Workspace.from_environment({"MASURIUM_ENV": str(env), "XDG_DATA_HOME": str(TMP / "xdg"),
+    places = {"XDG_DATA_HOME": str(TMP / "xdg"), "LOCALAPPDATA": str(TMP / "xdg")}
+    ws = Workspace.from_environment({"MASURIUM_ENV": str(env), **places,
                                      "MASURIUM_BOTS_DIR": "/from/the/environment"}, home=TMP)
     check("then the launcher's data folder, not the home",
           ws.shared_dir == data / "shared" and ws.instances_dir == data / "instances"
@@ -232,8 +249,7 @@ def tests_workspace():
     (old_home / "instances" / "alice").mkdir(parents=True, exist_ok=True)
     (old_home / "instances" / "alice" / "instance.json").write_text("{}")
     (old_home / "groups" / "stuff").mkdir(parents=True, exist_ok=True)
-    old_ws = Workspace.from_environment({"MASURIUM_ENV": str(env), "XDG_DATA_HOME": str(TMP / "xdg")},
-                                        home=old_home)
+    old_ws = Workspace.from_environment({"MASURIUM_ENV": str(env), **places}, home=old_home)
     check("a machine that still keeps its instances in the home keeps them there",
           old_ws.instances_dir == old_home / "instances", old_ws.instances_dir)
     check("...but a folder of the same name with nothing of the launcher's is not taken for one",
@@ -256,35 +272,40 @@ def tests_workspace():
     # Javas side by side, as /usr/lib/jvm keeps them: the default one on PATH
     # is a link into its folder, and each folder says its version in `release`.
     jvm = TMP / "jvm"
+    java = workspace_module.JAVA_EXE
     for name, version in (("java-26-openjdk", "26.0.2"), ("java-21-openjdk", "21.0.8"), ("mystery", None)):
         (jvm / name / "bin").mkdir(parents=True, exist_ok=True)
-        (jvm / name / "bin" / "java").write_text("#!/bin/sh\n")
-        (jvm / name / "bin" / "java").chmod(0o755)
+        (jvm / name / "bin" / java).write_text("#!/bin/sh\n")
+        (jvm / name / "bin" / java).chmod(0o755)
         if version:
             (jvm / name / "release").write_text(f'IMPLEMENTOR="Arch Linux"\nJAVA_VERSION="{version}"\n')
     path = TMP / "java-path"
     path.mkdir(exist_ok=True)
 
     def java_with(default, jvm_dir=jvm, **environ):
-        link = path / "java"
+        link = path / java
         if link.is_symlink() or link.exists():
             link.unlink()
         if default:
-            link.symlink_to(jvm / default / "bin" / "java")
+            link.symlink_to(jvm / default / "bin" / java)
         ws = Workspace(TMP, TMP, TMP, TMP / "server.env", home=TMP, environ={"PATH": str(path), **environ})
-        ws.jvm_dir = jvm_dir
+        ws.jvm_dirs = [TMP / "empty-vendor", jvm_dir]
         return ws.java_command()
     check("a `java` of 21 on PATH is the one", java_with("java-21-openjdk") == ["java"])
     check("the default is a newer Java: the 21 beside it, without changing the default",
-          java_with("java-26-openjdk") == [str(jvm / "java-21-openjdk" / "bin" / "java")])
-    check("...and with no java on PATH at all, the 21 of /usr/lib/jvm",
-          java_with(None) == [str(jvm / "java-21-openjdk" / "bin" / "java")])
+          java_with("java-26-openjdk") == [str(jvm / "java-21-openjdk" / "bin" / java)])
+    check("...and with no java on PATH at all, the 21 of /usr/lib/jvm (Program Files on Windows)",
+          java_with(None) == [str(jvm / "java-21-openjdk" / "bin" / java)])
     check("a java that does not say its version is taken at its word",
           java_with("mystery") == ["java"])
     check("no 21 anywhere: `java`, and setup says which it found",
           java_with("java-26-openjdk", jvm_dir=TMP / "no-jvm") == ["java"])
     check("MASURIUM_JAVA wins over all of it",
           java_with("java-26-openjdk", MASURIUM_JAVA="/opt/my-java/bin/java") == ["/opt/my-java/bin/java"])
+    check("where the Javas live: /usr/lib/jvm on Linux, each vendor's folder under Program Files on Windows",
+          workspace_module.jvm_dirs({}) == [workspace_module.JVM_DIR] if os.name != "nt" else
+          pathlib.Path(r"C:\Program Files") / "Eclipse Adoptium"
+          in workspace_module.jvm_dirs({"ProgramFiles": r"C:\Program Files"}))
 
 
 # --- names and servers ------------------------------------------------------
@@ -918,9 +939,7 @@ def tests_keeper_failures():
           not bot.keeper_pid_f.exists() and not bot.keeper_port_f.exists())
 
     # A keeper killed outright leaves no line behind: its pid is the sign.
-    slow = TMP / "slow_java.py"
-    slow.write_text("#!" + sys.executable + "\nimport time\ntime.sleep(60)\n")
-    slow.chmod(slow.stat().st_mode | stat.S_IEXEC)
+    slow = program(TMP / "slow_java.py", "import time\ntime.sleep(60)\n")
     WS.environ["MASURIUM_JAVA"] = str(slow)
     import signal
     import threading
@@ -1071,10 +1090,7 @@ def tests_server_mod_missing():
 def slow_java():
     """A java that never loads: the keeper holds it, and nothing ever says
     'initialized'."""
-    slow = TMP / "slow_java.py"
-    slow.write_text("#!" + sys.executable + "\nimport time\ntime.sleep(120)\n")
-    slow.chmod(slow.stat().st_mode | stat.S_IEXEC)
-    return slow
+    return program(TMP / "slow_java.py", "import time\ntime.sleep(120)\n")
 
 
 def tests_cancel():
@@ -1129,11 +1145,23 @@ def tests_cancel():
           and not bot.keeper_port_f.exists() and not bot.client_pid_f.exists())
 
     # The command line: the first Ctrl+C is a cancel, not an abandoned game.
+    # Windows has no SIGINT to send one process: there the window's Cancel,
+    # tested above, is the way.
+    if os.name == "nt":
+        print("  --   skipped on Windows: Ctrl+C cannot be sent to one process there")
+        keeper.clear_run_files(bot)
+        httpd.shutdown()
+        layout()
+        return
     import signal
     env = dict(WS.child_env())
     env["MASURIUM_JAVA"] = str(slow_java())
+    # A CI machine may start everything with SIGINT ignored, and Python then
+    # never turns it into KeyboardInterrupt: the child gets it back, as a
+    # terminal would give it.
     run = subprocess.Popen([sys.executable, str(HERE / "masurium.py"), "start", "Alice"],
-                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env,
+                           preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
     try:
         loading = wait(lambda: keeper.keeper_pid(bot) and bot.client_pid_f.exists(), 20)
         game_pid = files.read_pid(bot.client_pid_f)
@@ -1143,7 +1171,7 @@ def tests_cancel():
         if run.poll() is None:
             run.kill()
     check("Ctrl+C on `start` while loading: exit code 130", loading and run.returncode == 130,
-          f"{run.returncode} {out}")
+          f"{run.returncode} (SIGINT here: {signal.getsignal(signal.SIGINT)}) {out}")
     check("...saying it cancels, and stopping the game it launched",
           "cancelling" in out and "cancelled" in out
           and wait(lambda: not processes.pid_alive(game_pid), 10), out)
@@ -2015,11 +2043,9 @@ def tests_accounts():
     text, code = run_cli("account", "remove", "steve")
     check("unused, it is removed, login and all", code == 0 and not acc.dir.exists(), text)
 
-    login = TMP / "fake_login.py"
-    login.write_text("#!" + sys.executable + "\nimport pathlib\n"
-                     "a = pathlib.Path('HeadlessMC/auth')\na.mkdir(parents=True, exist_ok=True)\n"
-                     f"(a / '.accounts.json').write_text({hmc_logins('Herobrine')!r})\n")
-    login.chmod(login.stat().st_mode | stat.S_IEXEC)
+    login = program(TMP / "fake_login.py", "import pathlib\n"
+                    "a = pathlib.Path('HeadlessMC/auth')\na.mkdir(parents=True, exist_ok=True)\n"
+                    f"(a / '.accounts.json').write_text({hmc_logins('Herobrine')!r})\n")
     WS.environ["MASURIUM_JAVA"] = str(login)
     try:
         text, code = run_cli("account", "add")
