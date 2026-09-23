@@ -100,7 +100,8 @@ setting ignored it without a word.
   stopped together (`group start`, `group stop`, with a warning when their
   heaps do not fit). A dependency group holds a leader and its guards, on one
   server: starting a guard starts its leader first, stopping the leader stops
-  its guards, and a guard no group names does not start. Groups nest, each
+  its guards, and a guard no group names does not start. A leader in a normal
+  group stays there, its dependency group taking its place. Groups nest, each
   instance and group in one at most; their settings (`set --group`) and rules
   (`rules --group`) impose on what is inside them, the outer over the inner,
   and a global config (`set --global`, `rules --global`) over all of them.

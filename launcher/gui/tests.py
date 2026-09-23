@@ -172,6 +172,26 @@ def tests(app):
           launch_extras(win) == ["Restart", "Connect again", "Start its bridge"], launch_extras(win))
     check("...the tile selected is marked", win.tiles["alice"].property("selected")
           and not win.tiles["carol"].property("selected"))
+    menu = {k: [a.text for a in win._instance_actions(k) if a] for k in ("alice", "bob", "carol")}
+    check("right-click: an instance can lead a new dependency group, from its own menu",
+          "New Dependency Group…" in menu["carol"], menu["carol"])
+    check("...a leader adds guards to its own instead, and a guard cannot lead",
+          "Add Guards…" in menu["alice"]
+          and not next(a for a in win._instance_actions("bob") if a and a.text == "New Dependency Group…").enabled,
+          menu)
+    check("...only in the menu: the panel stays Prism's", "Add Guards…" not in side, side)
+    dialog = dialogs.NewGroupDialog(win, leader=ws.instance("carol"))
+    check("...its dialog asks only for the name, carol-guards to start with",
+          dialog.key.text() == "carol-guards" and dialog.dependency.isChecked()
+          and "carol" in dialog.windowTitle(), dialog.windowTitle())
+    dialog._create()
+    team = ws.group("team")
+    check("...and the new group takes carol's place in team, led by carol",
+          "carol" not in team.instance_keys() and "carol-guards" in team.group_keys()
+          and ws.group("carol-guards").leader == "carol", team.data)
+    ops.delete_group(ws, "carol-guards")
+    ops.group_add(ws, "team", ["carol"])
+    win.refresh()
     shot(win, "instance-selected")
     win.select(("group", "team"))
     QApplication.processEvents()

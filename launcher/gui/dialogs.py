@@ -243,28 +243,44 @@ class NewInstanceDialog(Dialog):
 
 
 class NewGroupDialog(Dialog):
-    def __init__(self, win, inside=None):
+    """A normal group or a dependency one. Given a `leader` (an instance's
+    right-click), only a dependency group led by it, and only its name asked."""
+
+    def __init__(self, win, inside=None, leader=None):
         super().__init__(win)
         self.inside = inside
         self.win, self.ws = win, win.ws
-        self.setWindowTitle("New group")
         form = QFormLayout(self)
-        self.key = QLineEdit(self.ws.free_key("group", self.ws.group_keys()))
+        taken = self.ws.group_keys()
+        self.key = QLineEdit(self.ws.free_key(f"{leader.key}-guards" if leader else "group", taken))
         self.key.setToolTip("lowercase letters, digits, - and _")
-        form.addRow("Name", self.key)
         self.normal = QRadioButton("Normal: instances and groups, started and stopped together")
-        self.normal.setChecked(True)
         self.dependency = QRadioButton("Dependency: a leader and its guards, on one server")
-        form.addRow(self.normal)
-        form.addRow(self.dependency)
         self.leader = QComboBox()
-        for inst in self.ws.instances():
-            if groups.parent_of(self.ws, inst) is None:
-                self.leader.addItem(f"{inst.key}  ·  {inst.name} on {inst.slug}", inst.key)
-        form.addRow("Leader", self.leader)
-        # The leader is only asked for a dependency group.
-        form.setRowVisible(self.leader, False)
-        self.dependency.toggled.connect(lambda on: (form.setRowVisible(self.leader, on), self.adjustSize()))
+        if leader is not None:
+            self.setWindowTitle(f"New dependency group, led by {leader.key}")
+            self.dependency.setChecked(True)
+            self.leader.addItem(leader.key, leader.key)
+            here = groups.parent_of(self.ws, leader)
+            form.addRow(muted(f"{leader.key} ({leader.name} on {leader.slug}) leads it"
+                              + (f", and it stays in {here.id}, inside the new group." if here else ".")
+                              + " Its guards are added afterwards: Add to it."))
+            form.addRow("Name", self.key)
+        else:
+            self.setWindowTitle("New group")
+            form.addRow("Name", self.key)
+            self.normal.setChecked(True)
+            form.addRow(self.normal)
+            form.addRow(self.dependency)
+            # A leader may be in a normal group (its new group takes its place
+            # there), not already in a dependency one.
+            for inst in self.ws.instances():
+                if groups.dependency_of(inst)[1] is None:
+                    self.leader.addItem(f"{inst.key}  ·  {inst.name} on {inst.slug}", inst.key)
+            form.addRow("Leader", self.leader)
+            # The leader is only asked for a dependency group.
+            form.setRowVisible(self.leader, False)
+            self.dependency.toggled.connect(lambda on: (form.setRowVisible(self.leader, on), self.adjustSize()))
         buttons = ok_row(self, "Create", self._create, help="groups")
         form.addRow(buttons)
 

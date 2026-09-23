@@ -955,7 +955,8 @@ def _member(ws, ref):
 
 def create_group(ws, key, leader=None, on_event=None):
     """A group: a normal one, or, with a leader, a dependency one (a leader
-    and its guards)."""
+    and its guards). A leader that was in a normal group stays there, one
+    level further in: its new group takes its place."""
     report = report_to(on_event)
     key = " ".join(key.split()).lower()
     groups.check_group_key(key)
@@ -968,10 +969,29 @@ def create_group(ws, key, leader=None, on_event=None):
                     f"masurium.py group add {key} ...", stage="created")
         return group
     lead = ws.instance(leader)
-    _check_free(ws, lead)
+    dependency, place = groups.dependency_of(lead)
+    if place == "leader":
+        raise Fail(f"{lead.key} already leads {dependency.id}: its guards go there.",
+                   lines=[f"masurium.py group add {dependency.key} <instance>"], code="already_leads")
+    if place == "guard":
+        raise Fail(f"{lead.key} guards {dependency.leader} in {dependency.id}: a guard follows its "
+                   "leader, it does not lead a group of its own.",
+                   lines=[f"take it out first:  masurium.py group remove {dependency.key} {lead.key}"],
+                   code="in_a_group")
+    parent = groups.parent_of(ws, lead)
     group.save({"kind": groups.DEPENDENCY, "leader": lead.key, "guards": []})
-    report.step(f"dependency group {key} created, led by {lead.key} ({lead.name} on {lead.slug}): add its "
-                f"guards with  masurium.py group add {key} <instance>", stage="created")
+    if parent is not None:
+        data = parent.data
+        data["instances"] = [k for k in data.get("instances", []) if k != lead.key]
+        data["groups"] = data.get("groups", []) + [group.key]
+        parent.save(data)
+    if settings.get(lead, "role") == "guard":
+        settings.set_value(lead, "role", "main")
+        report.detail(f"{lead.key}: role main (set on the instance), since it leads now")
+    settings.render(lead)
+    where = f", in {parent.id} where {lead.key} was" if parent else ""
+    report.step(f"dependency group {key} created, led by {lead.key} ({lead.name} on {lead.slug}){where}: "
+                f"add its guards with  masurium.py group add {key} <instance>", stage="created")
     return group
 
 

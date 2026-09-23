@@ -28,13 +28,15 @@ ISSUES = "https://github.com/CharquiPayload/masurium/issues"
 class Action:
     """Something that can be done with what is selected: a button on the
     side panel and a line in its right-click menu. `extra` ones go under
-    Launch's arrow on the panel."""
+    Launch's arrow on the panel; `menu_only` ones are only in the menu, so the
+    panel stays Prism's."""
     text: str
     icon: str
     run: object
     enabled: bool = True
     extra: bool = False
     tip: str = ""
+    menu_only: bool = False
 
 
 SEPARATOR = None
@@ -416,7 +418,7 @@ class MainWindow(QMainWindow):
                 s.addWidget(line)
                 s.addSpacing(4)
                 continue
-            if a.extra:
+            if a.extra or a.menu_only:
                 continue
             b = self._side_button(a)
             if first and extras:
@@ -508,6 +510,7 @@ class MainWindow(QMainWindow):
             SEPARATOR,
             Action("Edit", "edit", lambda: self.edit_instance(key), tip="Settings, rules, personality, mods, logs"),
             Action("Change Group", "move", lambda: self._dialog(dialogs.MoveDialog(self, inst))),
+            self._lead_action(inst),
             Action("Folder", "folder", lambda: self._folder(inst.dir)),
             Action("Copy", "copy", lambda: self._dialog(dialogs.CloneDialog(self, inst)),
                    tip="The same bot again, here or on another server"),
@@ -516,6 +519,19 @@ class MainWindow(QMainWindow):
         if settings.get(inst, "account") == "online":
             out.append(Action("Log its account in", "key", lambda: self._login(inst), not running))
         return out
+
+    def _lead_action(self, inst):
+        """A dependency group led by it, made from the instance itself. A
+        leader already has one: its guards go there. A guard follows its
+        leader and leads nothing."""
+        group, place = groups.dependency_of(inst)
+        if place == "leader":
+            return Action("Add Guards…", "group", lambda: self._dialog(dialogs.AddToGroupDialog(self, group)),
+                          tip=f"It leads {group.key}: instances on its server, to guard it", menu_only=True)
+        return Action("New Dependency Group…", "group",
+                      lambda: self._dialog(dialogs.NewGroupDialog(self, leader=inst)), place is None,
+                      tip=f"It guards {group.leader}: a guard leads nothing" if place == "guard"
+                      else "A group led by it, for guards to follow it", menu_only=True)
 
     def _group_actions(self, key):
         group = self.ws.group(key)

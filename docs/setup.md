@@ -397,6 +397,9 @@ A group is `groups/<group>/group.json`, and comes in two kinds:
   (client and bridge), stopping the leader stops its guards, and restarting the
   leader leaves them running. A guard has one leader. An instance with the
   role `guard` that no dependency group names does not start, and says so.
+  A leader that was in a normal group stays there: its new dependency group
+  takes its place. In the window, an instance's right-click has **New
+  Dependency Group…** (led by it), and a leader's has **Add Guards…**.
 
 ```bash
 launcher/masurium.py group create alice-guards --leader alice     # a dependency group

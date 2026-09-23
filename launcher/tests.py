@@ -2055,6 +2055,36 @@ def tests_delete():
         remove_tree(WS.bot(key).dir)
 
 
+def tests_lead_in_place():
+    print("\nA leader keeps its place: its new dependency group takes it")
+    layout()
+    quick_server_env()
+    _, chief = said(ops.create, WS, "Chief", "test", "offline")
+    _, aide = said(ops.create, WS, "Aide", "test", "offline")
+    ops.create_group(WS, "crew")
+    ops.group_add(WS, "crew", ["chief"])
+    settings.set_value(chief, "role", "guard")
+    text, _ = said(ops.create_group, WS, "chief-guards", leader="chief")
+    crew = WS.group("crew")
+    check("the new dependency group is in crew where chief was, and chief leads it",
+          crew.instance_keys() == [] and crew.group_keys() == ["chief-guards"]
+          and groups.dependency_of(chief)[1] == "leader", text)
+    check("...and says so", "in group crew where chief was" in text, text)
+    check("a leader is not a guard: its role is set to main", settings.get(chief, "role") == "main", text)
+    e = fails(ops.create_group, WS, "again", leader="chief")
+    check("an instance leads one dependency group", e is not None and e.code == "already_leads"
+          and not WS.group("again").exists(), told(e))
+    said(ops.group_add, WS, "chief-guards", ["aide"])
+    e = fails(ops.create_group, WS, "aide-guards", leader="aide")
+    check("a guard leads nothing", e is not None and e.code == "in_a_group"
+          and not WS.group("aide-guards").exists(), told(e))
+    for key in ("chief-guards", "crew"):
+        said(ops.delete_group, WS, key)
+    for key in ("chief", "aide"):
+        said(ops.delete_instance, WS, key)
+        remove_tree(WS.bot(key).dir)
+
+
 def tests_version():
     print("\nOne version for the launcher and the mod")
     import launcher
@@ -2183,6 +2213,7 @@ if __name__ == "__main__":
     tests_accounts()
     tests_offline_and_java()
     tests_delete()
+    tests_lead_in_place()
     tests_version()
     tests_rules_model()
     tests_rules()
