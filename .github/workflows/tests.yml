@@ -1,0 +1,51 @@
+# Every test of the project on GitHub's machines: the Python suites on Linux
+# and on Windows, the mod on Linux (a jar is the same jar everywhere).
+# tools/ci.py leaves a failure's lines as an annotation, readable without
+# logging in.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: python (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    # Windows is being ported to: its failures are said, and do not paint the
+    # commit red until it is done.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Qt for the window's suite
+        run: python -m pip install --disable-pip-version-check "PySide6-Essentials>=6.7,<7"
+      - name: the suites
+        run: python tools/ci.py
+
+  mod:
+    name: mod (java)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: build, and every test
+        working-directory: mod
+        run: ./gradlew build --console=plain
