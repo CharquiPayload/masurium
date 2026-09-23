@@ -1395,7 +1395,11 @@ MOUTH = threading.Lock()
 
 
 def say(text):
-    """To the game, through the client console. One line, bounded."""
+    """To the game, through the client console. One line, bounded.
+
+    Everything the bridge says answers someone (a message, an order), so the
+    chat cooldown lets it out; the body is told it spoke, so what it would say
+    on its own waits the cooldown from here."""
     blueprint, removed = drawable(text)
     if removed:
         log("removed " + " ".join(f"U+{ord(c):04X}" for c in removed[:8])
@@ -1404,6 +1408,32 @@ def say(text):
         blueprint = blueprint[:CHAT_LIMIT - 1] + "…"
     with MOUTH:
         console(f"msg {blueprint}")
+    try:
+        request_bot("/cooldown?spoke=1")
+    except Exception:
+        pass        # an older body keeps no cooldown
+
+
+# The launcher's chat_cooldown when it sets none (launcher/settings.py).
+CHAT_COOLDOWN = 10
+
+
+def chat_cooldown():
+    """Seconds between two things the bot says on its own (`chat_cooldown`)."""
+    t = _bot_config(NAME, "chat_cooldown")
+    try:
+        return max(0, int(t)) if t else CHAT_COOLDOWN
+    except ValueError:
+        return CHAT_COOLDOWN
+
+
+def tell_cooldown():
+    """The chat cooldown to the body, which keeps it. Told on starting and
+    before every turn, so a change in the launcher counts from the next one."""
+    try:
+        request_bot(f"/cooldown?seconds={chat_cooldown()}")
+    except Exception:
+        pass        # an older body keeps no cooldown
 
 
 def console(line):
@@ -2570,8 +2600,10 @@ def main():
     # time, while the bot is already listening (English meanwhile).
     threading.Thread(target=write_phrases, daemon=True).start()
 
+    tell_cooldown()
     while True:
         who, text, heard_at = inbox.get()
+        tell_cooldown()
         WITH_AI[0] = text.startswith(INTERNAL)
         THINKING.set()
         # An answer to someone is shown as typing; the body's own notices

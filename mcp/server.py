@@ -1126,10 +1126,20 @@ def t_stop_mining(_):
     return "I stop mining and stay where I am."
 
 
+# Whether this turn already answered whoever spoke (one server per turn: the
+# bridge starts `claude` for each one).
+_ANSWERED = []
+
+
 def t_say(a):
-    d = bt("/say", text=a.get("text", ""))
+    """Something said in the chat. The body keeps the chat cooldown; the first
+    thing said in a turn where someone spoke to me is my answer to them, which
+    always goes out (answer=1): they are waiting, and silence looks like a hang."""
+    answer = 1 if _speaker() and not _ANSWERED else None
+    d = bt("/say", text=a.get("text", ""), answer=answer)
     if not d.get("ok"):
         return d.get("error", "I could not say it")
+    _ANSWERED.append(True)
     return "Said. Now carry on with what you were going to do."
 
 

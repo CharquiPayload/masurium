@@ -330,10 +330,24 @@ def _lock(p):
     p.drawEllipse(QPointF(12, 15.5), 1.1, 1.1)
 
 
+def _chat(p):
+    """What is said: a speech bubble with its three dots."""
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(3.5, 4.5, 17, 12), 3, 3)
+    path.moveTo(8, 16.5)
+    path.lineTo(7, 20.5)
+    path.lineTo(12, 16.5)
+    p.drawPath(path.simplified())
+    p.setBrush(p.pen().color())
+    for x in (8.5, 12, 15.5):
+        p.drawEllipse(QPointF(x, 10.5), 0.9, 0.9)
+
+
 DRAW = dict(rules=_rules, cube=_cube, cup=_cup, server=_server, window=_window, globe=_globe, play=_play, stop=_stop, cancel=_cancel, edit=_edit, move=_move, folder=_folder, copy=_copy,
             delete=_delete, plus=_plus, gear=_gear, help=_help, account=_account, bot=_bot, restart=_restart,
             connect=_connect, bridge=_bridge, key=_key, logs=_logs, doctor=_doctor, quit=_quit, group=_group,
-            info=_info, chip=_chip, spark=_spark, bolt=_bolt, crown=_crown, shield=_shield, lock=_lock, pin=_pin)
+            info=_info, chip=_chip, spark=_spark, bolt=_bolt, crown=_crown, shield=_shield, lock=_lock, pin=_pin,
+            chat=_chat)
 
 
 # Each icon's gesture: (kind, amount, how long in ms). The icons that draw

@@ -20,10 +20,10 @@ import java.util.Map;
  * round trip to the model takes seconds, and by then the creeper has already blown up. It
  * is the same reason the {@link Guard} lives here.
  *
- * <p>Two brakes, because a bot that talks too much is worse than a quiet one: a topic is
- * not repeated until its period passes, and there is a breather between any two
- * sentences. And it never sends COMMANDS: a line starting with a slash would be a server
- * command, not a sentence.
+ * <p>Three brakes, because a bot that talks too much is worse than a quiet one: a topic
+ * is not repeated until its period passes, there is a breather between any two
+ * sentences, and the bot's {@link ChatCooldown} counts here too. And it never sends
+ * COMMANDS: a line starting with a slash would be a server command, not a sentence.
  */
 final class Voice {
 
@@ -58,6 +58,8 @@ final class Voice {
         while (line.startsWith("/")) line = line.substring(1).trim();
         if (line.isEmpty()) return false;
         if (line.length() > LENGTH_MAX) line = line.substring(0, LENGTH_MAX);
+        // The chat cooldown, last: a sentence it swallows is not said, and so not noted.
+        if (!ChatCooldown.take(now, false)) return false;
 
         p.connection.sendChat(line);
         lastByTopic.put(topic, now);

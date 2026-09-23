@@ -138,6 +138,25 @@ def tests_speaker():
     check("...unless `say` was the last thing it did, or it chose silence",
           bridge.not_said("Bob", "Voy.", True) and bridge.not_said("Bob", "(silence)", False))
 
+    # The chat cooldown is the body's; the bridge passes the launcher's on,
+    # and tells it when it spoke through the console.
+    asked.clear()
+    real_config = bridge._bot_config
+    try:
+        bridge.request_bot = lambda route: asked.append(route) or {"ok": True}
+        bridge._bot_config = lambda name, key, base=None: {"chat_cooldown": "25"}.get(key)
+        bridge.tell_cooldown()
+        bridge._bot_config = lambda name, key, base=None: None
+        bridge.tell_cooldown()
+        bridge._bot_config = lambda name, key, base=None: {"chat_cooldown": "soon"}.get(key)
+        bridge.tell_cooldown()
+        check("the chat cooldown goes to the body: the launcher's, 10 s without it or when "
+              "it makes no sense", asked == ["/cooldown?seconds=25", "/cooldown?seconds=10",
+                                             "/cooldown?seconds=10"], asked)
+    finally:
+        bridge.request_bot = real_request_bot
+        bridge._bot_config = real_config
+
     # A restart ordered from the game runs the launcher from the bridge. The
     # bridge's bots and state folders are its server's; the launcher needs its
     # own back, or it does not find the bot and leaves the bridge without a body.
@@ -1186,6 +1205,35 @@ def tests_wait_for_item():
         os.environ.pop("MASURIUM_HEARD_AT", None)
 
 
+def tests_say():
+    print("\nSaying: the first answer to whoever spoke always goes out")
+    asked = []
+
+    def body(route, **kw):
+        asked.append((route, kw))
+        if kw.get("answer"):
+            return {"ok": True}
+        return {"ok": False, "cooldown": True, "error": "not said: I spoke 3 s ago and my chat "
+                "cooldown is 10 s. If it still matters in a while, say it then; if not, let it go"}
+    with_response(body)
+    server._ANSWERED.clear()
+    os.environ["MASURIUM_SPEAKER"] = "Bob"
+    try:
+        out = server.t_say({"text": "Voy."})
+        check("the first thing said to whoever spoke is their answer", asked[-1][1].get("answer") == 1
+              and out.startswith("Said"), (asked, out))
+        out = server.t_say({"text": "Ya casi llego."})
+        check("...the next one waits the cooldown, and the brain is told why",
+              not asked[-1][1].get("answer") and "cooldown" in out, (asked[-1], out))
+        os.environ["MASURIUM_SPEAKER"] = ""
+        server._ANSWERED.clear()
+        server.t_say({"text": "Un creeper."})
+        check("a turn nobody asked for has no answer to give", not asked[-1][1].get("answer"), asked[-1])
+    finally:
+        os.environ.pop("MASURIUM_SPEAKER", None)
+        server._ANSWERED.clear()
+
+
 if __name__ == "__main__":
     tests_honesty()
     tests_ids()
@@ -1203,6 +1251,7 @@ if __name__ == "__main__":
     tests_server_env()
     tests_phrases()
     tests_wait_for_item()
+    tests_say()
 
     print(f"\n{done - len(failures)}/{done} checks pass")
     if failures:

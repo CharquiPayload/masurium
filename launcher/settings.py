@@ -134,6 +134,12 @@ def _check_java_args(target, value):
     return None
 
 
+def _check_chat_cooldown(target, value):
+    if not value.isdigit() or int(value) > 600:
+        return "whole seconds from 0 (no cooldown) to 600, such as 10"
+    return None
+
+
 def _java_default(target):
     return target.ws.java_command()[0]
 
@@ -175,6 +181,9 @@ SETTINGS = {s.key: s for s in [
     Setting("fast_responses", "its brain writes ahead of time, in its voice and language, the few things it "
             "says without thinking (warning of a creeper, being cornered, shutting down); again when its "
             "personality changes. No: those are said in plain English", "yes", ("no", "yes"), applies="bridge"),
+    Setting("chat_cooldown", "seconds between two things it says in the chat on its own (a creeper, how "
+            "a job goes); its answer to someone who has just spoken to it always goes out. 0: no cooldown",
+            "10", ("0", "5", "10", "20", "30", "60"), applies="now"),
     Setting("ignore_global", "yes: the global config (launcher.json: settings and rules) leaves it alone",
             "no", ("no", "yes"), applies="now", layers=(INSTANCE, GROUP)),
     Setting("lock", "yes: the groups around it do not impose on it (the global config still does)",
@@ -182,7 +191,8 @@ SETTINGS = {s.key: s for s in [
 ]}
 
 CHECKS = {"name": _check_name, "account": _check_account, "port": _check_port, "owner": _check_owner,
-          "model": _check_model, "heap": _check_heap, "java": _check_java, "java_args": _check_java_args}
+          "model": _check_model, "heap": _check_heap, "java": _check_java, "java_args": _check_java_args,
+          "chat_cooldown": _check_chat_cooldown}
 # Case matters in names (a player, a bot as the game shows it); in codes and
 # sizes it does not.
 LOWERCASE = ("account", "heap", "ignore_global", "lock", "role", "fast_responses")
@@ -410,7 +420,7 @@ def problems(target):
 # value each, written only when a layer sets them: without the file they apply
 # the same defaults as the table above (MASURIUM_OWNER for the owner). Plus
 # `escort`, the player of a guard's leader, from its dependency group.
-RENDERED = ("account", "model", "owner", "fast_responses")
+RENDERED = ("account", "model", "owner", "fast_responses", "chat_cooldown")
 # Files an older launcher rendered, removed wherever they are left.
 STALE = ("language", "gender")
 

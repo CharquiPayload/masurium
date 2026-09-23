@@ -251,6 +251,12 @@ setting ignored it without a word.
 - The final answer to a notice from the bot's own body is never said: nobody
   asked, so it is a thought. One went out to the chat as it was, in English and
   mid-fight. What is meant for someone goes with `say`.
+- A chat cooldown per bot (`chat_cooldown`, 10 s by default, per instance,
+  group or global, and in the window's settings): the least time between two
+  things a bot says in the chat on its own. Its answer to someone who has just
+  spoken to it always goes out; what its brain tries to say too soon is refused
+  and it is told why; what its body would say alone is dropped. The body keeps
+  it (`/cooldown`), and the bridge passes the setting on before every turn.
 
 ### Launchers and tests
 - Offline bots with a name of their own, or a logged-in Microsoft account.

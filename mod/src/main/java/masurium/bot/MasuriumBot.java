@@ -279,6 +279,7 @@ public class MasuriumBot {
             http.createContext("/strip_mine", x -> attend(x, this::strip));
             http.createContext("/staircase", x -> attend(x, this::staircase));
             http.createContext("/say", x -> attend(x, this::say));
+            http.createContext("/cooldown", x -> attend(x, this::cooldown));
             http.createContext("/logbook", x -> attend(x, this::logbook));
             http.createContext("/permissions", x -> attend(x, this::permissions));
             http.createContext("/follow", x -> attend(x, this::follow));
@@ -789,9 +790,14 @@ public class MasuriumBot {
      * something before doing it. It goes straight to the chat, without the {@link
      * Voice}'s breather: this is not speaking on its own initiative, it is answering.
      */
+    /**
+     * Something said in the chat for the brain. With {@code answer=1} it is its answer to
+     * someone who has just spoken to it, which the {@link ChatCooldown} always lets out.
+     */
     private String say(Map<String, String> q) throws Exception {
         String text = q.getOrDefault("text", "").replace('\n', ' ')
                 .replace('\r', ' ').trim();
+        boolean answer = "1".equals(q.get("answer"));
         return inGame(() -> {
             String negative = noGame();
             if (negative != null) return negative;
@@ -803,6 +809,13 @@ public class MasuriumBot {
                        + "sentence; I do not say it\"}";
             }
             String line = text.length() > 250 ? text.substring(0, 249) + "\u2026" : text;
+            long now = System.currentTimeMillis();
+            if (!ChatCooldown.take(now, answer)) {
+                return String.format("{\"ok\":false,\"cooldown\":true,\"error\":\"not said: I "
+                        + "spoke %d s ago and my chat cooldown is %d s. If it still matters in a "
+                        + "while, say it then; if not, let it go\"}",
+                        ChatCooldown.sinceMs(now) / 1000, ChatCooldown.cooldownMs() / 1000);
+            }
             Minecraft.getInstance().player.connection.sendChat(line);
             Logbook.note("say", line);
             return String.format("{\"ok\":true,\"said\":\"%s\"}",
@@ -810,6 +823,25 @@ public class MasuriumBot {
         });
     }
 
+
+    /**
+     * The chat cooldown ({@link ChatCooldown}): {@code seconds=N} sets it (the bridge
+     * passes on the launcher's {@code chat_cooldown}), {@code spoke=1} notes that the
+     * bridge just said something through the console. Either way, it says the cooldown.
+     */
+    private String cooldown(Map<String, String> q) {
+        long now = System.currentTimeMillis();
+        String seconds = q.getOrDefault("seconds", "").trim();
+        if (!seconds.isEmpty()) {
+            try {
+                ChatCooldown.set(Long.parseLong(seconds) * 1000);
+            } catch (NumberFormatException e) {
+                return "{\"ok\":false,\"error\":\"seconds has to be a whole number\"}";
+            }
+        }
+        if ("1".equals(q.get("spoke"))) ChatCooldown.spoke(now);
+        return String.format("{\"ok\":true,\"seconds\":%d}", ChatCooldown.cooldownMs() / 1000);
+    }
 
     /**
      * Going down to an elevation by a zig-zag staircase ({@link StairDigger}). Like the

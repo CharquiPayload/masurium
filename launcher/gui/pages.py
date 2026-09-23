@@ -301,11 +301,12 @@ class RulesPage(QWidget):
 # The settings in sections, each with its icon and a name a person reads;
 # the key the command line knows it by goes under the name.
 SECTIONS = (("The game", "cube", ("account", "name", "heap", "port", "java", "java_args")),
-            ("The brain", "spark", ("model", "fast_responses", "owner", "role")),
+            ("The brain", "spark", ("model", "fast_responses", "chat_cooldown", "owner", "role")),
             ("Groups", "group", ("ignore_global", "lock")))
 NAMES = {"account": ("Account", "account"), "heap": ("Memory", "chip"), "port": ("Port", "connect"),
          "java": ("Java", "cup"), "java_args": ("Java arguments", "logs"), "model": ("Model", "spark"),
-         "fast_responses": ("Fast responses", "bolt"), "owner": ("Owner", "crown"), "role": ("Role", "shield"),
+         "fast_responses": ("Fast responses", "bolt"), "chat_cooldown": ("Chat cooldown (s)", "chat"),
+         "owner": ("Owner", "crown"), "role": ("Role", "shield"),
          "ignore_global": ("Global config", "globe"), "lock": ("Lock", "lock")}
 
 

@@ -263,6 +263,10 @@ def tests(app):
     check("switches left alone change nothing", all(d.value_of(k) == "" for k in ("lock", "ignore_global",
                                                                                "fast_responses")))
     check("Java can be chosen per instance", "java" in d.editors and "java_args" in d.editors)
+    cooldown = d.editors["chat_cooldown"][0]
+    check("the chat cooldown is there to pick or type, 10 s by default",
+          cooldown.isEditable() and cooldown.currentText().startswith("10") and d.value_of("chat_cooldown") == "",
+          cooldown.currentText())
     box.setCurrentText("sonnet")
     d._apply()
     check("a setting changed lands in the instance's layer, and only it",

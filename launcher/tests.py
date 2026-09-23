@@ -1374,6 +1374,9 @@ def tests_settings():
                                     (alice, "lock", "maybe", "one of no, yes"),
                                     (alice, "heap", "512m", "at least 1g"),
                                     (alice, "heap", "lots", "heap size"),
+                                    (alice, "chat_cooldown", "-5", "whole seconds"),
+                                    (alice, "chat_cooldown", "ten", "whole seconds"),
+                                    (group, "chat_cooldown", "3600", "to 600"),
                                     (alice, "port", "80", "between 1024"),
                                     (alice, "port", str(FIRST_PORT + 1), "belongs to another instance")):
         e = fails(settings.set_value, target, key, value)
@@ -1386,6 +1389,15 @@ def tests_settings():
     settings.clear(alice, "account")
     check("a model keeps its two words", settings.set_value(alice, "model", "haiku   low") == "haiku low")
     check("a role goes in lowercase", settings.set_value(alice, "role", "GUARD") == "guard")
+    check("the chat cooldown is 10 s unless a layer says otherwise",
+          settings.resolve(alice, "chat_cooldown") == ("10", "default"))
+    settings.set_value(group, "chat_cooldown", "30")
+    settings.render(alice)
+    check("...set globally, it reaches the instance, and the bridge reads it from its folder",
+          settings.resolve(alice, "chat_cooldown") == ("30", "global") and alice.read("chat_cooldown") == "30")
+    settings.clear(group, "chat_cooldown")
+    settings.render(alice)
+    check("...and cleared, the file goes: the bridge applies the default", not (alice.dir / "chat_cooldown").exists())
     check("a player name keeps its capitals", settings.set_value(alice, "name", "Alice") == "Alice")
     claude_dir = WS.home / ".claude"
     claude_dir.mkdir(exist_ok=True)

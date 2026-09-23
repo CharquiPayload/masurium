@@ -372,6 +372,7 @@ players and how; it goes at the start of its prompt.
 | `java_args` | instance, group, global | extra JVM flags, e.g. `-XX:+UseZGC` (the heap is `heap`, not a flag here) |
 | `role` | instance, group | `main` (takes orders, does jobs) or `guard` (see [Groups](#groups)) |
 | `fast_responses` | instance, group, global | `yes` (default): its brain writes ahead of time, in its voice and language, the few things it says without thinking; `no`: plain English |
+| `chat_cooldown` | instance, group, global | seconds between two things the bot says in the chat on its own, from 0 (none) to 600 (default `10`). Its answer to someone who has just spoken to it always goes out; what its brain tries to say too soon is refused, and it is told why; what its body would say alone (a creeper) is dropped. Applies from its next turn |
 | `port` | instance | the local port of the bot mod, chosen by the launcher |
 | `lock` | instance, group | `yes`: the groups around it do not impose on it (the global config still does) |
 | `ignore_global` | instance, group | `yes`: the global config (settings and rules) leaves it alone |
