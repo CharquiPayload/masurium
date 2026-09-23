@@ -111,7 +111,14 @@ def delete_instance(ws, key, on_event=None):
     if parent is not None:
         group_remove(ws, parent.key, [f"instance:{inst.key}"], on_event=on_event, deleting=True)
     leave_place(inst)
-    shutil.rmtree(inst.dir)
+    try:
+        shutil.rmtree(inst.dir)
+    except PermissionError as e:
+        # Windows will not delete a file some process still has open: a game
+        # or a keeper left over, holding its log.
+        raise Fail(f"{inst.key} could not be deleted whole: {e.filename} is in use by another program.",
+                   lines=["close whatever still runs from its folder (a game, its keeper), and delete it again"],
+                   code="in_use")
     report.step(f"instance {inst.key} deleted", stage="deleted")
 
 

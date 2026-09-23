@@ -462,7 +462,10 @@ def tests(app):
     c._clone()
     check("an instance is copied", wait(lambda: "carol-1" in ws.instance_keys()), ws.instance_keys())
     check("the window follows: new tiles and sections",
-          wait(lambda: {"dave", "carol-1"} <= set(win.tiles) and "extra" in win.sections), list(win.tiles))
+          wait(lambda: {"dave", "carol-1"} <= set(win.tiles) and "extra" in win.sections),
+          f"{list(win.tiles)} {list(win.sections)}; running: {win.tasks.running()}; "
+          f"status: {win.statusBar().currentMessage()!r}; said: {said['alerts'][-2:]} "
+          f"{[repr(e) + getattr(e, 'trace', '')[-800:] for e in said['fails'][-2:]]}")
     win.select(("instance", "carol-1"))
     win.delete_instance("carol-1")
     check("an instance is deleted, and its tile goes",

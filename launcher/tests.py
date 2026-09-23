@@ -29,16 +29,27 @@ TMP = pathlib.Path(tempfile.mkdtemp(prefix="masurium-test-"))
 def program(path, code):
     """A Python script that runs as a program of its own, the way a java
     does: on Linux the script itself, marked executable with its interpreter
-    on the first line; on Windows, which runs neither, a .cmd beside it that
-    hands it and its arguments to this Python. Returns what to run."""
+    on the first line. Windows runs neither a script nor its first line, and a
+    .cmd around it, started detached as the keeper starts a game, neither read
+    its stdin nor wrote its stdout: there it is a real .exe, made the way pip
+    makes a console script's, a launcher that runs this Python on the script
+    zipped onto its end. Returns what to run."""
     path = pathlib.Path(path)
     path.write_text("#!" + sys.executable + "\n" + code)
     if os.name != "nt":
         path.chmod(path.stat().st_mode | stat.S_IEXEC)
         return path
-    cmd = path.with_suffix(".cmd")
-    cmd.write_text(f'@"{sys.executable}" "{path}" %*\r\n')
-    return cmd
+    import io
+    import zipfile
+    from pip._vendor import distlib
+    launcher = (pathlib.Path(distlib.__file__).parent / "t64.exe").read_bytes()
+    packed = io.BytesIO()
+    with zipfile.ZipFile(packed, "w") as z:
+        z.writestr("__main__.py", code)
+    python = sys.executable if " " not in sys.executable else f'"{sys.executable}"'
+    exe = path.with_suffix(".exe")
+    exe.write_bytes(launcher + f"#!{python}\n".encode() + packed.getvalue())
+    return exe
 
 
 # A game that is not a game: it reads its stdin, echoes each line to stdout
@@ -1690,11 +1701,14 @@ def tests_server_apis():
             [c for c in checks if "other" in c.label])
         check("...and compares the pack with ITS server, not whichever answers",
               any(l == "servers/other: versions" and "with its server" in d for l, ok, d in checks))
-        own.chmod(0o644)
-        checks = doctor.checks(WS)
-        check("a server.env others can read is a problem: it holds the token",
-              any(l == "servers/other: server.env" and ok is False and "chmod 600" in d for l, ok, d in checks))
-        own.chmod(0o600)
+        # Windows keeps who may read a file in its ACL, not in these bits, and a
+        # file under the user's own folders is theirs alone already.
+        if os.name != "nt":
+            own.chmod(0o644)
+            checks = doctor.checks(WS)
+            check("a server.env others can read is a problem: it holds the token",
+                  any(l == "servers/other: server.env" and ok is False and "chmod 600" in d for l, ok, d in checks))
+            own.chmod(0o600)
         own.write_text(f"MASURIUM_HOST=127.0.0.1\nMASURIUM_PORT={port}\nMASURIUM_TOKEN=wrong\n")
         checks = doctor.checks(WS)
         check("a wrong token is named as such",
