@@ -435,7 +435,9 @@ def tests(app):
     check("a new instance is created, playing as that account",
           wait(lambda: "dave" in ws.instance_keys()) and ws.instance("dave").name == "Dave"
           and ws.instance("dave").data.get("account") == "dave", ws.instance_keys())
-    check("...and gets its tile", wait(lambda: "dave" in win.tiles), list(win.tiles))
+    check("...and gets its tile", wait(lambda: "dave" in win.tiles),
+          f"{list(win.tiles)}; said: {said['alerts'][-2:]} "
+          f"{[repr(e) + getattr(e, 'trace', '')[-800:] for e in said['fails'][-2:]]}")
     here = dialogs.NewInstanceDialog(win, group="team")
     check("added from a group's right-click, it goes into that group", here.group.currentData() == "team")
     here.close()

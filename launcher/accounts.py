@@ -20,7 +20,7 @@ import os
 import shutil
 
 from .events import Fail
-from .files import link_or_copy, link_target
+from .files import link_or_copy, link_target, same_path
 
 OFFLINE = "offline"
 
@@ -160,7 +160,7 @@ def link_login(inst, account):
     of its own that was already there is kept aside, not destroyed."""
     from .files import link_dir
     auth = inst.hmc / "HeadlessMC" / "auth"
-    if link_target(auth) == account.auth:
+    if same_path(link_target(auth), account.auth):
         return
     account.auth.mkdir(parents=True, exist_ok=True)
     if auth.is_dir() and not auth.is_symlink():

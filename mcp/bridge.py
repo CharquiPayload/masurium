@@ -1489,17 +1489,24 @@ def only_one_bridge(file=None):
     """
     f = pathlib.Path(file or f"{STATE}/bridge_{NAME.lower()}.lock")
     f.parent.mkdir(parents=True, exist_ok=True)
-    handle = open(f, "w")
+    # Opened without truncating: the one that loses must not wipe the pid of
+    # the one that holds it, which is how the launcher tells who that is.
+    handle = open(f, "a+")
     try:
         if fcntl:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         else:
+            # Windows locks bytes, and a locked byte cannot be read by anyone
+            # else: the lock sits far past the pid, which stays readable.
+            os.lseek(handle.fileno(), 1 << 30, os.SEEK_SET)
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:
         handle.close()
         log(f"another bridge for {NAME} is already running: this one stops "
             f"(the lock is {f})")
         raise SystemExit(1)
+    handle.seek(0)
+    handle.truncate()
     handle.write(f"{os.getpid()}\n")
     handle.flush()
     return handle        # kept open on purpose: closing it frees the lock

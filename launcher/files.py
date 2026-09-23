@@ -10,6 +10,11 @@ except ImportError:          # Windows
     fcntl = None
     import msvcrt
 
+# Windows locks bytes, not files, and a locked byte cannot be read by anyone
+# else: a lock taken on the pid itself hid who held it. The lock goes on a
+# byte far past what is written, where nothing is ever read.
+LOCK_BYTE = 1 << 30
+
 
 def read_env_file(path):
     """KEY=VALUE lines, as a shell would read them but without running one:
@@ -98,11 +103,29 @@ def link_dir(target, link):
 
 
 def link_target(link):
-    """Where a folder link points, or None."""
+    """Where a folder link points, or None. Windows may hand it back behind
+    the prefix it gives long paths and junctions, which is no part of where it
+    points and is dropped."""
     try:
-        return pathlib.Path(os.readlink(link))
+        target = os.readlink(link)
     except OSError:
         return None
+    for prefix in ("\\\\?\\", "\\??\\"):
+        if target.startswith(prefix):
+            target = target[len(prefix):]
+    return pathlib.Path(target)
+
+
+def same_path(a, b):
+    """Whether two paths name the same file or folder. Windows spells one
+    folder several ways, long, short (RUNNER~1) or in another case, so it is
+    asked of the system, and only when that cannot be done compared as text."""
+    if a is None or b is None:
+        return False
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
 
 def link_or_copy(src, dst):
@@ -124,7 +147,7 @@ def try_lock(path):
         if fcntl:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         else:
-            handle.seek(0)
+            os.lseek(handle.fileno(), LOCK_BYTE, os.SEEK_SET)
             msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:
         handle.close()

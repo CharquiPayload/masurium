@@ -23,7 +23,7 @@ from .api import UNREACHABLE
 from .instances import Instance, check_key, check_name, operating, read_json, write_json
 from .diagnosis import complaints, crash_report, explain_crash
 from .events import Cancelled, Fail, pause, report_to, wait_for
-from .files import (LogWatch, link_dir, link_or_copy, link_target, log_has, read_java_properties,
+from .files import (LogWatch, link_dir, link_or_copy, link_target, log_has, read_java_properties, same_path,
                     read_pid, tail_lines, try_lock, unlink_quietly)
 from .keeper import (GAME_OVER, HMC_READY, KEEPER_ENDED, KEEPER_FAILED, clear_run_files,
                      keeper_alive, keeper_ask, keeper_pid, launcher_pid)
@@ -240,8 +240,7 @@ def take_place(inst):
 
 
 def leave_place(inst):
-    target = link_target(inst.place)
-    if target is not None and pathlib.Path(target) == inst.dir:
+    if same_path(link_target(inst.place), inst.dir):
         unlink_quietly(inst.place)
 
 
@@ -643,7 +642,7 @@ def start_bridge(inst, on_event=None):
         if pid:
             report.step(f"the bridge of {inst.key} is already running (pid {pid})", stage="bridge")
             return pid
-        if link_target(inst.place) != inst.dir:
+        if not same_path(link_target(inst.place), inst.dir):
             check_can_run(inst)
             take_place(inst)
         settings.render(inst)

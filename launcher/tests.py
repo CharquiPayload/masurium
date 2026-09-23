@@ -569,7 +569,9 @@ def tests_keeper():
           files.read_pid(inst.client_pid_f) == game_pid and processes.pid_alive(game_pid))
     check("keeper_alive() agrees", keeper.keeper_alive(inst))
     check("the launch line reached the game",
-          wait(lambda: files.log_has(inst.client_log, "got: launch neoforge-21.1.248 -lwjgl -offline"), 5))
+          wait(lambda: files.log_has(inst.client_log, "got: launch neoforge-21.1.248 -lwjgl -offline"), 5),
+          " | ".join(files.tail_lines(inst.client_log, 8)) + "  /keeper:  "
+          + " | ".join(files.tail_lines(inst.keeper_log, 8)))
     check("...and the game claimed the mod initialized", files.log_has(inst.client_log, keeper.HMC_READY))
     check("a line is passed through and acknowledged", keeper.keeper_ask(inst, "connect 10.0.0.5:25566") == "sent")
     check("it arrived at the game's stdin", wait(lambda: files.log_has(inst.client_log, "got: connect 10.0.0.5:25566"), 5))
@@ -881,7 +883,7 @@ def tests_conflicts():
     _, away = said(ops.clone_instance, WS, "alice", slug="other")  # alice-2: Alice on other
     ops.take_place(alice)
     check("the running instance is linked as its player in its server's state folder",
-          files.link_target(alice.place) == alice.dir
+          files.same_path(files.link_target(alice.place), alice.dir)
           and alice.place == TMP / "state" / "servers" / "test" / "bots" / "alice")
     start_keeper("alice")
     try:
@@ -948,7 +950,7 @@ def tests_keeper_failures():
     def kill_the_keeper():
         if wait(lambda: keeper.keeper_pid(bot) and bot.client_pid_f.exists(), 20):
             game["pid"] = files.read_pid(bot.client_pid_f)
-            os.kill(keeper.keeper_pid(bot), signal.SIGKILL)
+            os.kill(keeper.keeper_pid(bot), getattr(signal, "SIGKILL", signal.SIGTERM))
 
     killer = threading.Thread(target=kill_the_keeper)
     killer.start()
@@ -960,10 +962,13 @@ def tests_keeper_failures():
         killer.join()
         WS.environ["MASURIUM_JAVA"] = str(FAKE_JAVA)
         if game.get("pid"):
-            try:
-                os.killpg(game["pid"], signal.SIGKILL)
-            except OSError:
-                pass
+            if os.name == "nt":
+                processes.kill_tree(game["pid"], hard=True)
+            else:
+                try:
+                    os.killpg(game["pid"], signal.SIGKILL)
+                except OSError:
+                    pass
     check("a keeper killed while loading: start notices", isinstance(result, Fail) and took < 30,
           f"{result!r} after {took:.0f}s")
     check("...and says the keeper did not get the game going",
@@ -1170,8 +1175,9 @@ def tests_cancel():
     finally:
         if run.poll() is None:
             run.kill()
+    logs = [f"--- {f.name}: " + " | ".join(files.tail_lines(f, 6)) for f in (bot.keeper_log, bot.client_log)]
     check("Ctrl+C on `start` while loading: exit code 130", loading and run.returncode == 130,
-          f"{run.returncode} (SIGINT here: {signal.getsignal(signal.SIGINT)}) {out}")
+          f"{run.returncode} (SIGINT here: {signal.getsignal(signal.SIGINT)}) {out}\n" + "\n".join(logs))
     check("...saying it cancels, and stopping the game it launched",
           "cancelling" in out and "cancelled" in out
           and wait(lambda: not processes.pid_alive(game_pid), 10), out)
@@ -1986,7 +1992,7 @@ def tests_accounts():
     settings.render(alice)
     props = files.read_java_properties(alice.hmc / "HeadlessMC" / "config.properties")
     check("its instance's login IS the account's: a link, not a copy",
-          files.link_target(own) == acc.auth and props.get("hmc.offline") == "false")
+          files.same_path(files.link_target(own), acc.auth) and props.get("hmc.offline") == "false")
     check("...and a login the instance had of its own is kept aside, not destroyed",
           accounts.players_in(alice.hmc / "HeadlessMC" / "auth.before-account" / ".accounts.json") == ["OldLogin"])
     settings.set_value(alice, "account", "offline")
