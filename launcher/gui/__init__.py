@@ -31,7 +31,7 @@ def main(argv=None, ws=None):
     app = QApplication.instance() or QApplication(list(argv or sys.argv))
     app.setApplicationName("Masurium Launcher")
     theme.apply(app)
-    app.setWindowIcon(QIcon(theme.avatar("Masurium", 64, colour=theme.ACCENT)))   # until it has a logo
+    app.setWindowIcon(QIcon(theme.LOGO))
     win = MainWindow(ws or Workspace.from_environment())
     win.show()
     return app.exec()

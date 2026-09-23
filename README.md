@@ -1,3 +1,5 @@
+<p align="center"><img src="launcher/gui/logo.png" width="160" alt="Masurium: element 43, Ma"></p>
+
 # Masurium
 
 Minecraft bots with a brain. A Masurium bot joins your server as a regular
@@ -180,7 +182,8 @@ idea came from or what Masurium works with; their logos and assets are not used.
 
 Masurium is the name three chemists gave element 43 in 1925, with the symbol
 **Ma**. Their discovery could not be confirmed, and the element is known today as
-technetium, so the name was free for a project to borrow, symbol included.
+technetium, so the name was free for a project to borrow, symbol included. The
+logo is its tile in the periodic table.
 
 ## License
 

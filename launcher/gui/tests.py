@@ -125,6 +125,7 @@ def tests(app):
           {"Doctor…", "Documentation", "About Masurium Launcher"}
           <= {a.text() for a in win.bar_buttons["Help"].menu().actions()})
     check("the window is called Masurium Launcher", win.windowTitle() == "Masurium Launcher", win.windowTitle())
+    check("the logo is there, for the window's icon and About", theme.logo(64).width() == 64, theme.LOGO)
     check("there is a way out without a title bar: Quit (Ctrl+Q)",
           any(a.text() == "Quit" and not a.shortcut().isEmpty() for a in win.toolbar_actions()))
 

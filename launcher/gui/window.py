@@ -209,7 +209,7 @@ class MainWindow(QMainWindow):
                          "Prism Launcher, HeadlessMC or Baritone, and not an official Minecraft product: not "
                          "approved by or associated with Mojang or Microsoft.<br><br>MIT licence.",
                          QMessageBox.Ok, self)
-        box.setIconPixmap(theme.avatar("M", 56))
+        box.setIconPixmap(theme.logo(64))
         box.exec()
 
     def toolbar_actions(self):

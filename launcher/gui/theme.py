@@ -254,3 +254,13 @@ def avatar(name, size=44, colour=None, image=None):
     p.drawText(pm.rect(), Qt.AlignCenter, (name or "?")[:1].upper())
     p.end()
     return pm
+
+
+# Element 43's tile: masurium, symbol Ma (the README says why). A picture and
+# not a drawing, unlike the icons: its lettering is a font the machine may not have.
+LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
+
+
+def logo(size):
+    """The logo, `size` pixels a side: the window's icon, the About box."""
+    return QPixmap(LOGO).scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)

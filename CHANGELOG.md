@@ -7,7 +7,8 @@ the name changed before any release because a server plugin with fake players
 already used it. Everything that carried the old name carries the new one:
 the mod ids (`masurium_server`, `masurium_bot`), the Java packages, the
 `/masurium` command, the `MASURIUM_*` variables, `~/.masurium` and the jars.
-The launcher is Masurium Launcher.
+The launcher is Masurium Launcher. The logo is element 43's tile, the one
+masurium would have had.
 
 **One jar for both sides.** The same `masurium-*.jar` goes in the Minecraft
 server's `mods/` folder and in each bot client's. The bot half is
