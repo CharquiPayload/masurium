@@ -18,10 +18,13 @@ Qt. Started with  masurium.py gui  or  python -m launcher.gui.
 """
 
 
+# The name of the menu entry the installers put in (install.sh, the .deb).
+DESKTOP_ID = "masurium-launcher"
+
+
 def main(argv=None, ws=None):
     import sys
 
-    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
 
     from ..workspace import Workspace
@@ -30,8 +33,12 @@ def main(argv=None, ws=None):
 
     app = QApplication.instance() or QApplication(list(argv or sys.argv))
     app.setApplicationName("Masurium Launcher")
+    # The installed menu entry (masurium-launcher.desktop): with it the desktop
+    # knows this window is that app, and shows its icon, not a generic one.
+    app.setDesktopFileName(DESKTOP_ID)
     theme.apply(app)
-    app.setWindowIcon(QIcon(theme.LOGO))
+    app.setWindowIcon(theme.app_icon())
     win = MainWindow(ws or Workspace.from_environment())
     win.show()
+    win.first_run()
     return app.exec()

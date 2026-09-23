@@ -136,16 +136,59 @@ the player names that are bots, comma separated. Restart the server afterwards.
 Java properties files do not support comments at the end of a line, so keep
 comments on their own lines.
 
-### 3. Prepare the bot machine
+### 3. Install Masurium Launcher on the bot machine
+
+The launcher is what creates and runs the bots. From the releases:
+
+- **Ubuntu, Debian, Linux Mint, Pop!_OS**: `masurium-launcher_<version>_amd64.deb`.
+  Double-click it, or `sudo apt install ./masurium-launcher_<version>_amd64.deb`.
+  It brings Qt for the window inside (it installs without internet) and asks
+  apt for Python and Java 21. `sudo apt remove masurium-launcher` takes it away.
+- **Any other Linux**: `masurium-launcher-<version>.tar.gz`. Unpack it and run
+  `./install.sh`: for your user alone, without sudo, with its own Python
+  environment for the window (a download of about 100 MB, once). `./install.sh
+  --no-gui` installs the command line alone, for a machine without a screen;
+  run it again to update, and `./install.sh --uninstall` to take it away.
+- **From a clone of this repository**: `./install.sh` as well (it takes the jars
+  you built), or run `launcher/masurium.py` right where it is.
+
+Either way you get **Masurium Launcher** in the applications menu and the
+`masurium` command (from a clone that was not installed, `launcher/masurium.py`).
+Its data lives in `~/.local/share/masurium` and `~/.masurium`, and uninstalling
+leaves both alone.
+
+**Claude Code** is installed apart, for the user that runs the bots:
+`curl -fsSL https://claude.ai/install.sh | bash`, then run `claude` once to sign in.
+
+**Setting it up.** The first time the window opens, it offers **Set up this
+machine** (also in Help); in a terminal, `masurium setup` does the same,
+asking as it goes (or taking `--host`, `--port`, `--token`, `--owner`,
+`--server` and `--game-port`, for a script). It:
+
+- downloads HeadlessMC 2.10.0 and hmc-specifics 2.4.0 from their own releases,
+  checked against the checksums of the files Masurium was tested with;
+- puts the Masurium jars the launcher came with in `shared/mods`;
+- asks the server's Masurium mod for the first time (its address, and the
+  `port` and `token` of its `masurium.properties`) and writes `server.env`,
+  readable by you alone;
+- registers the first server, with the NeoForge version the server says it runs;
+- checks Java 21 and Claude Code, and says how to get what is missing.
+
+What it makes, which can also be made by hand:
 
 ```text
-~/.masurium/server.env          connection to the server mod
-~/shared/headlessmc-launcher.jar
-~/shared/mods/                  masurium-*.jar and hmc-specifics-*.jar
-~/servers/<slug>/server.conf    one folder per server you connect to
-~/servers/<slug>/mods/          client-side mods that server requires (may be empty)
-~/instances/                    created by the launcher: one folder per bot (an instance)
+~/.masurium/server.env                    connection to the server mod
+~/.local/share/masurium/
+    shared/headlessmc-launcher.jar
+    shared/mods/                          masurium-*.jar and hmc-specifics-*.jar
+    servers/<slug>/server.conf            one folder per server you connect to
+    servers/<slug>/mods/                  client-side mods that server requires (may be empty)
+    instances/                            one folder per bot (an instance)
+    accounts/  groups/                    Microsoft accounts, and groups of instances
 ```
+
+A machine that already kept these folders straight in the home (`~/servers`,
+`~/instances`...) goes on using them there.
 
 `~/.masurium/server.env`:
 
@@ -201,8 +244,8 @@ and what runs: its game folder, its HeadlessMC, its logs, its port. It all
 lives in `instances/<instance>/`, and it is what starts and stops. The same
 character on two servers is two instances; copy one to make the other.
 
-Everything goes through one command, `launcher/masurium.py`, the command line of
-Masurium Launcher:
+Everything goes through one command, `masurium` (`launcher/masurium.py` from a
+clone), the command line of Masurium Launcher:
 
 ```bash
 launcher/masurium.py doctor                 # the machine, the folders, the server: what is missing
@@ -239,9 +282,11 @@ Then say its name in the chat: `Alice, come here`.
 **The window.** Masurium Launcher also has a window, on the same code:
 
 ```bash
-pip install PySide6-Essentials          # Qt for Python; the command line does not need it
-launcher/masurium.py gui
+masurium gui       # or Masurium Launcher in the applications menu
 ```
+
+The installers bring Qt for Python, which the window needs and the command
+line does not; from a clone, `pip install PySide6-Essentials` first.
 
 It is laid out as [Prism Launcher](https://prismlauncher.org/)'s, so it feels
 familiar to anyone who has used it (Masurium is not affiliated with Prism;

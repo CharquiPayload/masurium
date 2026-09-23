@@ -139,6 +139,7 @@ class MainWindow(QMainWindow):
         button("Settings", "gear", lambda: self.open_settings(), "The launcher's settings: its style, Java, "
                                                                    "global settings and rules, accounts, servers")
         help_ = QMenu(self)
+        help_.addAction(icons.icon("gear"), "Set up this machine…", self.open_setup)
         help_.addAction(icons.icon("doctor"), "Doctor…", lambda: dialogs.DoctorDialog(self).exec())
         help_.addAction(icons.icon("help"), "Documentation", lambda: open_help())
         help_.addAction(icons.icon("logs"), "Report an issue", lambda: QDesktopServices.openUrl(QUrl(ISSUES)))
@@ -188,6 +189,19 @@ class MainWindow(QMainWindow):
     def copy_path(self, path):
         QApplication.clipboard().setText(str(path))
         self.say_text(f"copied: {path}")
+
+    def open_setup(self):
+        from .firstrun import SetupDialog
+        SetupDialog(self).exec()
+        self.refresh()
+
+    def first_run(self):
+        """Offered when the window opens and a first bot would still lack
+        something the launcher can get itself: a new machine, say. Asked on
+        a thread (java -version takes a moment) and shown when it answers."""
+        from .. import firstrun
+        self.background.ask(lambda: firstrun.ready(self.ws),
+                            lambda ready: None if ready else self.open_setup(), lambda e: None)
 
     def open_settings(self, start=None):
         dialogs.SettingsWindow(self, start=start).exec()

@@ -12,11 +12,13 @@ import dataclasses
 import json
 import os
 import pathlib
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent
@@ -217,8 +219,23 @@ def tests_workspace():
                                      "MASURIUM_BOTS_DIR": "/from/the/environment"}, home=TMP)
     check("the environment wins", ws.bots_dir == pathlib.Path("/from/the/environment"))
     check("then server.env", ws.servers_dir == pathlib.Path("/from/the/file"))
-    check("then the default next to the home",
-          ws.shared_dir == TMP / "shared" and ws.instances_dir == TMP / "instances")
+    data = TMP / "xdg" / "masurium"
+    ws = Workspace.from_environment({"MASURIUM_ENV": str(env), "XDG_DATA_HOME": str(TMP / "xdg"),
+                                     "MASURIUM_BOTS_DIR": "/from/the/environment"}, home=TMP)
+    check("then the launcher's data folder, not the home",
+          ws.shared_dir == data / "shared" and ws.instances_dir == data / "instances"
+          and ws.accounts_dir == data / "accounts" and ws.groups_dir == data / "groups",
+          (ws.shared_dir, ws.instances_dir))
+    old_home = TMP / "old-home"
+    (old_home / "instances" / "alice").mkdir(parents=True, exist_ok=True)
+    (old_home / "instances" / "alice" / "instance.json").write_text("{}")
+    (old_home / "groups" / "stuff").mkdir(parents=True, exist_ok=True)
+    old_ws = Workspace.from_environment({"MASURIUM_ENV": str(env), "XDG_DATA_HOME": str(TMP / "xdg")},
+                                        home=old_home)
+    check("a machine that still keeps its instances in the home keeps them there",
+          old_ws.instances_dir == old_home / "instances", old_ws.instances_dir)
+    check("...but a folder of the same name with nothing of the launcher's is not taken for one",
+          old_ws.groups_dir == data / "groups", old_ws.groups_dir)
     check("the state folder is next to server.env by default, where the bridge kept it",
           ws.state_dir == TMP)
     check("two workspaces do not share their folders", WS.bots_dir == TMP / "bots")
@@ -2306,6 +2323,212 @@ def tests_migrate():
     remove_tree(TMP / "bots" / "unused")
 
 
+# --- a new machine: setup, and the installer -----------------------------------
+
+def tests_firstrun():
+    print("\nSetup: what a new machine lacks, got for it where the launcher can")
+    import hashlib
+    import io
+    import contextlib
+    from launcher import firstrun
+    root = TMP / "fresh"
+    fresh = Workspace(root / "bots", root / "servers", root / "shared", root / "dot" / "server.env",
+                      home=root, environ=ENVIRON, instances_dir=root / "instances", state_dir=root / "dot",
+                      accounts_dir=root / "accounts")
+    needs = {n.key: n for n in firstrun.needs(fresh)}
+    check("a new machine lacks the downloads, the mod, the way to the server and a server",
+          all(not needs[k].ok for k in ("download:headlessmc-launcher.jar", "server_env", "server", "masurium")),
+          needs)
+    check("...and setup says it can get the downloads, the server's way and the server itself",
+          needs["download:headlessmc-launcher.jar"].can and needs["server_env"].can and needs["server"].can)
+    check("...Java and Claude Code are checked, and said how to get when missing",
+          "java" in needs and "claude" in needs
+          and (needs["claude"].ok or "claude.ai/install.sh" in needs["claude"].detail))
+    check("not ready: the window offers the setup", not firstrun.ready(fresh))
+
+    content = b"a jar, pretend"
+    right = firstrun.Download("thing 1.0", "mods/thing-1.0.jar", "https://example.invalid/thing.jar",
+                              hashlib.sha256(content).hexdigest(), len(content))
+    wrong = firstrun.Download("thing 1.0", "mods/other-1.0.jar", "https://example.invalid/other.jar",
+                              "0" * 64, len(content))
+    opener = lambda request, timeout=30: io.BytesIO(content)
+    got = firstrun.download(fresh, right, opener=opener)
+    check("a download lands where it goes, once its checksum is the one expected",
+          got == root / "shared" / "mods" / "thing-1.0.jar" and got.read_bytes() == content)
+    e = fails(firstrun.download, fresh, wrong, opener=opener)
+    check("...one that is not what was tested is refused, and nothing is left of it",
+          e is not None and e.code == "bad_download" and not (root / "shared" / "mods" / "other-1.0.jar").exists()
+          and not list((root / "shared" / "mods").glob("*.part")), told(e))
+
+    def unreachable(request, timeout=30):
+        raise urllib.error.URLError("no network")
+    e = fails(firstrun.download, fresh, wrong, opener=unreachable)
+    check("...without network it says where to get it by hand", e is not None and "by hand" in told(e), told(e))
+    real = firstrun.DOWNLOADS
+    try:
+        firstrun.DOWNLOADS = (right,)
+        (root / "shared" / "mods" / "thing-1.0.jar").unlink()
+        check("fetch gets what is missing", len(firstrun.fetch(fresh, opener=opener)) == 1)
+        check("...and nothing that is there already", firstrun.fetch(fresh, opener=opener) == [])
+    finally:
+        firstrun.DOWNLOADS = real
+
+    for args, what, why in (((fresh, "", "8477", "t"), "no address", "address"),
+                            ((fresh, "a b", "8477", "t"), "an address with a space", "address"),
+                            ((fresh, "10.0.0.5", "port", "t"), "a port that is no number", "port"),
+                            ((fresh, "10.0.0.5", "8477", ""), "no token, for a server elsewhere", "token"),
+                            ((fresh, "10.0.0.5", "8477", "t", "not a name"), "an owner that is no player", "owner")):
+        e = fails(firstrun.connect, *args, test=False)
+        check(f"the way to the server refuses {what}", e is not None and why in told(e), told(e))
+    check("...a server on this very machine may go without a token",
+          fails(firstrun.connect, fresh, "127.0.0.1", "8477", "", test=False) is None
+          and not firstrun.server_env_missing(fresh))
+    fresh.env_file.write_text("MASURIUM_HOST=old\nMASURIUM_INSTANCES_DIR=/somewhere\n")
+    firstrun.connect(fresh, "10.0.0.5", "8477", "secret", "Owner", test=False)
+    values = fresh.env_values()
+    check("server.env is written, keeping the lines it had", values.get("MASURIUM_HOST") == "10.0.0.5"
+          and values.get("MASURIUM_TOKEN") == "secret" and values.get("MASURIUM_INSTANCES_DIR") == "/somewhere",
+          values)
+    check("...and only its user can read it: it holds the token", fresh.env_file.stat().st_mode & 0o077 == 0)
+    firstrun.connect(fresh, "10.0.0.5", "8477", "secret", "", test=False)
+    check("...an owner left empty goes", "MASURIUM_OWNER" not in fresh.env_values())
+    httpd, port = fake_server_mod("right", [])
+    try:
+        e = fails(firstrun.connect, fresh, "127.0.0.1", str(port), "wrong")
+        check("the server's mod is asked first: a wrong token is named as such",
+              e is not None and e.code == "wrong_token", told(e))
+        e = fails(firstrun.connect, fresh, "127.0.0.1", "1", "right")
+        check("...and nothing answering says what to look at", e is not None and "masurium.properties" in told(e),
+              told(e))
+        check("...the right one is saved", fails(firstrun.connect, fresh, "127.0.0.1", str(port), "right") is None
+              and fresh.env_values()["MASURIUM_PORT"] == str(port))
+
+        for args, what, why in ((("My Server", "10.0.0.5"), "a name with capitals and spaces", "lowercase"),
+                                (("ok", ""), "no address", "address"),
+                                (("ok", "10.0.0.5", "x"), "a port that is no number", "port")):
+            e = fails(firstrun.add_server, fresh, *args)
+            check(f"a server refuses {what}", e is not None and why in told(e), told(e))
+        s = firstrun.add_server(fresh, "my-server", "10.0.0.5", "25566", description='the "main" one')
+        check("a server is registered: its server.conf and an empty mods folder",
+              s.slug == "my-server" and s.mc_port == "25566" and (s.pack / "mods").is_dir()
+              and s.version == DEFAULT_VERSION and s.description == "the 'main' one", s)
+        check("...not twice", fails(firstrun.add_server, fresh, "my-server", "10.0.0.5").code == "exists")
+        real_mods = workspace_module.ServerApi.mods
+        workspace_module.ServerApi.mods = lambda self: {"neoforge": "21.1.300"}
+        try:
+            check("...with the NeoForge the server says it runs", firstrun.add_server(
+                fresh, "second", "10.0.0.5").version == "neoforge-21.1.300")
+        finally:
+            workspace_module.ServerApi.mods = real_mods
+    finally:
+        httpd.shutdown()
+
+    built = TMP / "fake-repo"
+    for d in ("mod/build/libs", "addons/watut/build/libs"):
+        (built / d).mkdir(parents=True, exist_ok=True)
+    (built / "mod/build/libs/masurium-1.0.0.jar").write_bytes(b"core")
+    (built / "mod/build/libs/masurium-1.0.0-sources.jar").write_bytes(b"src")
+    (built / "addons/watut/build/libs/masurium-watut-1.0.0.jar").write_bytes(b"watut")
+    real_repo = ops.REPO
+    try:
+        ops.REPO = built
+        names = [j.name for j in firstrun.bundled_jars()]
+        check("the jars a clone built count as the ones it came with, the core first, no sources",
+              names == ["masurium-1.0.0.jar", "masurium-watut-1.0.0.jar"], names)
+        (built / "jars").mkdir()
+        (built / "jars" / "masurium-1.0.1.jar").write_bytes(b"release")
+        check("...an installed program's jars/ wins", [j.name for j in firstrun.bundled_jars()]
+              == ["masurium-1.0.1.jar"])
+        put = firstrun.put_mods(fresh)
+        check("they go into shared/mods", [p.name for p in put] == ["masurium-1.0.1.jar"]
+              and (root / "shared" / "mods" / "masurium-1.0.1.jar").read_bytes() == b"release")
+        check("...not again when they are there", firstrun.put_mods(fresh) == [])
+    finally:
+        ops.REPO = real_repo
+
+    out = io.StringIO()
+    (root / "cli").mkdir()
+    cli_ws = Workspace(root / "cli" / "bots", root / "cli" / "servers", root / "cli" / "shared",
+                       root / "cli" / "server.env", home=root / "cli", environ=ENVIRON,
+                       instances_dir=root / "cli" / "instances", state_dir=root / "cli")
+    real_stdin = sys.stdin
+    sys.stdin = io.StringIO()            # nobody at a keyboard: it asks nothing, it takes the defaults
+    try:
+        with contextlib.redirect_stdout(out):
+            code = cli.main(["setup", "--no-download", "--no-check", "--host", "10.0.0.9", "--token", "tt",
+                             "--server", "home", "--game-port", "25570"], ws=cli_ws)
+    finally:
+        sys.stdin = real_stdin
+    text = out.getvalue()
+    check("`setup` with its answers as arguments: the way to the server and the first server",
+          cli_ws.env_values().get("MASURIUM_HOST") == "10.0.0.9" and cli_ws.server("home").mc_port == "25570"
+          and cli_ws.server("home").host == "10.0.0.9", text)
+    check("...and it says what is still left (the downloads it was told not to get)",
+          code == 1 and "still to do" in text and "HeadlessMC" in text, text)
+
+
+def tests_install():
+    print("\nInstaller: the program for one user, its command and its menu entry")
+    home = TMP / "install-home"
+    home.mkdir(exist_ok=True)
+    probe = subprocess.run([sys.executable, "-m", "venv", str(TMP / "venv-probe")], capture_output=True)
+    if probe.returncode != 0:
+        print("  --   skipped: this Python cannot make environments (python3-venv missing)")
+        return
+    # A stand-in for PySide6, offered to pip from a folder: the installer's own
+    # steps are what is tested, not a 100 MB download.
+    import zipfile
+    wheels = TMP / "wheels"
+    wheels.mkdir(exist_ok=True)
+    info = "pyside6_essentials-6.7.0.dist-info"
+    with zipfile.ZipFile(wheels / "pyside6_essentials-6.7.0-py3-none-any.whl", "w") as z:
+        z.writestr("pyside6_stand_in.py", "")
+        z.writestr(f"{info}/METADATA", "Metadata-Version: 2.1\nName: PySide6-Essentials\nVersion: 6.7.0\n")
+        z.writestr(f"{info}/WHEEL", "Wheel-Version: 1.0\nGenerator: tests\nRoot-Is-Purelib: true\n"
+                                    "Tag: py3-none-any\n")
+        z.writestr(f"{info}/RECORD", "")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("XDG_", "PIP_"))}
+    env.update(HOME=str(home), PIP_NO_INDEX="1", PIP_FIND_LINKS=str(wheels),
+               PATH=str(home / ".local" / "bin") + os.pathsep + env.get("PATH", ""))
+    run = lambda *a: subprocess.run(["sh", str(REPO / "install.sh"), *a], capture_output=True, text=True,
+                                    env=env, timeout=300)
+    r = run()
+    prefix = home / ".local" / "share" / "masurium-launcher"
+    command = home / ".local" / "bin" / "masurium"
+    desktop = home / ".local" / "share" / "applications" / "masurium-launcher.desktop"
+    check("install.sh installs the program in its own folder, with an environment of its own",
+          r.returncode == 0 and (prefix / "app" / "launcher" / "masurium.py").is_file()
+          and (prefix / "app" / "mcp" / "bridge.py").is_file() and (prefix / "venv" / "bin" / "python").exists(),
+          r.stdout + r.stderr)
+    check("...Qt for the window goes into that environment", r.returncode == 0 and subprocess.run(
+        [str(prefix / "venv" / "bin" / "python"), "-c", "import pyside6_stand_in"]).returncode == 0)
+    ran = subprocess.run([str(command), "--help"], capture_output=True, text=True, env=env)
+    check("...the `masurium` command runs it", ran.returncode == 0 and "setup" in ran.stdout, ran.stderr)
+    text = desktop.read_text() if desktop.is_file() else ""
+    check("...an entry in the applications menu, opening the window, with the Ma icon",
+          "Name=Masurium Launcher" in text and f'Exec="{command}" gui' in text and "Icon=masurium-launcher" in text
+          and (home / ".local/share/icons/hicolor/256x256/apps/masurium-launcher.png").is_file(), text)
+    validate = shutil.which("desktop-file-validate")
+    if validate and text:
+        v = subprocess.run([validate, str(desktop)], capture_output=True, text=True)
+        check("...and the entry is a valid one", v.returncode == 0, v.stdout + v.stderr)
+    (prefix / "app" / "stale-file").write_text("from an older version")
+    r = run()
+    check("run again, it updates: the old program goes whole", r.returncode == 0
+          and not (prefix / "app" / "stale-file").exists(), r.stdout + r.stderr)
+    data = home / ".local" / "share" / "masurium" / "instances"
+    data.mkdir(parents=True, exist_ok=True)
+    r = run("--uninstall")
+    check("--uninstall takes the program, its command and its menu entry away",
+          r.returncode == 0 and not prefix.exists() and not command.exists() and not desktop.exists(),
+          r.stdout + r.stderr)
+    check("...and leaves the instances alone", data.is_dir())
+    r = run("--no-gui")
+    check("--no-gui: the command line alone, no menu entry", r.returncode == 0 and command.exists()
+          and not desktop.exists(), r.stdout + r.stderr)
+    run("--uninstall")
+
+
 if __name__ == "__main__":
     tests_files()
     tests_workspace()
@@ -2349,6 +2572,8 @@ if __name__ == "__main__":
     tests_rules()
     tests_migrate()
     tests_cli()
+    tests_firstrun()
+    tests_install()
 
     print(f"\n{done - len(failures)}/{done} checks pass")
     if failures:

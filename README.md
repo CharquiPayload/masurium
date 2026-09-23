@@ -17,8 +17,11 @@ them play alongside you.
 > tools answer when they *know*, not when they launched an order, and every
 > failure says *what happened*, with numbers.
 
-**To install it**, see [docs/setup.md](docs/setup.md): what you need, how to
-build it, and how to get the first bot into the game.
+**To install it**: the mod jar goes in your server's `mods/` folder, and
+**Masurium Launcher** on the machine that runs the bots: a `.deb` for Ubuntu and
+Debian, or `install.sh` for any Linux. The first time it opens, it sets the
+machine up. [docs/setup.md](docs/setup.md) has every step, and how to build it
+all yourself.
 
 ## How it works
 
@@ -31,7 +34,7 @@ build it, and how to get the first bot into the game.
 | **Bridge** | reads the chat, wakes the brain when the bot is named, relays body notices | `mcp/bridge.py` |
 | **Claude Code** | thinking, only when needed | — |
 | **Masurium Launcher** | creates, starts, stops and watches bots; a keeper per bot holds the game's console | `launcher/` |
-| **Add-ons** | jars of their own, one per third-party mod the bot has to live with; the first keeps Veil off a GPU that a headless bot does not have | `addons/veil/` |
+| **Add-ons** | jars of their own, one per third-party mod the bot has to live with: one keeps Veil off a GPU that a headless bot does not have, another keeps WATUT from showing a working bot as away | `addons/` |
 
 The split is strict: **a question goes to the server, an action goes to the
 bot.** A dedicated server loads only the server and shared halves; the bot half
@@ -106,7 +109,9 @@ inline, a lambda, or a return type that no `import` would reveal.
 
 - A per-bot configuration file generated on first start, with the behaviour
   toggles as `true`/`false`.
-- Release builds of the jar.
+- Release builds: `tools/release.sh` makes the jars, the launcher's `.deb`
+  and its folder for any Linux. To do: a Windows installer (and a portable
+  zip), an AUR package and an `.rpm`.
 - **Masurium Launcher**: the command line is done (`launcher/masurium.py`: bots,
   each one an instance — a player on a server, with its name, account,
   personality and settings — created, copied, started, stopped and watched;
@@ -118,11 +123,13 @@ inline, a lambda, or a return type that no `import` would reveal.
   groups, plain ones that start together and a leader with its guards, nested,
   with settings and rules that impose on what is inside them, and a global
   config over all). A window on the same code (`masurium.py gui`, PySide6):
-  the instances by group, their actions, rules, settings and logs. To do: a run
-  on Windows.
-- **Add-ons**: separate jars that teach the bots one mod each. The first one is
-  there, `addons/veil` (compatibility: Veil without a GPU); the next ones teach
-  *abilities* (`masurium-create`, `masurium-watut`...). To do for those: the
+  the instances by group, their actions, rules, settings and logs; it sets a
+  new machine up by itself (the downloads, the way to the server, the first
+  server), and installs as a desktop app. To do: a run on Windows.
+- **Add-ons**: separate jars that teach the bots one mod each. Two are there,
+  `addons/veil` (Veil without a GPU) and `addons/watut` (a bot at work is not
+  away, and it types while it thinks); the next ones teach *abilities*
+  (`masurium-create`...). To do for those: the
   core offers them a place to register their own `/masurium bot <bot> <add-on>
   ...` subcommands and their own per-bot settings, kept where the rest of the
   per-bot settings live and handed to the bridge in the same poll, so an add-on

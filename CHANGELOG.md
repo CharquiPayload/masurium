@@ -54,6 +54,23 @@ setting ignored it without a word.
 - Bots do not pick up again what they tossed themselves.
 
 ### Launcher
+- **Installers**: a `.deb` for Ubuntu, Debian and their family (Qt for the
+  window inside as wheels, so it installs without internet; Python and Java 21
+  asked of apt), and `install.sh` for any Linux, for one user and without sudo
+  (`--no-gui` for a machine without a screen, `--uninstall`). Both put
+  **Masurium Launcher** in the applications menu, with its own icon (element
+  43's tile with only its symbol, Ma), and a `masurium` command.
+  `tools/release.sh` builds them with the jars.
+- **Setting a new machine up**: the window offers it the first time it opens
+  (and from Help), `masurium setup` in a terminal. It downloads HeadlessMC and
+  hmc-specifics, checked against the checksums of the versions Masurium was
+  tested with; puts in the Masurium jars the launcher came with; asks the
+  server's Masurium mod before writing `server.env` (readable by its user
+  alone); registers the first server with the NeoForge version the server
+  runs; and says how to get Java 21 and Claude Code when they are missing.
+- The launcher's folders (instances, servers, shared, accounts, groups) live
+  in `~/.local/share/masurium` by default instead of straight in the home; a
+  machine that already has them in the home keeps using them there.
 - One command, `launcher/masurium.py`, in Python with no dependencies and no
   shell: `servers`, `create`, `start`, `connect`, `bridge`, `stop`,
   `restart`, `status`, `deploy-mod`, `doctor`. It replaced eight bash scripts.

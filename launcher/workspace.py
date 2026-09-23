@@ -1,6 +1,8 @@
 """Where everything is.
 
-Four folders, outside the repo because they are heavy and are not code:
+Some folders, outside the program because they are heavy and are not code,
+all in one place, the launcher's data folder (~/.local/share/masurium on Linux,
+%LOCALAPPDATA%\\Masurium on Windows):
 
     servers/<slug>/        one server: how to get in, and ITS pack of client mods
     accounts/<account>/    a Microsoft account, logged in once
@@ -10,9 +12,11 @@ Four folders, outside the repo because they are heavy and are not code:
                            and the settings and rules they impose
     shared/                what every instance uses: HeadlessMC and the Masurium mods
 
-plus server.env, the way to the server mod's API; the state folder, where
-each server's bridges keep their sessions and channels; and the environment
-variables that override the defaults. All of it held by one Workspace object
+plus server.env, the way to the server mod's API, in ~/.masurium; the state
+folder, where each server's bridges keep their sessions and channels, next to
+it; and the environment variables that override the defaults. They were once
+straight in the home (~/instances, ~/servers...); a machine that still has
+them there keeps using them. All of it held by one Workspace object
 instead of module globals resolved at import: a window can change a folder
 without restarting, and a test gets a workspace of its own.
 
@@ -32,6 +36,29 @@ from .processes import port_in_use
 FIRST_PORT = 8478          # 8477 belongs to the SERVER mod
 DEFAULT_VERSION = "neoforge-21.1.248"
 DEFAULT_HEAP = "3g"
+
+# Each folder, and what in it says it is the launcher's: an old one straight in
+# the home counts only when it holds that (a ~/servers of someone's own does not).
+FOLDERS = {"bots": "*/bot.json", "servers": "*/server.conf", "shared": "headlessmc-launcher.jar",
+           "instances": "*/instance.json", "accounts": "*/account.json", "groups": "*/group.json"}
+
+
+def data_home(home, environ):
+    """Where the launcher keeps its folders by default: the platform's place
+    for an application's data."""
+    if os.name == "nt":
+        base = environ.get("LOCALAPPDATA")
+        return pathlib.Path(base) / "Masurium" if base else home / "AppData" / "Local" / "Masurium"
+    base = environ.get("XDG_DATA_HOME")
+    return (pathlib.Path(base) if base else home / ".local" / "share") / "masurium"
+
+
+def default_folder(name, home, environ):
+    """data_home/<name>, unless the machine keeps its old one in the home."""
+    old = home / name
+    if old.is_dir() and any(old.glob(FOLDERS[name])):
+        return old
+    return data_home(home, environ) / name
 
 
 @dataclass(frozen=True)
@@ -83,8 +110,8 @@ class Workspace:
     @classmethod
     def from_environment(cls, environ=None, home=None):
         """The folders as this machine says: the environment first, then
-        server.env, so one file can hold everything; then the defaults next
-        to the home."""
+        server.env, so one file can hold everything; then the defaults, in
+        the launcher's data folder."""
         environ = dict(os.environ if environ is None else environ)
         home = pathlib.Path(home) if home else pathlib.Path.home()
         env_file = pathlib.Path(environ.get("MASURIUM_ENV")
@@ -95,14 +122,17 @@ class Workspace:
             value = environ.get(key) or values.get(key)
             return pathlib.Path(value).expanduser() if value else default
 
-        return cls(pick("MASURIUM_BOTS_DIR", home / "bots"),
-                   pick("MASURIUM_SERVERS_DIR", home / "servers"),
-                   pick("MASURIUM_COMMON_DIR", home / "shared"),
+        def folder(name):
+            return default_folder(name, home, environ)
+
+        return cls(pick("MASURIUM_BOTS_DIR", folder("bots")),
+                   pick("MASURIUM_SERVERS_DIR", folder("servers")),
+                   pick("MASURIUM_COMMON_DIR", folder("shared")),
                    env_file, home, environ,
-                   instances_dir=pick("MASURIUM_INSTANCES_DIR", home / "instances"),
+                   instances_dir=pick("MASURIUM_INSTANCES_DIR", folder("instances")),
                    state_dir=pick("MASURIUM_STATE_DIR", env_file.parent),
-                   accounts_dir=pick("MASURIUM_ACCOUNTS_DIR", home / "accounts"),
-                   groups_dir=pick("MASURIUM_GROUPS_DIR", home / "groups"))
+                   accounts_dir=pick("MASURIUM_ACCOUNTS_DIR", folder("accounts")),
+                   groups_dir=pick("MASURIUM_GROUPS_DIR", folder("groups")))
 
     def __repr__(self):
         return (f"Workspace(bots={self.bots_dir}, instances={self.instances_dir}, "

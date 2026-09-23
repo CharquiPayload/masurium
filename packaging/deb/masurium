@@ -1,0 +1,4 @@
+#!/bin/sh
+# Masurium Launcher's command (the .deb): its own Python environment, made
+# when the package was installed, runs the program.
+exec /opt/masurium-launcher/venv/bin/python /opt/masurium-launcher/app/launcher/masurium.py "$@"

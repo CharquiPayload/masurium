@@ -19,6 +19,7 @@
     masurium.py account [add | remove <account>]
     masurium.py deploy-mod [jar]
     masurium.py doctor
+    masurium.py setup [--host H --token T ...]   the first time: downloads, the server
 
 The same as `python3 -m launcher` from the repository. The code is the rest of
 this folder, the `launcher` package (see its __init__); this file is only the

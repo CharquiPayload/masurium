@@ -71,6 +71,7 @@ def workspace():
         (TMP / d).mkdir(parents=True, exist_ok=True)
     (TMP / "shared" / "headlessmc-launcher.jar").write_bytes(b"not really a jar")
     (TMP / "shared" / "mods" / "masurium-1.0.0.jar").write_bytes(b"m")
+    (TMP / "shared" / "mods" / "hmc-specifics-1.21.1-neoforge.jar").write_bytes(b"h")
     (TMP / "servers" / "test" / "server.conf").write_text("HOST=127.0.0.1\nDESCRIPTION=\"the test one\"\n")
     (TMP / "servers" / "other" / "server.conf").write_text("HOST=127.0.0.2\n")
     # A server mod that refuses at once: every question to it fails in no time.
@@ -506,6 +507,51 @@ def tests(app):
     shot(doc, "doctor")
     check("there are no bots apart from the instances: no Bots window",
           not hasattr(dialogs, "BotsDialog") and not hasattr(dialogs, "EditBotDialog"))
+
+    print("\nSetting up a new machine")
+    from .firstrun import SetupDialog
+    check("Help offers to set up this machine",
+          "Set up this machine…" in {a.text() for a in win.bar_buttons["Help"].menu().actions()})
+    check("the app's icon is the tile with only its symbol, at every size a desktop asks for",
+          sorted(s.width() for s in theme.app_icon().availableSizes()) == [32, 48, 64, 128, 256, 512],
+          theme.app_icon().availableSizes())
+    fresh_root = TMP / "fresh"
+    fresh = Workspace(fresh_root / "bots", fresh_root / "servers", fresh_root / "shared",
+                      fresh_root / "server.env", home=fresh_root, environ=ws.environ,
+                      instances_dir=fresh_root / "instances", state_dir=fresh_root)
+    new_win = MainWindow(fresh, QSettings(str(TMP / "fresh.ini"), QSettings.IniFormat))
+    new_said = []
+    new_win.alert = lambda heading, text: new_said.append(text)
+    new_win.fail = lambda e, heading="": new_said.append(str(e))
+    offered = []
+    new_win.open_setup = lambda: offered.append(True)
+    new_win.first_run()
+    check("a new machine is offered the setup when the window opens", wait(lambda: offered, 20))
+    offered.clear()
+    win_offered = []
+    win.open_setup = lambda: win_offered.append(True)
+    win.first_run()
+    wait(lambda: False, 1.5)
+    check("...one that has everything is not", not win_offered)
+    del win.open_setup
+    setup = SetupDialog(new_win)
+    check("the setup lists what a first bot needs", wait(lambda: setup.list.count() >= 7 and setup.needs),
+          setup.list.count())
+    lacking = {n.key for n in setup.needs if not n.ok}
+    check("...on a new machine: the downloads, the way to the server, a server",
+          {"download:headlessmc-launcher.jar", "server_env", "server"} <= lacking, lacking)
+    check("...the button to get the downloads is on, the one to add the first instance is not yet",
+          setup.get.isEnabled() and not setup.first.isVisible() and setup.add_button.isEnabled())
+    check("...the token is not shown as it is typed", setup.token.echoMode() == QLineEdit.Password)
+    setup.host.setText("10.0.0.5")
+    setup.token.setText("")
+    setup._connect()
+    check("...a way to the server without its token is refused, saying what it needs",
+          wait(lambda: new_said, 10) and "token" in new_said[-1] and not (fresh_root / "server.env").exists(),
+          new_said)
+    shot(setup, "setup")
+    setup.reject()
+    new_win.close()
     shot(win, "main-after")
     win.close()
 

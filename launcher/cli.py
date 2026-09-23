@@ -313,7 +313,8 @@ def cmd_gui(ws, args):
     import importlib.util
     if importlib.util.find_spec("PySide6") is None:
         raise Fail("the window needs PySide6 (Qt for Python), which the command line does not:",
-                   lines=["pip install PySide6-Essentials", "then:  masurium.py gui"], code="no_pyside")
+                   lines=["the installers bring it (install.sh, the .deb); by hand:  pip install PySide6-Essentials",
+                          "then:  masurium.py gui"], code="no_pyside")
     from .gui import main as gui_main
     return gui_main(["masurium"], ws)
 
@@ -335,6 +336,32 @@ def cmd_doctor(ws, args):
     say()
     say("everything checks out" if not bad else f"{bad} problem(s) above")
     return 1 if bad else 0
+
+
+def print_needs(needs):
+    for n in needs:
+        mark = "ok " if n.ok else ("-> " if n.can else "!! ")
+        say(f"  {mark} {n.label:<34} {n.detail}")
+
+
+def cmd_setup(ws, args):
+    """What a first bot needs, done where it can be and said where not."""
+    from . import firstrun
+    say("Setting up this machine for Masurium:")
+    print_needs(firstrun.needs(ws))
+    say()
+    left = cancellable(lambda cancel: firstrun.run(
+        ws, host=args.host, port=args.port, token=args.token, owner=args.owner, server=args.server,
+        game_port=args.game_port, download_them=not args.no_download, test=not args.no_check,
+        on_event=print_event, cancel=cancel))
+    say()
+    print_needs(firstrun.needs(ws))
+    say()
+    if left:
+        say(f"{len(left)} thing(s) still to do above (!! is yours to do; -> setup does it)")
+        return 1
+    say("ready: create a bot with  masurium.py create <player> <server>  or in the window,  masurium.py gui")
+    return 0
 
 
 def cmd_migrate(ws, args):
@@ -457,6 +484,18 @@ def build_parser():
     c.add_argument("jar", nargs="?", help="a jar to deploy instead of the core, such as an add-on's")
     c.set_defaults(fn=cmd_deploy_mod)
     sub.add_parser("doctor", help="check the machine, the folders and the servers").set_defaults(fn=cmd_doctor)
+
+    c = sub.add_parser("setup", help="get this machine ready for its first bot: downloads, the way to the "
+                                     "server, the first server (asks what it needs)")
+    c.add_argument("--host", help="where the server's Masurium mod listens")
+    c.add_argument("--port", help="its port (8477 unless changed)")
+    c.add_argument("--token", help="its token (`token` in the masurium.properties next to the server's jar)")
+    c.add_argument("--owner", help="your player name, the bots' owner")
+    c.add_argument("--server", help="a name for the first server, such as my-server")
+    c.add_argument("--game-port", help="its game port (25565 unless changed)")
+    c.add_argument("--no-download", action="store_true", help="do not download HeadlessMC nor hmc-specifics")
+    c.add_argument("--no-check", action="store_true", help="save the way to the server without asking it")
+    c.set_defaults(fn=cmd_setup)
 
     c = sub.add_parser("migrate", help="fold the bots kept apart into their instances (a backup first)")
     c.add_argument("--dry-run", action="store_true", help="only say what it would do")

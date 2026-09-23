@@ -56,6 +56,13 @@ def heap_gb(text):
     return n if unit == "g" else n / 1024
 
 
+def env_keys(values):
+    """What a server.env must say: the token too, unless the server mod is on
+    this same machine, where it may listen without one."""
+    local = values.get("MASURIUM_HOST") in ("127.0.0.1", "localhost", "::1")
+    return ("MASURIUM_HOST", "MASURIUM_PORT") + (() if local else ("MASURIUM_TOKEN",))
+
+
 def checks(ws):
     """Every check, as Check(label, ok, detail). The order is the order in
     which things break: what is missing first, what would fail later last."""
@@ -96,8 +103,7 @@ def checks(ws):
         add("server.env", None, f"{ws.env_file} does not exist; not needed, every server has its own")
     elif ws.env_file.is_file():
         values = ws.env_values()
-        missing = [k for k in ("MASURIUM_HOST", "MASURIUM_PORT", "MASURIUM_TOKEN")
-                   if not values.get(k)]
+        missing = [k for k in env_keys(values) if not values.get(k)]
         add("server.env", not missing, f"{ws.env_file}" + (f": missing {', '.join(missing)}" if missing else ""))
         if not missing:
             api = ws.api()
@@ -166,7 +172,7 @@ def checks(ws):
         if s.env_file.is_file():
             its_mods = None
             own = read_env_file(s.env_file)
-            missing = [k for k in ("MASURIUM_HOST", "MASURIUM_PORT", "MASURIUM_TOKEN") if not own.get(k)]
+            missing = [k for k in env_keys(own) if not own.get(k)]
             if not WINDOWS and s.env_file.stat().st_mode & 0o077:
                 add(f"servers/{slug}: server.env", False,
                     f"{s.env_file} can be read by other users, and it holds the token: chmod 600 it")
