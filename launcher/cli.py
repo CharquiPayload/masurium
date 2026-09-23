@@ -41,18 +41,25 @@ def cancellable(run):
     whatever the operation was doing."""
     cancel = Cancel()
     outcome = {}
+    finished = threading.Event()
 
     def work():
         try:
             outcome["value"] = run(cancel)
         except BaseException as e:          # handed to the waiting thread as it came
             outcome["error"] = e
+        finally:
+            finished.set()
 
     worker = threading.Thread(target=work, name="operation", daemon=True)
     worker.start()
-    while worker.is_alive():
+    # Waited for through an Event the operation sets, not through join(): on
+    # Python 3.12 and older a Ctrl+C that lands inside join() leaves the thread
+    # looking finished while it runs, and the command left at once, exit code
+    # 0, with the game it had launched still loading and nobody stopping it.
+    while not finished.is_set():
         try:
-            worker.join(0.2)
+            finished.wait(0.2)
         except KeyboardInterrupt:
             if cancel.is_set():
                 raise

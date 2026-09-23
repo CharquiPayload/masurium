@@ -2338,9 +2338,16 @@ def tests_masurium_update():
           "git pull" in updates.how_to_update(TMP / "clone")
           and ".deb" in updates.how_to_update("/opt/masurium-launcher/app")
           and "PKGBUILD" in updates.how_to_update("/usr/share/masurium-launcher")
-          and updates.ONE_LINE in updates.how_to_update(TMP / "unpacked"))
+          and updates.one_line() in updates.how_to_update(TMP / "unpacked"))
+    check("each platform's installer is run its way: sh for install.sh, PowerShell for install.ps1",
+          updates.installer_command("x/install.sh") == ["sh", str(pathlib.Path("x/install.sh"))]
+          and updates.installer_command("x/install.ps1")[:1] == ["powershell"]
+          and "-File" in updates.installer_command("x/install.ps1"))
 
-    print("\n...and a copy install.sh made updates itself, when asked")
+    # The installer of this platform, as a release carries it: install.sh, or
+    # install.ps1 on Windows, which has no sh.
+    marker = "install.ps1" if os.name == "nt" else "install.sh"
+    print(f"\n...and a copy {marker} made updates itself, when asked")
     import hashlib
     import tarfile
     release = TMP / "release"
@@ -2349,7 +2356,10 @@ def tests_masurium_update():
     stage.mkdir(parents=True)
     ran = TMP / "update-ran"
     ran.unlink(missing_ok=True)
-    (stage / "install.sh").write_text(f'#!/bin/sh\necho "installed $*" > "{ran}"\n')
+    if marker == "install.ps1":
+        (stage / marker).write_text(f'Set-Content -Path "{ran}" -Value "installed"\n')
+    else:
+        (stage / marker).write_text(f'#!/bin/sh\necho "installed $*" > "{ran}"\n')
     tarball = release / "masurium-launcher-9.9.9.tar.gz"
     with tarfile.open(tarball, "w:gz") as t:
         t.add(stage, arcname="masurium-launcher-9.9.9")
@@ -2358,13 +2368,14 @@ def tests_masurium_update():
     app = TMP / "installed-app"
     app.mkdir(exist_ok=True)
     e = fails(updates.install_latest, base=release.as_uri(), root=app)
-    check("a copy install.sh did not make is not updated from here: it is told how",
+    check("a copy no installer made is not updated from here: it is told how",
           e is not None and e.code == "not_install_sh" and not ran.exists(), told(e))
-    (app / updates.INSTALLER).write_text("install.sh\n")
-    check("...one it made is, and is told so", updates.made_by_install_sh(app)
-          and "Update now" in updates.how_to_update(app) and updates.ONE_LINE in updates.how_to_update(app))
+    (app / updates.INSTALLER).write_text(marker + "\n")
+    check("...one it made is, and is told so", updates.made_by_installer(app)
+          and "Update now" in updates.how_to_update(app)
+          and updates.one_line(marker == "install.ps1") in updates.how_to_update(app))
     got = updates.install_latest(base=release.as_uri(), root=app)
-    check("the latest release is downloaded, checked, and its own install.sh installs it",
+    check(f"the latest release is downloaded, checked, and its own {marker} installs it",
           got == "9.9.9" and ran.is_file() and ran.read_text().strip() == "installed", got)
     ran.unlink(missing_ok=True)
     (release / "SHA256SUMS").write_text(f"{'1' * 64}  masurium-launcher-9.9.9.tar.gz\n")
@@ -2643,16 +2654,9 @@ def tests_firstrun():
           code == 1 and "still to do" in text and "HeadlessMC" in text, text)
 
 
-def tests_install():
-    print("\nInstaller: the program for one user, its command and its menu entry")
-    home = TMP / "install-home"
-    home.mkdir(exist_ok=True)
-    probe = subprocess.run([sys.executable, "-m", "venv", str(TMP / "venv-probe")], capture_output=True)
-    if probe.returncode != 0:
-        print("  --   skipped: this Python cannot make environments (python3-venv missing)")
-        return
-    # A stand-in for PySide6, offered to pip from a folder: the installer's own
-    # steps are what is tested, not a 100 MB download.
+def stand_in_pyside():
+    """A stand-in for PySide6, offered to pip from a folder: the installers'
+    own steps are what is tested, not a 100 MB download."""
     import zipfile
     wheels = TMP / "wheels"
     wheels.mkdir(exist_ok=True)
@@ -2663,6 +2667,42 @@ def tests_install():
         z.writestr(f"{info}/WHEEL", "Wheel-Version: 1.0\nGenerator: tests\nRoot-Is-Purelib: true\n"
                                     "Tag: py3-none-any\n")
         z.writestr(f"{info}/RECORD", "")
+    return wheels
+
+
+def a_release(release, installer):
+    """A release as a folder, reached as a file:// URL the way the one-line
+    installer reaches GitHub's: its tarball, and its SHA256SUMS. Returns the
+    SHA256SUMS text."""
+    import hashlib
+    import tarfile
+    shutil.rmtree(release, ignore_errors=True)
+    stage = release / "masurium-launcher-9.9.9"
+    skip = shutil.ignore_patterns("__pycache__")
+    for d in ("launcher", "mcp"):
+        shutil.copytree(REPO / d, stage / d, ignore=skip)
+    for f in (installer, "README.md", "LICENSE"):
+        shutil.copy2(REPO / f, stage / f)
+    tarball = release / "masurium-launcher-9.9.9.tar.gz"
+    with tarfile.open(tarball, "w:gz") as t:
+        t.add(stage, arcname=stage.name)
+    shutil.rmtree(stage)
+    sums = f"{hashlib.sha256(tarball.read_bytes()).hexdigest()}  {tarball.name}\n"
+    (release / "SHA256SUMS").write_text(sums)
+    return sums
+
+
+def tests_install():
+    if os.name == "nt":
+        return tests_install_windows()
+    print("\nInstaller: the program for one user, its command and its menu entry")
+    home = TMP / "install-home"
+    home.mkdir(exist_ok=True)
+    probe = subprocess.run([sys.executable, "-m", "venv", str(TMP / "venv-probe")], capture_output=True)
+    if probe.returncode != 0:
+        print("  --   skipped: this Python cannot make environments (python3-venv missing)")
+        return
+    wheels = stand_in_pyside()
     env = {k: v for k, v in os.environ.items() if not k.startswith(("XDG_", "PIP_"))}
     env.update(HOME=str(home), PIP_NO_INDEX="1", PIP_FIND_LINKS=str(wheels),
                PATH=str(home / ".local" / "bin") + os.pathsep + env.get("PATH", ""))
@@ -2681,7 +2721,7 @@ def tests_install():
     ran = subprocess.run([str(command), "--help"], capture_output=True, text=True, env=env)
     check("...the `masurium` command runs it", ran.returncode == 0 and "setup" in ran.stdout, ran.stderr)
     check("...and the copy says install.sh made it: it can update itself",
-          updates.made_by_install_sh(prefix / "app"))
+          updates.made_by_installer(prefix / "app"))
     text = desktop.read_text() if desktop.is_file() else ""
     check("...an entry in the applications menu, opening the window, with the Ma icon",
           "Name=Masurium Launcher" in text and f'Exec="{command}" gui' in text and "Icon=masurium-launcher" in text
@@ -2708,22 +2748,8 @@ def tests_install():
 
     # The one-line installer: install.sh piped into sh, anywhere, gets the
     # latest release. Here the release is a folder, reached as a file:// URL.
-    import hashlib
-    import tarfile
     release = TMP / "install-release"
-    shutil.rmtree(release, ignore_errors=True)
-    stage = release / "masurium-launcher-9.9.9"
-    skip = shutil.ignore_patterns("__pycache__")
-    for d in ("launcher", "mcp"):
-        shutil.copytree(REPO / d, stage / d, ignore=skip)
-    for f in ("install.sh", "README.md", "LICENSE"):
-        shutil.copy2(REPO / f, stage / f)
-    tarball = release / "masurium-launcher-9.9.9.tar.gz"
-    with tarfile.open(tarball, "w:gz") as t:
-        t.add(stage, arcname=stage.name)
-    shutil.rmtree(stage)
-    sums = f"{hashlib.sha256(tarball.read_bytes()).hexdigest()}  {tarball.name}\n"
-    (release / "SHA256SUMS").write_text(sums)
+    sums = a_release(release, "install.sh")
     elsewhere = TMP / "somewhere-else"
     elsewhere.mkdir(exist_ok=True)
 
@@ -2734,7 +2760,7 @@ def tests_install():
     r = piped("--no-gui")
     check("piped from anywhere (curl ... | sh), install.sh gets the latest release, checks it and installs it",
           r.returncode == 0 and "checked" in r.stdout and (prefix / "app" / "launcher" / "masurium.py").is_file()
-          and command.exists() and updates.made_by_install_sh(prefix / "app"), r.stdout + r.stderr)
+          and command.exists() and updates.made_by_installer(prefix / "app"), r.stdout + r.stderr)
     run("--uninstall")
     (release / "SHA256SUMS").write_text(sums.replace(sums[:8], "00000000"))
     r = piped("--no-gui")
@@ -2742,11 +2768,76 @@ def tests_install():
           r.returncode != 0 and "checksum" in r.stderr and not prefix.exists(), r.stdout + r.stderr)
 
 
+def tests_install_windows():
+    print("\nInstaller for Windows: the program for one user, its command and its Start menu entry")
+    # Every folder it writes to is one of these, under TMP; and it is told
+    # not to touch this user's PATH, which lives in the registry.
+    local, roaming, profile = TMP / "win-local", TMP / "win-roaming", TMP / "win-profile"
+    for d in (local, roaming, profile):
+        d.mkdir(exist_ok=True)
+    wheels = stand_in_pyside()
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PIP_", "MASURIUM_"))}
+    env.update(LOCALAPPDATA=str(local), APPDATA=str(roaming), USERPROFILE=str(profile),
+               MASURIUM_USER_PATH="skip", PIP_NO_INDEX="1", PIP_FIND_LINKS=str(wheels))
+    powershell = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+    run = lambda *a: subprocess.run(powershell + [str(REPO / "install.ps1"), *a], capture_output=True, text=True,
+                                    env=env, timeout=600)
+    prefix = local / "Programs" / "masurium-launcher"
+    command = prefix / "bin" / "masurium.cmd"
+    shortcut = roaming / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Masurium Launcher.lnk"
+    r = run()
+    check("install.ps1 installs the program in its own folder, with an environment of its own",
+          r.returncode == 0 and (prefix / "app" / "launcher" / "masurium.py").is_file()
+          and (prefix / "app" / "mcp" / "bridge.py").is_file()
+          and (prefix / "venv" / "Scripts" / "python.exe").exists(), r.stdout + r.stderr)
+    check("...Qt for the window goes into that environment", r.returncode == 0 and subprocess.run(
+        [str(prefix / "venv" / "Scripts" / "python.exe"), "-c", "import pyside6_stand_in"]).returncode == 0)
+    ran = subprocess.run(["cmd", "/c", str(command), "--help"], capture_output=True, text=True, env=env)
+    check("...the `masurium` command runs it", ran.returncode == 0 and "setup" in ran.stdout, ran.stdout + ran.stderr)
+    check("...and the copy says install.ps1 made it: it can update itself",
+          updates.installer_of(prefix / "app") == "install.ps1")
+    check("...an entry in the Start menu, with the Ma icon",
+          shortcut.is_file() and (prefix / "app" / "launcher" / "gui" / "appicon" / "masurium-launcher.ico").is_file())
+    (prefix / "app" / "stale-file").write_text("from an older version")
+    r = run()
+    check("run again, it updates: the old program goes whole", r.returncode == 0
+          and not (prefix / "app" / "stale-file").exists(), r.stdout + r.stderr)
+    data = local / "Masurium" / "instances"
+    data.mkdir(parents=True, exist_ok=True)
+    r = run("-Uninstall")
+    check("-Uninstall takes the program, its command and its Start menu entry away",
+          r.returncode == 0 and not prefix.exists() and not shortcut.exists(), r.stdout + r.stderr)
+    check("...and leaves the instances alone", data.is_dir())
+    r = run("-NoGui")
+    check("-NoGui: the command line alone, no Start menu entry", r.returncode == 0 and command.exists()
+          and not shortcut.exists(), r.stdout + r.stderr)
+    run("-Uninstall")
+
+    # The one-line installer: install.ps1 on its own, as irm ... | iex has it,
+    # gets the latest release. Here the release is a folder, as a file:// URL.
+    release = TMP / "install-release-windows"
+    sums = a_release(release, "install.ps1")
+    alone = TMP / "install-ps1-alone"
+    alone.mkdir(exist_ok=True)
+    shutil.copy2(REPO / "install.ps1", alone / "install.ps1")
+    piped = lambda *a: subprocess.run(powershell + [str(alone / "install.ps1"), *a], capture_output=True, text=True,
+                                      timeout=600, env=dict(env, MASURIUM_RELEASE_URL=release.as_uri()))
+    r = piped("-NoGui")
+    check("from anywhere (irm ... | iex), install.ps1 gets the latest release, checks it and installs it",
+          r.returncode == 0 and "checked" in r.stdout and (prefix / "app" / "launcher" / "masurium.py").is_file()
+          and command.exists() and updates.installer_of(prefix / "app") == "install.ps1", r.stdout + r.stderr)
+    run("-Uninstall")
+    (release / "SHA256SUMS").write_text(sums.replace(sums[:8], "00000000"))
+    r = piped("-NoGui")
+    check("...a tarball that is not what the release says is refused: nothing is installed",
+          r.returncode != 0 and "checksum" in (r.stdout + r.stderr) and not prefix.exists(), r.stdout + r.stderr)
+
+
 def tests_arch_package():
     print("\nArch package: what its PKGBUILD puts where")
     bash = shutil.which("bash")
-    if not bash:
-        print("  --   skipped: no bash to run the PKGBUILD with")
+    if not bash or os.name == "nt":
+        print("  --   skipped: no bash to run the PKGBUILD with" if not bash else "  --   skipped: Arch's, not Windows'")
         return
     version = "9.9.9"
     base = TMP / "arch"

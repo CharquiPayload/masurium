@@ -556,10 +556,10 @@ def tests(app):
     win.news()
     wait(lambda: False, 1)
     check("...and is not said again for that release", "release" not in win.notices)
-    real_made, real_install = updates.made_by_install_sh, updates.install_latest
+    real_made, real_install = updates.made_by_installer, updates.install_latest
     installed, restarted = [], []
     try:
-        updates.made_by_install_sh = lambda root=None: True
+        updates.made_by_installer = lambda root=None: True
         updates.install_latest = lambda on_event=None, cancel=None: installed.append(1) or "99.0.1"
         win.restart = lambda: restarted.append(1)
         (ws.state_dir / updates.CACHE).unlink(missing_ok=True)
@@ -572,7 +572,7 @@ def tests(app):
         check("...asked, it installs the release, and offers to restart the launcher",
               wait(lambda: installed and restarted) and "release" not in win.notices, (installed, restarted))
     finally:
-        updates.made_by_install_sh, updates.install_latest = real_made, real_install
+        updates.made_by_installer, updates.install_latest = real_made, real_install
         del win.restart
         updates.fetch_latest = LATEST
         (ws.state_dir / updates.CACHE).unlink(missing_ok=True)

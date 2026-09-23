@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
         if release and self.store.value("notices/release", "") != release[1]:
             have, new, page = release
             page_button = ("What is new", lambda: QDesktopServices.openUrl(QUrl(page)))
-            if updates.made_by_install_sh():
+            if updates.made_by_installer():
                 self.notice("release", "spark", f"Masurium {new} is out; this launcher is {have}.",
                             [("Update now…", lambda: self.update_launcher(new)), page_button], remember=new)
             else:
