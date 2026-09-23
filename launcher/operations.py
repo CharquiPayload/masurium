@@ -57,8 +57,9 @@ def create_bot(ws, name, key=None, account=None, on_event=None):
     if bot.dir.exists():
         raise Fail(f"{bot.dir} already exists.", code="exists")
     account = account or ws.environ.get("MARIONETTE_ACCOUNT") or "online"
-    if account not in ("online", "offline"):
-        raise Fail(f"the account must be online or offline, not '{account}'.", code="bad_account")
+    if account not in ("online", "offline") and not ws.account(account).exists():
+        raise Fail(f"the account is online, offline or one of the accounts ({', '.join(ws.account_keys()) or 'none yet'}),"
+                   f" not '{account}'.", code="bad_account")
     try:
         bot.dir.mkdir(parents=True)
     except FileExistsError:
@@ -142,6 +143,28 @@ def clone_bot(ws, key, new_key=None, on_event=None):
     return dst
 
 
+def delete_instance(ws, key, on_event=None):
+    """An instance out of the launcher, its game folder and all: what it
+    keeps about its world, its logs, its extra mods. Its bot stays. Refused
+    while it runs, and while it leads a dependency group (the group goes
+    first, or gets another leader). A guard leaves its group."""
+    report = report_to(on_event)
+    inst = ws.instance(key)
+    if client_running(inst) or bridge_pid(inst):
+        raise Fail(f"{inst.key} is running: stop it first.", code="running")
+    group, place = groups.dependency_of(inst)
+    if place == "leader":
+        raise Fail(f"{inst.key} leads {group.id}: delete that group first, or it would guard nobody.",
+                   code="leader")
+    bot = inst.data.get("bot", "?")          # read before its instance.json goes with the folder
+    parent = groups.parent_of(ws, inst)
+    if parent is not None:
+        group_remove(ws, parent.key, [f"instance:{inst.key}"], on_event=on_event)
+    leave_place(inst)
+    shutil.rmtree(inst.dir)
+    report.step(f"instance {inst.key} deleted (its bot {bot} stays)", stage="deleted")
+
+
 def clone_instance(ws, key, new_key=None, slug=None, on_event=None):
     """The same bot again, on this server or another: the instance's own
     settings, extra mods, and what it keeps about its world (its config
@@ -192,7 +215,7 @@ def login_command(inst):
     of one of the launcher's accounts is logged in through the account
     (`account add`), and is refused here."""
     value = settings.get(inst, "account")
-    if value == "offline":
+    if accounts.plays_offline(inst.ws, value):
         return None
     if accounts.kind(value) == "account":
         raise Fail(f"{inst.key} plays with the account {value}: its login is the account's, "
@@ -202,8 +225,12 @@ def login_command(inst):
 
 
 def account_of(target):
-    """("offline" | "online" | an Account) for what a bot or instance plays with."""
+    """("offline" | "online" | an Account) for what a bot or instance plays
+    with. An offline account is "offline": an offline player may play in two
+    games at once, on two servers."""
     value = settings.get(target, "account")
+    if accounts.plays_offline(target.ws, value):
+        return "offline"
     return target.ws.account(value) if accounts.kind(value) == "account" else value
 
 
@@ -849,6 +876,14 @@ def add_account(ws, run_login, key=None, on_event=None):
     account = accounts.finish_login(ws, folder, key)
     report.step(f"account {account.key}: plays as {account.name}", stage="added")
     report.detail(f"a bot plays with it with:  marionette.py set --bot <bot> account {account.key}")
+    return account
+
+
+def add_offline_account(ws, name, key=None, on_event=None):
+    """An offline account: a player name, for private servers."""
+    report = report_to(on_event)
+    account = accounts.add_offline(ws, name, key)
+    report.step(f"offline account {account.key}: plays as {account.name}", stage="added")
     return account
 
 

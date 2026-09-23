@@ -21,7 +21,10 @@ every change, so they are an output, never edited by hand.
 import json
 import re
 import shutil
+import shlex
 from dataclasses import dataclass
+
+import pathlib
 
 from . import groups
 from .bots import Character, Instance
@@ -104,6 +107,34 @@ def _check_heap(target, value):
     return None
 
 
+def _check_java(target, value):
+    found = shutil.which(value) if not ("/" in value or "\\" in value) else (value if pathlib.Path(value).is_file() else None)
+    if not found:
+        return "a java that is there: a path to a java executable, or a name on the PATH"
+    return None
+
+
+def _check_java_args(target, value):
+    try:
+        words = shlex.split(value)
+    except ValueError as e:
+        return f"arguments as a shell would split them ({e})"
+    if '"' in value or any(not w.startswith("-") for w in words):
+        return "JVM flags, each starting with -, such as -XX:+UseZGC, without quotes"
+    if any(w.startswith("-Xmx") for w in words):
+        return "the heap is its own setting (heap), not a flag here"
+    return None
+
+
+def _java_default(target):
+    return target.ws.java_command()[0]
+
+
+def java_command(inst):
+    """The Java an instance's game runs on (its `java` setting), as a command."""
+    return [get(inst, "java")]
+
+
 def _owner_default(target):
     return target.ws.env_values().get("MARIONETTE_OWNER", "")
 
@@ -127,6 +158,10 @@ SETTINGS = {s.key: s for s in [
             ("opus medium", "opus high", "sonnet", "sonnet low", "haiku low", "fable"), applies="bridge"),
     Setting("owner", "the player it belongs to: their delicate orders, /marionette bot anywhere",
             _owner_default, applies="now"),
+    Setting("java", "the Java its game runs on: a path to a java executable, or a name on the PATH "
+            "(NeoForge 21.1 wants Java 21)", _java_default, applies="start", layers=(INSTANCE, GROUP, GLOBAL)),
+    Setting("java_args", "extra flags for its Java (the JVM), such as -XX:+UseZGC; the heap is its own "
+            "setting", "", applies="start", layers=(INSTANCE, GROUP, GLOBAL)),
     Setting("fast_responses", "its brain writes ahead of time, in its voice and language, the few things it "
             "says without thinking (warning of a creeper, being cornered, shutting down); again when its "
             "personality changes. No: those are said in plain English", "yes", ("no", "yes"), applies="bridge"),
@@ -137,7 +172,7 @@ SETTINGS = {s.key: s for s in [
 ]}
 
 CHECKS = {"account": _check_account, "port": _check_port, "owner": _check_owner,
-          "model": _check_model, "heap": _check_heap}
+          "model": _check_model, "heap": _check_heap, "java": _check_java, "java_args": _check_java_args}
 # Case matters in names (a player, a bot as the game shows it); in codes and
 # sizes it does not.
 LOWERCASE = ("account", "heap", "ignore_global", "lock", "role", "fast_responses")
@@ -417,7 +452,10 @@ def render(inst):
     if cfg.parent.is_dir():
         props = read_java_properties(cfg)
         props.setdefault("hmc.jline.enabled", "false")
-        props["hmc.offline"] = "true" if get(inst, "account") == "offline" else "false"
+        from .accounts import plays_offline
+        props["hmc.offline"] = "true" if plays_offline(inst.ws, get(inst, "account")) else "false"
+        # The Java HeadlessMC launches the game with: the instance's.
+        props["hmc.java.versions"] = shutil.which(get(inst, "java")) or get(inst, "java")
         props["hmc.offline.username"] = inst.name
         props.setdefault("hmc.invert.command.modifiers", "false")
         props["hmc.gamedir"] = str(inst.gamedir)
@@ -425,7 +463,7 @@ def render(inst):
     # Its login: the account's, through a link, or one of its own.
     from .accounts import kind, link_login, unlink_login
     value = get(inst, "account")
-    if kind(value) == "account" and inst.ws.account(value).exists():
+    if kind(value) == "account" and inst.ws.account(value).exists() and not inst.ws.account(value).offline:
         link_login(inst, inst.ws.account(value))
     elif (inst.hmc / "HeadlessMC").is_dir():
         unlink_login(inst)

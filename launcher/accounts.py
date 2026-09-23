@@ -1,5 +1,9 @@
 """Minecraft accounts, logged in once and shared by the instances that use them.
 
+An account is a player: online, a real, purchased Minecraft Java account
+logged in once; or offline, only a player name, for private servers with
+online-mode=false (no login at all). Bots and instances name one.
+
 An online bot plays with a real, purchased Minecraft Java account. HeadlessMC
 keeps the login of an account in its own folder (HeadlessMC/auth/.accounts.json,
 a path it does not let be changed), and renews it every time it launches the
@@ -61,8 +65,13 @@ class Account:
         """The player name it plays as."""
         return self.data.get("name") or self.key
 
+    @property
+    def offline(self):
+        """An offline account: a player name and nothing to log in."""
+        return bool(self.data.get("offline"))
+
     def logged_in(self):
-        return bool(players_in(self.logins))
+        return self.offline or bool(players_in(self.logins))
 
     def users(self):
         """The bots and instances whose account this is, by their own layer."""
@@ -102,6 +111,29 @@ def kind(value):
     """What an `account` setting says: OFFLINE, ONLINE (a login kept in the
     instance's own HeadlessMC, the way before accounts), or an account's key."""
     return value if value in (OFFLINE, ONLINE) else "account"
+
+
+def plays_offline(ws, value):
+    """Whether an `account` setting means playing offline: `offline`, or an
+    offline account."""
+    if value == OFFLINE:
+        return True
+    return kind(value) == "account" and ws.account(value).exists() and ws.account(value).offline
+
+
+def add_offline(ws, name, key=None):
+    """An offline account: accounts/<key>/account.json with its player name.
+    Nothing to log in; it is listed and chosen like the others."""
+    from .bots import check_key, check_name
+    check_name(name)
+    key = (key or name).lower()
+    check_key(key, "account")
+    account = Account(ws, key)
+    if account.dir.exists():
+        raise Fail(f"there is already an account {key}.", code="exists")
+    account.dir.mkdir(parents=True)
+    account.json.write_text(json.dumps({"name": name, "offline": True}, indent=2) + "\n", encoding="utf-8")
+    return account
 
 
 def prepare_login(ws):

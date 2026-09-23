@@ -38,6 +38,9 @@ A program uses it like this:
     ws = Workspace.from_environment()
     operations.start(ws.instance("alice"), on_event=print)
 """
+# The release, the same as the mod's (mod/build.gradle): one number for both.
+__version__ = "1.0.0"
+
 from . import doctor, operations, settings
 from .bots import Character, Instance
 from .events import Cancel, Event, Fail

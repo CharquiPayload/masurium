@@ -216,8 +216,8 @@ def checks(ws):
         account = ws.account(key)
         bots_, insts_ = account.users()
         add(f"accounts/{key}", account.logged_in(),
-            (f"plays as {account.name}" if account.logged_in() else "its login is gone (HeadlessMC deletes "
-             "one it could not renew): remove it and add it again")
+            (f"plays as {account.name}" + (", offline" if account.offline else "") if account.logged_in()
+             else "its login is gone (HeadlessMC deletes one it could not renew): remove it and add it again")
             + (f"; used by {', '.join(bots_ + insts_)}" if bots_ or insts_ else ""))
 
     keys = ws.bot_keys()

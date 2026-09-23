@@ -106,6 +106,14 @@ def cmd_clone(ws, args):
     next_steps(inst)
 
 
+def cmd_delete(ws, args):
+    """marionette.py delete alice --yes   the instance, its game folder and all; its bot stays"""
+    if not args.yes:
+        raise Fail(f"this deletes the instance {args.instance}, its game folder and all (what it keeps about its "
+                   "world, its logs, its extra mods); its bot stays. Say it again with --yes.", code="confirm")
+    operations.delete_instance(ws, args.instance, print_event)
+
+
 def cmd_clone_bot(ws, args):
     bot = operations.clone_bot(ws, args.bot, args.as_, print_event)
     say(f"    an instance of it:  marionette.py create {bot.name} <server> --bot {bot.key}")
@@ -217,8 +225,12 @@ def cmd_set(ws, args):
 def cmd_account(ws, args):
     """marionette.py account                  every account, whether it is logged in, who uses it
     marionette.py account add [--as KEY]     log one in, once (HeadlessMC opens: login, then quit)
+    marionette.py account add --offline NAME an offline one: a player name, for private servers
     marionette.py account remove KEY         out of the launcher, login and all"""
     if args.action == "add":
+        if args.offline:
+            operations.add_offline_account(ws, args.offline, args.as_, print_event)
+            return 0
         operations.add_account(ws, lambda argv, cwd, env: subprocess.call(argv, cwd=str(cwd), env=env),
                                args.as_, print_event)
         return 0
@@ -234,7 +246,7 @@ def cmd_account(ws, args):
     for account, logged, bots, insts in rows:
         users = ", ".join([f"bot {b}" for b in bots] + [f"instance {i}" for i in insts]) or "nobody"
         say(f"  {account.key:<16} plays as {account.name:<16} "
-            f"{'logged in' if logged else 'NOT logged in':<14} used by {users}")
+            f"{'offline' if account.offline else 'logged in' if logged else 'NOT logged in':<14} used by {users}")
     return 0
 
 
@@ -413,6 +425,11 @@ def build_parser():
     c.add_argument("--as", dest="as_", metavar="INSTANCE", help="its name (default: <instance>-1, -2...)")
     c.set_defaults(fn=cmd_clone)
 
+    c = sub.add_parser("delete", help="an instance out of the launcher, its folder and all (its bot stays)")
+    c.add_argument("instance")
+    c.add_argument("--yes", action="store_true", help="yes, delete it")
+    c.set_defaults(fn=cmd_delete)
+
     c = sub.add_parser("clone-bot", help="a new bot from another: its settings and personality")
     c.add_argument("bot")
     c.add_argument("--as", dest="as_", metavar="BOT", help="its name (default: <bot>-1, -2...)")
@@ -476,6 +493,7 @@ def build_parser():
     c.add_argument("action", nargs="?", choices=("list", "add", "remove"), default="list")
     c.add_argument("key", nargs="?", metavar="account", help="for remove: which")
     c.add_argument("--as", dest="as_", metavar="ACCOUNT", help="for add: its name here (default: the player's)")
+    c.add_argument("--offline", metavar="PLAYER", help="for add: an offline account with this player name")
     c.set_defaults(fn=cmd_account)
 
     c = sub.add_parser("rules", help="see or change a bot's rules: toggles, food it will not eat, "

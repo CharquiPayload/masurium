@@ -113,7 +113,18 @@ setting ignored it without a word.
   cancelled; it is tested drawn offscreen. Instances and groups move by
   dragging them onto a group; a dependency group is drawn as its leader with
   its guards hanging from it; a bot can have a picture; colour styles (dark
-  and light, lavender and classic) in the launcher's own settings.
+  and light, lavender and classic) in the launcher's own settings. It is laid
+  out as Prism Launcher's (a bar on top, instances as faces by group, the
+  selected one's actions on the right, Edit Instance and Settings windows with
+  their pages down the left), with icons of its own, drawn in code; motion
+  (animations and animated icons) can be turned off.
+- Offline accounts (`account add --offline NAME`): a player name, listed and
+  chosen like a Microsoft account, which may play in several games at once.
+- `java` and `java_args`: the Java an instance's game runs on and extra JVM
+  flags, per instance, per group or globally.
+- `delete <instance> --yes` (and Delete in the window): an instance out of the
+  launcher, its folder and all (its bot stays); refused while it runs or leads
+  a dependency group.
 - `fast_responses`: whether a bot's brain writes its fast responses (what it
   says without thinking) ahead of time; they are written again when its
   personality changes. Off, they are said in plain English.

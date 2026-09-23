@@ -5,11 +5,14 @@ person sees on Windows is the one that was looked at on Linux. A preset is a
 handful of colours; the stylesheet and the palette are made from it, and
 switching presets restyles the open window at once (the launcher's settings).
 """
+import atexit
 import os
+import shutil
+import tempfile
 import zlib
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPalette, QPen, QPixmap
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPalette, QPen, QPixmap, QPolygonF
 
 PRESETS = {
     "Lavender dark": dict(
@@ -61,7 +64,37 @@ def __getattr__(name):
     raise AttributeError(name)
 
 
+_ARROWS = None
+
+
+def arrows(colour):
+    """Small arrows for combo boxes, spin boxes and menu buttons, drawn in the
+    preset's colour: a stylesheet that restyles those parts only takes its
+    arrows as image files. Kept in a folder of this process's own, removed
+    when it ends."""
+    global _ARROWS
+    if _ARROWS is None:
+        _ARROWS = tempfile.mkdtemp(prefix="marionette-arrows-")
+        atexit.register(shutil.rmtree, _ARROWS, True)
+    paths = {}
+    for name, points in (("down", ((1, 3), (9, 3), (5, 8))), ("up", ((1, 7), (9, 7), (5, 2)))):
+        path = os.path.join(_ARROWS, f"{name}-{colour.lstrip('#')}.png")
+        if not os.path.exists(path):
+            pm = QPixmap(10, 10)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(colour))
+            p.drawPolygon(QPolygonF([QPointF(x, y) for x, y in points]))
+            p.end()
+            pm.save(path, "PNG")
+        paths[name] = path.replace(os.sep, "/")
+    return paths
+
+
 def stylesheet(c):
+    a = arrows(c["muted"])
     return f"""
 QWidget {{ color: {c['text']}; }}
 QMainWindow, QWidget#page {{ background: {c['base']}; }}
@@ -75,15 +108,30 @@ QScrollArea {{ border: none; background: {c['base']}; }}
 QToolButton#groupHeader {{ color: {c['header']}; font-weight: bold; border: none; background: transparent;
     padding: 6px 4px 2px 2px; text-align: left; }}
 QToolButton#groupHeader[selected="true"] {{ color: {c['accent_light']}; text-decoration: underline; }}
-QFrame#tile {{ background: {c['card']}; border: 1px solid {c['border']}; border-radius: 10px; }}
-QFrame#tile:hover {{ border-color: {c['hover']}; }}
-QFrame#tile[selected="true"] {{ background: {c['tile_selected']}; border: 2px solid {c['accent_light']}; }}
+QFrame#tile {{ background: transparent; border: 1px solid transparent; border-radius: 8px; }}
+QFrame#tile:hover {{ background: {c['card']}; }}
+QFrame#tile[selected="true"] {{ background: {c['tile_selected']}; border: 1px solid {c['accent_light']}; }}
+QLabel#tileName {{ padding: 1px 4px; border-radius: 3px; }}
+QLabel#tileName[selected="true"] {{ background: {c['accent']}; color: white; }}
+QLabel#tileWhere {{ color: {c['muted']}; font-size: 8pt; }}
+QFrame#headerLine {{ color: {c['border']}; background: {c['border']}; max-height: 1px; border: none; }}
+QFrame#side QPushButton {{ background: transparent; border: none; text-align: left; padding: 6px 10px;
+    border-radius: 5px; }}
+QFrame#side QPushButton:hover {{ background: {c['card']}; }}
+QFrame#side QPushButton:disabled {{ color: {c['faint']}; }}
+QFrame#side QPushButton#primary {{ font-weight: bold; color: {c['accent_light']}; background: transparent; }}
+QFrame#side QPushButton#primary:hover {{ background: {c['card']}; }}
+QFrame#side QToolButton#more {{ background: transparent; border: none; border-radius: 5px; padding: 0 6px; }}
+QFrame#side QToolButton#more:hover {{ background: {c['card']}; }}
+QFrame#side QToolButton#more::menu-indicator {{ image: none; }}
+QFrame#side QFrame#sideLine {{ color: {c['border']}; background: {c['border']}; max-height: 1px; border: none; }}
+QListWidget#pages {{ background: {c['panel']}; outline: 0; }}
+QListWidget#pages::item {{ padding: 8px 10px; border: none; }}
 QWidget#section {{ background: {c['section']}; border: 1px solid {c['strong_border']}; border-radius: 10px; }}
 QWidget#dependency {{ background: transparent; border: none; }}
 QWidget#section[drop="true"], QWidget#loose[drop="true"], QWidget#dependency[drop="true"] {{
     background: {c['drop']}; border: 1px dashed {c['accent_light']}; border-radius: 10px; }}
 QToolButton#face {{ border: none; background: transparent; padding: 0; }}
-QLabel#tileName {{ font-weight: bold; }}
 QLabel#muted {{ color: {c['muted']}; }}
 QLabel#title {{ font-weight: bold; font-size: 13pt; }}
 QFrame#side {{ background: {c['panel']}; border-left: 1px solid {c['border']}; }}
@@ -92,7 +140,6 @@ QPushButton {{ background: {c['button']}; border: 1px solid {c['strong_border']}
 QPushButton:hover {{ border-color: {c['hover']}; }}
 QPushButton:pressed {{ background: {c['pressed']}; }}
 QPushButton:disabled {{ color: {c['faint']}; border-color: {c['separator']}; }}
-QFrame#side QPushButton {{ text-align: left; padding: 7px 10px; }}
 QPushButton#primary {{ background: {c['accent']}; border: none; color: white; font-weight: bold; padding: 8px; }}
 QPushButton#primary:hover {{ background: {c['accent_hover']}; }}
 QPushButton#primary:disabled {{ background: {c['switch_off']}; color: {c['muted']}; }}
@@ -101,6 +148,8 @@ QTabWidget::pane {{ border: 1px solid {c['border']}; border-radius: 6px; backgro
 QTabBar::tab {{ background: {c['card']}; padding: 7px 16px; border-top-left-radius: 6px;
     border-top-right-radius: 6px; margin-right: 2px; }}
 QTabBar::tab:selected {{ background: {c['selected']}; }}
+QTreeWidget::item {{ padding: 5px 2px; border-bottom: 1px solid {c['separator']}; }}
+QTreeWidget::item:selected {{ background: {c['selected']}; color: {c['text']}; }}
 QTableWidget, QListWidget, QPlainTextEdit, QTreeWidget {{ background: {c['field']}; border: 1px solid {c['border']};
     border-radius: 6px; gridline-color: {c['border']}; selection-background-color: {c['selected']}; }}
 QListWidget::item {{ padding: 6px 4px; border-bottom: 1px solid {c['separator']}; }}
@@ -110,6 +159,21 @@ QHeaderView::section {{ background: {c['card']}; border: none; padding: 5px; col
     font-weight: bold; }}
 QLineEdit, QComboBox, QSpinBox {{ background: {c['card']}; border: 1px solid {c['strong_border']};
     border-radius: 5px; padding: 5px; }}
+QComboBox {{ padding-right: 24px; }}
+QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: center right; width: 22px; border: none; }}
+QComboBox::down-arrow {{ image: url({a['down']}); width: 10px; height: 10px; }}
+QSpinBox {{ padding-right: 22px; }}
+QSpinBox::up-button, QSpinBox::down-button {{ subcontrol-origin: border; width: 20px; border: none;
+    background: transparent; }}
+QSpinBox::up-button {{ subcontrol-position: top right; }}
+QSpinBox::down-button {{ subcontrol-position: bottom right; }}
+QSpinBox::up-arrow {{ image: url({a['up']}); width: 10px; height: 10px; }}
+QSpinBox::down-arrow {{ image: url({a['down']}); width: 10px; height: 10px; }}
+QToolButton::menu-indicator {{ image: url({a['down']}); subcontrol-origin: padding;
+    subcontrol-position: center right; width: 10px; height: 10px; right: 4px; }}
+QToolBar QToolButton[popupMode="2"] {{ padding-right: 22px; }}
+QToolButton::menu-button {{ border: none; border-left: 1px solid {c['border']}; width: 18px; }}
+QToolButton::menu-arrow {{ image: url({a['down']}); width: 10px; height: 10px; }}
 QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {c['accent_light']}; }}
 QComboBox QAbstractItemView {{ background: {c['card']}; selection-background-color: {c['selected']}; }}
 QMenu {{ background: {c['card']}; border: 1px solid {c['border']}; padding: 4px; }}

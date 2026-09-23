@@ -1,11 +1,11 @@
 """The pieces of the main window: a tile per instance, a collapsible section
 per group, and the layout that lays tiles out in rows that wrap."""
-from PySide6.QtCore import QMimeData, QPoint, QPointF, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QDrag, QPainter, QPen, QPolygonF
+from PySide6.QtCore import Property, QMimeData, QPoint, QPointF, QRect, QSize, Qt, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QDrag, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (QAbstractButton, QApplication, QFrame, QHBoxLayout, QLabel, QLayout, QSizePolicy,
                                QToolButton, QVBoxLayout, QWidget)
 
-from . import theme
+from . import anim, icons, theme
 
 STATE_TEXT = {"in": "in the server", "loading": "loading…", "stopped": "stopped",
               "mute": "in the server, no bridge"}
@@ -103,14 +103,26 @@ class FlowLayout(QLayout):
 
 
 class Switch(QAbstractButton):
-    """On or off, for what is only that: a pill with a knob, lavender when on."""
+    """On or off, for what is only that: a pill with a knob in the accent
+    colour when on. The knob slides, unless motion is off."""
 
     def __init__(self, checked=False, parent=None):
         super().__init__(parent)
         self.setCheckable(True)
         self.setChecked(checked)
+        self._knob = 1.0 if checked else 0.0
         self.setCursor(Qt.PointingHandCursor)
         self.setFixedSize(QSize(40, 22))
+        self.toggled.connect(lambda on: anim.slide(self, b"knob", 1.0 if on else 0.0, 140))
+
+    def _get_knob(self):
+        return self._knob
+
+    def _set_knob(self, value):
+        self._knob = float(value)
+        self.update()
+
+    knob = Property(float, _get_knob, _set_knob)
 
     def sizeHint(self):
         return QSize(40, 22)
@@ -118,17 +130,20 @@ class Switch(QAbstractButton):
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        on, enabled = self.isChecked(), self.isEnabled()
-        track = QColor(theme.ACCENT if on else theme.SWITCH_OFF)
+        enabled = self.isEnabled()
+        off, on = QColor(theme.SWITCH_OFF), QColor(theme.ACCENT)
+        k = max(0.0, min(1.0, self._knob))
+        track = QColor(int(off.red() + (on.red() - off.red()) * k), int(off.green() + (on.green() - off.green()) * k),
+                       int(off.blue() + (on.blue() - off.blue()) * k))
         if not enabled:
             track.setAlpha(90)
         p.setPen(Qt.NoPen)
         p.setBrush(track)
         p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 10, 10)
         d = self.height() - 8
-        x = self.width() - d - 4 if on else 4
+        x = 4 + (self.width() - d - 8) * k
         p.setBrush(QColor("#ffffff" if enabled else "#8a8499"))
-        p.drawEllipse(x, 4, d, d)
+        p.drawEllipse(QPointF(x + d / 2, 4 + d / 2), d / 2, d / 2)
         p.end()
 
 
@@ -145,9 +160,35 @@ def switch_row(text, checked=False):
     return row, sw
 
 
+def face_with_state(face, colour, pulse=None):
+    """A bot's face with a dot in its corner saying how it is doing. `pulse`
+    (0 to 1), while it is busy: a ring that grows out of the dot and fades."""
+    size = face.width()
+    pm = QPixmap(face)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    d = max(10, size // 4)
+    centre = QPointF(size - 1 - d / 2, size - 1 - d / 2)
+    if pulse is not None:
+        ring = QColor(colour)
+        ring.setAlphaF(0.85 * (1 - pulse))
+        pen = QPen(ring)
+        pen.setWidthF(2)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        r = d / 2 + 1 + 5 * pulse
+        p.drawEllipse(centre, r, r)
+    p.setPen(QPen(QColor(theme.BASE), 2))
+    p.setBrush(QColor(colour))
+    p.drawEllipse(centre, d / 2, d / 2)
+    p.end()
+    return pm
+
+
 class InstanceTile(Dragger, QFrame):
-    """One instance: its bot's face, its name, where it plays and how it is
-    doing. Clicked, it is selected; right-clicked, its actions; dragged onto
+    """One instance, Prism's way: its face, a dot on it saying how it is
+    doing, and its name under it (and, small, where it plays). Clicked, it is
+    selected; right-clicked, its actions; double-clicked, edited; dragged onto
     a group, it moves there."""
 
     clicked = Signal(str)
@@ -158,38 +199,38 @@ class InstanceTile(Dragger, QFrame):
         super().__init__(parent)
         self.key = view.key
         self.setObjectName("tile")
-        self.setFixedSize(QSize(224, 82))
+        self.setFixedSize(QSize(128, 116))
         self.setCursor(Qt.PointingHandCursor)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 8, 10, 8)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(4, 6, 4, 4)
+        lay.setSpacing(3)
         self.pic = QLabel()
+        self.pic.setAlignment(Qt.AlignCenter)
         self.face = None
         lay.addWidget(self.pic)
         self._from = None
-        col = QVBoxLayout()
-        col.setSpacing(1)
-        top = QHBoxLayout()
         self.title = QLabel(view.key)
         self.title.setObjectName("tileName")
-        top.addWidget(self.title)
-        top.addStretch()
-        self.dot = QLabel("●")
-        top.addWidget(self.dot)
-        col.addLayout(top)
+        self.title.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.title)
         self.where = QLabel()
-        self.where.setObjectName("muted")
-        col.addWidget(self.where)
-        self.note = QLabel()
-        self.note.setObjectName("muted")
-        col.addWidget(self.note)
-        lay.addLayout(col, 1)
+        self.where.setObjectName("tileWhere")
+        self.where.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.where)
+        lay.addStretch()
+        self.note = QLabel()          # what it is doing, for the tooltip and the tests; not shown
+        self.base = None              # its face without the dot
+        self.colour = None
+        # While it loads or works, its dot pulses (animated icons, in the settings).
+        self.pulse = QVariantAnimation(self)
+        self.pulse.setStartValue(0.0)
+        self.pulse.setEndValue(1.0)
+        self.pulse.setDuration(1300)
+        self.pulse.setLoopCount(-1)
+        self.pulse.valueChanged.connect(lambda v: self.pic.setPixmap(face_with_state(self.base, self.colour, v)))
         self.update_view(view, None)
 
     def update_view(self, view, busy):
-        if self.face != view.icon:
-            self.face = view.icon
-            self.pic.setPixmap(theme.avatar(view.bot or view.name, image=icon_of(view)))
-        self.where.setText(f"{view.name} · {view.server}")
         if busy:
             note, colour = busy + "…", theme.BUSY
         else:
@@ -197,24 +238,44 @@ class InstanceTile(Dragger, QFrame):
             note, colour = STATE_TEXT[state], STATE_COLOUR[state]
             if view.leader:
                 note = f"guard of {view.leader} · {note}" if state != "stopped" else f"guard of {view.leader}"
-        self.note.setText(self.note.fontMetrics().elidedText(note, Qt.ElideRight, 150))
+        signature = (view.icon, colour, theme.current["name"])
+        if self.face != signature:
+            self.face = signature
+            self.base = theme.avatar(view.bot or view.name, 52, image=icon_of(view))
+            self.colour = colour
+            self.pic.setPixmap(face_with_state(self.base, colour))
+        self.set_pulsing(bool(busy) or view.state == "loading")
+        metrics = self.title.fontMetrics()
+        self.title.setText(metrics.elidedText(view.key, Qt.ElideRight, 118))
+        self.where.setText(metrics.elidedText(view.server, Qt.ElideRight, 118))
+        self.note.setText(note)
         self.note.setToolTip(note)
-        self.dot.setStyleSheet(f"color: {colour};")
-        self.setToolTip(f"{view.key}: {view.name} on {view.server}, port {view.port}\nmodel {view.model}, "
-                        f"role {view.role}")
+        self.setToolTip(f"{view.key}: {view.name} on {view.server}, port {view.port}\n{note}\n"
+                        f"model {view.model}, role {view.role}")
+
+    def set_pulsing(self, on):
+        on = on and icons.animated
+        if on and self.pulse.state() != QVariantAnimation.Running:
+            self.pulse.start()
+        elif not on and self.pulse.state() == QVariantAnimation.Running:
+            self.pulse.stop()
+            self.pic.setPixmap(face_with_state(self.base, self.colour))
 
     def set_selected(self, on):
-        self.setProperty("selected", on)
-        self.style().unpolish(self)
-        self.style().polish(self)
+        for w in (self, self.title):
+            w.setProperty("selected", on)
+            w.style().unpolish(w)
+            w.style().polish(w)
 
     def mousePressEvent(self, e):
         self._press(e)
-        if e.button() == Qt.LeftButton:
+        if e.button() in (Qt.LeftButton, Qt.RightButton):
             self.clicked.emit(self.key)
-        elif e.button() == Qt.RightButton:
-            self.clicked.emit(self.key)
-            self.menu.emit(self.key, e.globalPosition().toPoint())
+
+    def contextMenuEvent(self, e):
+        # Taken here, so the group around it does not offer its own menu too.
+        e.accept()
+        self.menu.emit(self.key, e.globalPos())
 
     def mouseMoveEvent(self, e):
         self._move(e, f"instance:{self.key}", self.grab())
@@ -250,7 +311,8 @@ class GroupSection(QWidget):
 
     toggled = Signal(str, bool)
     clicked = Signal(str)
-    menu = Signal(str, QPoint)
+    menu = Signal(str, QPoint)           # on its name: the group's actions
+    space_menu = Signal(str, QPoint)     # anywhere else in it: what can be added there
     dropped = Signal(str, str)           # what ("instance:alice"), into which group ("" for none)
 
     def __init__(self, key, title, folded, parent=None):
@@ -286,7 +348,13 @@ class GroupSection(QWidget):
         self.header.customContextMenuRequested.connect(
             lambda pos: self.menu.emit(self.key, self.header.mapToGlobal(pos)))
         row.addWidget(self.header)
-        row.addStretch()
+        # Prism's header: the name, and a thin line running to the right.
+        line = QFrame()
+        line.setObjectName("headerLine")
+        line.setFrameShape(QFrame.HLine)
+        line.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        row.addSpacing(8)
+        row.addWidget(line, 1)
         v.addLayout(row)
         self.body = QWidget()
         self.inner = QVBoxLayout(self.body)
@@ -302,7 +370,13 @@ class GroupSection(QWidget):
         folded = self.body.isVisible()
         self.body.setVisible(not folded)
         self.arrow.setArrowType(Qt.RightArrow if folded else Qt.DownArrow)
+        if not folded:
+            anim.fade_in(self.body)
         self.toggled.emit(self.key, folded)
+
+    def contextMenuEvent(self, e):
+        e.accept()
+        self.space_menu.emit(self.key, e.globalPos())
 
     def set_selected(self, on):
         self.header.setProperty("selected", on)
@@ -376,9 +450,9 @@ class DependencySection(GroupSection):
         pen.setWidth(2)
         p.setPen(pen)
         top_left = self.leader.mapTo(self, QPoint(0, 0))
-        lx = top_left.x() + 36                      # under the leader's face
+        lx = top_left.x() + self.leader.width() // 2   # under the leader's face
         ly = top_left.y() + self.leader.height()
-        tops = [(g.mapTo(self, QPoint(0, 0)).x() + 36, g.mapTo(self, QPoint(0, 0)).y()) for g in guards]
+        tops = [(g.mapTo(self, QPoint(0, 0)).x() + g.width() // 2, g.mapTo(self, QPoint(0, 0)).y()) for g in guards]
         bus = (ly + min(y for _, y in tops)) // 2
         p.drawLine(lx, ly + 1, lx, bus)
         for gx, gy in tops:

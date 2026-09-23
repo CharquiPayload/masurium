@@ -1944,6 +1944,124 @@ def tests_accounts():
     layout()
 
 
+def tests_offline_and_java():
+    print("\nOffline accounts, and the Java a game runs on")
+    from launcher import accounts
+    import shutil
+    layout()
+    alice, bob = WS.instance("alice"), WS.instance("bob")
+    text, acc = said(ops.add_offline_account, WS, "Dave")
+    check("an offline account is a player name: accounts/dave, playing as Dave, nothing to log in",
+          not isinstance(acc, Fail) and acc.key == "dave" and acc.offline and acc.logged_in()
+          and json.loads(acc.json.read_text()) == {"name": "Dave", "offline": True}, text)
+    check("adding it again is refused", fails(ops.add_offline_account, WS, "Dave").code == "exists")
+    check("a name no player could have is refused", fails(ops.add_offline_account, WS, "Da ve") is not None)
+    check("offline, and an offline account, play offline; online does not",
+          accounts.plays_offline(WS, "offline") and accounts.plays_offline(WS, "dave")
+          and not accounts.plays_offline(WS, "online"))
+    own = alice.hmc / "HeadlessMC"
+    existed = own.is_dir()
+    own.mkdir(parents=True, exist_ok=True)
+    settings.set_value(alice.bot, "account", "dave")
+    settings.render(alice)
+    props = files.read_java_properties(own / "config.properties")
+    check("a bot set to it plays as its player, offline",
+          alice.name == "Dave" and props.get("hmc.offline") == "true"
+          and props.get("hmc.offline.username") == "Dave", props)
+    check("...with no login to link", not (own / "auth").is_symlink())
+    check("...-offline on its launch line", " -offline " in keeper.launch_line(alice, WS.server("test")))
+    check("...and nothing to log in", ops.login_command(alice) is None)
+    settings.set_value(bob.bot, "account", "dave")
+    check("an offline account is not kept to one game at a time, as a Microsoft one is",
+          ops.account_of(bob) == "offline")
+    text, code = run_cli("account")
+    check("`account` lists it, as offline", code == 0 and "dave" in text and "offline" in text, text)
+    text, code = run_cli("account", "remove", "dave")
+    check("in use, it is not removed", code == 1 and acc.exists(), text)
+    for b in (alice.bot, bob.bot):
+        settings.set_value(b, "account", "offline")
+    text, code = run_cli("account", "remove", "dave")
+    check("unused, it is removed", code == 0 and not acc.dir.exists(), text)
+    text, code = run_cli("account", "add", "--offline", "Erin")
+    check("`account add --offline NAME` adds one", code == 0 and WS.account("erin").offline, text)
+    shutil.rmtree(WS.account("erin").dir)
+
+    server = WS.server("test")
+    check("by default a game runs on the launcher's java", settings.java_command(alice) == WS.java_command()[:1])
+    e = fails(settings.set_value, alice, "java", str(TMP / "no-such-java"))
+    check("a java that is not there is refused", e is not None and "java" in told(e), told(e))
+    settings.set_value(WS.global_config(), "java", str(FAKE_JAVA))
+    check("the global config can choose it for every instance", settings.java_command(alice) == [str(FAKE_JAVA)])
+    settings.clear(WS.global_config(), "java")
+    settings.set_value(alice, "java", str(FAKE_JAVA))
+    check("an instance can have its own", settings.java_command(alice) == [str(FAKE_JAVA)]
+          and settings.java_command(bob) == WS.java_command()[:1])
+    settings.render(alice)
+    props = files.read_java_properties(own / "config.properties")
+    check("...and HeadlessMC is told to launch the game with it", props.get("hmc.java.versions") == str(FAKE_JAVA),
+          props)
+    e = fails(settings.set_value, alice, "java_args", "-Xmx8g")
+    check("the heap is no flag here: it is its own setting", e is not None and "heap" in told(e), told(e))
+    check("words that are not flags are refused", fails(settings.set_value, alice, "java_args", "rm -rf") is not None)
+    settings.set_value(alice, "java_args", "-XX:+UseZGC -XX:+AlwaysPreTouch")
+    line = keeper.launch_line(alice, server)
+    check("its JVM flags go on its launch line, after the heap",
+          "-XX:+UseZGC -XX:+AlwaysPreTouch" in line and line.index("-Xmx") < line.index("-XX:+UseZGC"), line)
+    data = alice.data
+    data["java_args"] = '-XX:+UseZGC" ; evil'
+    alice.save(data)
+    check("flags edited by hand into something else never reach the JVM",
+          "evil" not in keeper.launch_line(alice, server))
+    settings.clear(alice, "java_args")
+    settings.clear(alice, "java")
+    if not existed:
+        shutil.rmtree(own)
+
+
+def tests_delete():
+    print("\nDeleting an instance: its folder goes, its bot stays")
+    layout()
+    quick_server_env()
+    _, gone = said(ops.create, WS, "Gone", "test", "offline")
+    ops.create_group(WS, "leaving")
+    ops.group_add(WS, "leaving", ["gone"])
+    start_keeper("gone")
+    try:
+        check("the keeper runs", wait(lambda: keeper.keeper_alive(gone), 10))
+        e = fails(ops.delete_instance, WS, "gone")
+        check("a running instance is not deleted: stop it first", e is not None and e.code == "running"
+              and gone.dir.exists(), told(e))
+    finally:
+        said(ops.stop, gone)
+    text, code = run_cli("delete", "gone")
+    check("`delete` asks for --yes first", code == 1 and "--yes" in text and gone.dir.exists(), text)
+    text, code = run_cli("delete", "gone", "--yes")
+    check("stopped, it is deleted, folder and all, and leaves its group",
+          not gone.dir.exists() and "gone" not in WS.instance_keys()
+          and "gone" not in WS.group("leaving").instance_keys(), text)
+    check("...and its bot stays", WS.bot("gone").exists() and "bot gone stays" in text, text)
+    _, lead = said(ops.create, WS, "Lead", "test", "offline")
+    ops.create_group(WS, "lead-guards", leader="lead")
+    e = fails(ops.delete_instance, WS, "lead")
+    check("a leader is not deleted from under its guards", e is not None and e.code == "leader"
+          and lead.dir.exists(), told(e))
+    said(ops.delete_group, WS, "lead-guards")
+    said(ops.delete_group, WS, "leaving")
+    said(ops.delete_instance, WS, "lead")
+    for key in ("gone", "lead"):
+        remove_tree(WS.bot(key).dir)
+
+
+def tests_version():
+    print("\nOne version for the launcher and the mod")
+    import launcher
+    import re
+    gradle = (REPO / "mod" / "build.gradle").read_text()
+    mod = re.search(r"^version = '([^']+)'", gradle, re.M)
+    check("launcher.__version__ is the mod's", mod is not None and launcher.__version__ == mod.group(1),
+          (launcher.__version__, mod and mod.group(1)))
+
+
 # --- the layout from before instances -----------------------------------------
 
 def tests_migrate():
@@ -2060,6 +2178,9 @@ if __name__ == "__main__":
     tests_server_apis()
     tests_phrases()
     tests_accounts()
+    tests_offline_and_java()
+    tests_delete()
+    tests_version()
     tests_rules_model()
     tests_rules()
     tests_migrate()

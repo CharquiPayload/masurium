@@ -213,7 +213,10 @@ launcher/marionette.py restart alice     # starts the client and, once it is in,
 ```
 
 For an offline bot on a private server with `online-mode=false`, create it with
-`--account offline` and skip the account.
+`--account offline` and skip the account. Or add an **offline account**,
+`account add --offline Name`: only a player name, listed and chosen like the
+others, which gives every bot set to it that name. Unlike a Microsoft
+account, it may play in several games at once.
 
 **Accounts.** An online bot plays with a real, purchased Minecraft Java
 account. `account add` opens HeadlessMC in a folder of its own: type `login`,
@@ -237,16 +240,30 @@ pip install PySide6-Essentials          # Qt for Python; the command line does n
 launcher/marionette.py gui
 ```
 
-It shows every instance by group, how each is doing (in the server, loading,
-stopped, in the game with no bridge), and for the one selected what can be done
-with it: start (client and bridge), stop, restart, connect again, its rules,
-its settings, its personality, clone it, move it to a group, its folder and
-its logs; for a group, start or stop everything in it, add to it, its rules and
-settings, clone or delete it. Long operations run in the background and can be
-cancelled; what they report is listed under the instance. Bots, accounts
-(logged in from the window: HeadlessMC's questions and your answers), servers,
-the global settings and rules, doctor and the launcher's own settings (its
-colour style, how often it looks at the instances) are in the toolbar.
+It is laid out as [Prism Launcher](https://prismlauncher.org/)'s, so it feels
+familiar to anyone who has used it (Marionette is not affiliated with Prism;
+see the README). Across the top: **Add Instance** (with Add Group under its
+arrow), **Folders**, **Settings**, **Help** (doctor, this guide), and **Bots**
+and **Accounts** on the right. In the middle, every instance by group: its
+bot's face with a dot saying how it is doing (in the server, loading, stopped,
+in the game with no bridge), its name under it. On the right, for the one
+selected: **Launch** (client, then bridge; Restart, Connect again and Start its
+bridge under its arrow), **Kill**, **Edit**, **Change Group**, **Folder**,
+**Copy** and **Delete**; for a group, Launch all, Kill all, Edit, Add to it,
+Add instance here, and the same. Right-click on a group's empty space adds an
+instance or a group right there; on the background, in no group.
+
+**Edit** opens an instance's own window, with its pages down the left:
+Settings, Rules, Personality, Mods (jars of its own) and Logs, and Launch and
+Kill at the bottom; a double click on an instance opens it at its logs.
+**Settings** has the launcher's own page (its colour style, animations, how
+often it looks at the instances), Java, the global settings and rules,
+accounts (Microsoft ones, logged in from the window through HeadlessMC's own
+questions, and offline ones) and the servers. Long operations run in the
+background and can be cancelled; what they report is listed under the
+instance. Motion is on by default and off in Settings, Launcher: switches that
+slide, windows and panels that fade in, icons that make a small gesture when
+the pointer is over them, and a dot that pulses while its instance works.
 
 Instances and groups are dragged onto a group to move them there, or onto
 "In no group" to take them out; a leader or a guard takes its dependency group
@@ -268,7 +285,8 @@ waypipe -n ssh user@bots-machine /path/to/marionette/launcher/marionette.py gui
 The rest of the subcommands: `status` (every instance: client, hands, in the
 server, bridge), `bots`, `servers`, `start` (the client only), `connect`
 (rejoin after a log off), `bridge` (the bridge only), `stop` (client, bridge and
-its running guards; `--keep-guards` leaves the guards), `set` and `deploy-mod`.
+its running guards; `--keep-guards` leaves the guards), `set`, `deploy-mod` and
+`delete <instance> --yes` (its folder and all; its bot stays).
 
 **Cloning.** `clone alice` makes `alice-1`, the same bot on the same server;
 `clone alice --server other` puts it on another. `clone-bot alice` makes a new
@@ -334,6 +352,8 @@ players and how; it goes at the start of its prompt.
 | `owner` | all | the player the bot belongs to: it accepts their delicate orders, and they control it with `/marionette bot` on any server. It cannot be changed from inside the game |
 | `model` | all | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`). The aliases `opus`, `sonnet`, `haiku` and `fable` always mean the newest of their family; `opus[1m]` and the like, a million tokens of context |
 | `heap` | all | the game's memory, e.g. `3g` (default `MARIONETTE_HEAP`, else `3g`) |
+| `java` | instance, group, global | the Java its game runs on: a path to a `java`, or a name on the PATH (default `MARIONETTE_JAVA`, else `java`); NeoForge 21.1 wants Java 21 |
+| `java_args` | instance, group, global | extra JVM flags, e.g. `-XX:+UseZGC` (the heap is `heap`, not a flag here) |
 | `role` | bot, instance, group | `main` (takes orders, does jobs) or `guard` (see [Groups](#groups)) |
 | `fast_responses` | all | `yes` (default): its brain writes ahead of time, in its voice and language, the few things it says without thinking; `no`: plain English |
 | `port` | instance | the local port of the bot mod, chosen by the launcher |

@@ -47,7 +47,8 @@ def launch_line(inst, server):
     from the sentences its brain wrote (see the bridge's write_phrases), not
     from a language flag: the mod speaks plain English otherwise."""
     ws = inst.ws
-    offline = " -offline" if settings.get(inst, "account") == "offline" else ""
+    from .accounts import plays_offline
+    offline = " -offline" if plays_offline(ws, settings.get(inst, "account")) else ""
     # A heap edited by hand is not trusted onto the JVM's command line:
     # anything but a size falls back to the default (doctor says why).
     heap = settings.get(inst, "heap")
@@ -55,6 +56,9 @@ def launch_line(inst, server):
         heap = ws.heap()
     jvm = [f"-Xmx{heap}", f"-Dmarionette.name={inst.name}",
            "-Dmarionette.headless=true", f"-Dmarionette.bot.port={inst.port}"]
+    extra = settings.get(inst, "java_args")
+    if extra and not settings.problem(inst, "java_args", extra):
+        jvm += extra.split()
     return f"launch {ws.version_for(server)} -lwjgl{offline} -paulscode --jvm \"{' '.join(jvm)}\""
 
 
@@ -93,13 +97,13 @@ def keeper_main(inst, server):
     # the group is how both are stopped together (kill_tree).
     try:
         game = subprocess.Popen(
-            inst.ws.java_command() + ["-jar", "headlessmc-launcher.jar"],
+            settings.java_command(inst) + ["-jar", "headlessmc-launcher.jar"],
             cwd=str(inst.hmc), stdin=subprocess.PIPE, stdout=client_log,
             stderr=subprocess.STDOUT, env=inst.ws.child_env(), **own_group())
     except OSError as e:
         # No java, or not that one. Said in one line `start` is waiting for,
         # instead of a traceback it is not.
-        note(f"{KEEPER_FAILED}: could not run {' '.join(inst.ws.java_command())}: {e}")
+        note(f"{KEEPER_FAILED}: could not run {' '.join(settings.java_command(inst))}: {e}")
         client_log.close()
         listener.close()
         clear_run_files(inst)

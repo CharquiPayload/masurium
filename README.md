@@ -170,6 +170,12 @@ ideally with a whitelist.
 - [NeoForge](https://neoforged.net/) and the Minecraft modding community.
 - [Claude Code](https://claude.com/claude-code) by Anthropic, the brain.
 
+Marionette is an independent project. It is not affiliated with, endorsed by or
+sponsored by the Prism Launcher project, HeadlessMC or HeadlessHQ, or the Baritone
+project, and it is **not an official Minecraft product: not approved by or
+associated with Mojang or Microsoft**. Their names are used only to say where an
+idea came from or what Marionette works with; their logos and assets are not used.
+
 ## License
 
 [MIT](LICENSE) © 2026 CharquiPayload
