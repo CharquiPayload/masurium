@@ -1,0 +1,45 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+
+# WATUT (What Are They Up To) shows what each player is doing: typing, in a
+# menu, and away. "Away" is time without a key or a mouse button, and a bot
+# has neither: it walks, digs and fights through code, so WATUT marked it
+# AFK while it worked. This add-on tells WATUT a bot is active whenever it
+# moves or acts. The WATUT it is for, exactly: its internals are reached by
+# reflection, and another version could have moved them.
+
+[[mods]]
+modId = "masurium_watut"
+version = "1.0.0"
+displayName = "Masurium: WATUT for bots"
+description = "Tells WATUT that a bot that moves or acts is not away, as a key or a mouse click would. Client side only."
+authors = "CharquiPayload"
+
+[[mods.dependencies.masurium_watut]]
+modId = "masurium_bot"
+type = "required"
+versionRange = "[1.0.0,)"
+ordering = "AFTER"
+side = "CLIENT"
+
+[[mods.dependencies.masurium_watut]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1.0,)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[mods.dependencies.masurium_watut]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1,1.22)"
+ordering = "NONE"
+side = "CLIENT"
+
+[[mods.dependencies.masurium_watut]]
+modId = "watut"
+type = "optional"
+versionRange = "[1.21.0-1.2.7]"
+ordering = "AFTER"
+side = "CLIENT"

@@ -131,6 +131,14 @@ class BotTest {
     }
 
     @Test
+    @DisplayName("WATUT in the pack and no add-on: refused, naming it (it would look AFK while it works)")
+    void watutWithoutTheAddonIsRefused() {
+        String why = Bot.missingAddon(true, id -> id.equals("watut"));
+        assertTrue(why != null && why.contains("masurium_watut"), String.valueOf(why));
+        assertNull(Bot.missingAddon(true, id -> id.equals("watut") || id.equals("masurium_watut")));
+    }
+
+    @Test
     @DisplayName("no Veil, no add-on needed")
     void noVeilNoAddon() {
         assertNull(Bot.missingAddon(true, id -> false));

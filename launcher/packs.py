@@ -20,7 +20,7 @@ CORE_JAR = re.compile(r"^masurium-\d")
 # Third-party mods a headless bot cannot run without an add-on, and the add-on's
 # jar family. The same table lives in the bot mod (Bot.ADDON_FOR), which refuses
 # to start without it; here it is caught before a 3 GB java is launched.
-ADDON_FOR = {"veil": "masurium-veil"}
+ADDON_FOR = {"veil": "masurium-veil", "watut": "masurium-watut"}
 
 
 def toml_mods(text, manifest_version=""):

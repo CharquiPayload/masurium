@@ -672,6 +672,16 @@ def tests_doctor():
           not any(l == "servers/test: veil" for l, ok, d in checks))
     (TMP / "shared" / "mods" / "masurium-veil-1.0.0.jar").unlink()
     carrier.unlink()
+    watut = TMP / "servers" / "test" / "mods" / "watut-neoforge-1.21.0-1.2.7.jar"
+    write_mod_jar(watut, "watut", "1.21.0-1.2.7")
+    checks = doctor.checks(WS)
+    check("WATUT in a pack without its add-on is a problem too (the bot would look AFK while it works)",
+          any(l == "servers/test: watut" and ok is False and "masurium-watut" in d for l, ok, d in checks))
+    (TMP / "shared" / "mods" / "masurium-watut-1.0.0.jar").write_bytes(b"w")
+    check("...and not with it in shared/mods",
+          not any(l == "servers/test: watut" for l, ok, d in doctor.checks(WS)))
+    (TMP / "shared" / "mods" / "masurium-watut-1.0.0.jar").unlink()
+    watut.unlink()
 
     bob = WS.instance("bob")
     data = bob.data
