@@ -55,11 +55,11 @@ ENVIRON["MASURIUM_JAVA"] = str(FAKE_JAVA)
 WS = Workspace(TMP / "bots", TMP / "servers", TMP / "shared", TMP / "server.env",
                home=TMP, environ=ENVIRON, instances_dir=TMP / "instances", state_dir=TMP / "state",
                accounts_dir=TMP / "accounts")
-# Which port a new instance gets is decided among the tests' own instances: a
-# bot running for real on this machine held 8478, and six checks failed with
-# nothing wrong. Only the choosing is told so; everything else still asks the
-# machine whether a port is in use.
-workspace_module.port_in_use = lambda port: False
+# The tests' instances take ports of their own, far from the ones real bots
+# use (8478 on). Stopping an instance stops whatever java carries its port on
+# the whole machine (processes.game_pids): with the same ports, running the
+# tests next to a real bot stopped that bot.
+FIRST_PORT = workspace_module.FIRST_PORT = bots.FIRST_PORT = 18478
 
 
 # --- minimal harness --------------------------------------------------------
@@ -2107,6 +2107,9 @@ def tests_version():
 
 # --- the layout from before instances -----------------------------------------
 
+OLD_PORT = FIRST_PORT + 12
+
+
 def tests_migrate():
     print("\nMigrate: bots/<name>/ with the game inside becomes a bot and an instance")
     layout()
@@ -2114,7 +2117,7 @@ def tests_migrate():
     (old / "hmc" / "HeadlessMC").mkdir(parents=True)
     (old / "gamedir" / "config").mkdir(parents=True)
     (old / "run").mkdir()
-    for f, v in (("port", "8490"), ("server", "test"), ("account", "offline"), ("language", "es"),
+    for f, v in (("port", str(OLD_PORT)), ("server", "test"), ("account", "offline"), ("language", "es"),
                  ("model", "haiku low"), ("owner", "Someone"), ("gender", "f")):
         (old / f).write_text(v + "\n")
     (old / "personality.txt").write_text("You are Old.\n")
@@ -2137,7 +2140,7 @@ def tests_migrate():
 
     import socket
     busy = socket.socket()
-    busy.bind(("127.0.0.1", 8490))
+    busy.bind(("127.0.0.1", OLD_PORT))
     busy.listen(1)
     try:
         e = fails(ops.migrate, WS)
@@ -2148,7 +2151,7 @@ def tests_migrate():
 
     text, made = said(ops.migrate, WS, dry_run=True)
     check("a dry run says what it would do and does nothing",
-          made == [] and "old: bot old (plays as Old) + instance old on test, port 8490" in text
+          made == [] and f"old: bot old (plays as Old) + instance old on test, port {OLD_PORT}" in text
           and (old / "port").exists() and not (TMP / "instances" / "old").exists(), text)
 
     text, made = said(ops.migrate, WS)
@@ -2161,7 +2164,8 @@ def tests_migrate():
     check("...and language and gender, no longer settings, are pointed at its personality",
           "language es, gender f are no longer settings: say them in its personality.txt" in text, text)
     check("...and its personality, where it was", bot.personality.read_text() == "You are Old.\n")
-    check("the instance keeps its server and its port", inst.data == {"bot": "old", "server": "test", "port": 8490})
+    check("the instance keeps its server and its port",
+          inst.data == {"bot": "old", "server": "test", "port": OLD_PORT})
     check("its game, HeadlessMC and logs were moved, not copied",
           (inst.gamedir / "config" / "masurium-places-test.txt").exists()
           and (inst.run / "client.log").exists() and not (old / "gamedir").exists())

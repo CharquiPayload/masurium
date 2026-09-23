@@ -20,10 +20,14 @@ from PySide6.QtCore import QEvent, QSettings, Qt, QVariantAnimation  # noqa: E40
 from PySide6.QtGui import QColor, QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QToolButton  # noqa: E402
 
-from .. import groups, operations as ops, rules  # noqa: E402
+from .. import bots, groups, operations as ops, rules, workspace  # noqa: E402
 from ..workspace import Workspace  # noqa: E402
 from . import anim, dialogs, icons, theme, window as window_module  # noqa: E402
 from .widgets import Switch  # noqa: E402
+
+# Ports of their own, far from real bots': stopping an instance stops whatever
+# java carries its port on the whole machine (see launcher/tests.py).
+workspace.FIRST_PORT = bots.FIRST_PORT = 18478
 from .window import MainWindow  # noqa: E402
 
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="masurium-gui-test-"))
