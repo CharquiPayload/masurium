@@ -2211,13 +2211,26 @@ def carry_out(order, in_rules=False):
                     [sys.executable, f"{REPO}/launcher/masurium.py", verb,
                      os.environ.get("MASURIUM_INSTANCE") or NAME],
                     stdout=log_f, stderr=subprocess.STDOUT,
-                    stdin=subprocess.DEVNULL, **apart)
+                    stdin=subprocess.DEVNULL, env=launcher_env(), **apart)
         except Exception as e:
             log(f"could not launch the launcher's {verb}: {e}")
             say(phrase("no_restart"))
         return action
     log(f"[control] unknown order ignored: {order}")
     return None
+
+
+def launcher_env():
+    """The environment to run the launcher with from here: this bridge's own,
+    with the launcher's folders back in place. The bridge's bots and state
+    folders are its server's (the launcher's bridge_env), and a launcher run
+    with them does not find the bot it is asked to restart."""
+    env = dict(os.environ)
+    for key in ("MASURIUM_BOTS_DIR", "MASURIUM_STATE_DIR"):
+        own = env.get(key.replace("MASURIUM_", "MASURIUM_LAUNCHER_", 1))
+        if own:
+            env[key] = own
+    return env
 
 
 def listen(since, inbox, control_since=None):

@@ -682,8 +682,15 @@ def bridge_env(inst):
     instances of one bot on two servers are two lives, and do not share a
     session or a channel. Its server's own server.env, by PATH, never the
     token. And the instance, so that a restart ordered from the game
-    restarts THIS one."""
+    restarts THIS one.
+
+    That restart runs the launcher from the bridge, so the launcher's own
+    folders go along under other names, for the bridge to hand back: with the
+    bridge's, the launcher looked for the bot among one server's players, did
+    not find it, and left the bridge running without a body."""
     env = inst.ws.child_env()
+    env["MASURIUM_LAUNCHER_BOTS_DIR"] = env["MASURIUM_BOTS_DIR"]
+    env["MASURIUM_LAUNCHER_STATE_DIR"] = env["MASURIUM_STATE_DIR"]
     env["BOT_NAME"] = inst.name
     env["MASURIUM_BOTS_DIR"] = str(inst.state / "bots")
     env["MASURIUM_STATE_DIR"] = str(inst.state)

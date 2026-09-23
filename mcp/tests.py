@@ -110,6 +110,27 @@ def tests_speaker():
     # from its OWN backpack, so it stays the bot's to decide.
     check("trash: the bot still decides its own trash", bool(server.TOOLS["trash"][2]))
 
+    # A restart ordered from the game runs the launcher from the bridge. The
+    # bridge's bots and state folders are its server's; the launcher needs its
+    # own back, or it does not find the bot and leaves the bridge without a body.
+    saved = dict(os.environ)
+    try:
+        os.environ.update({"MASURIUM_BOTS_DIR": "/state/servers/test/bots",
+                           "MASURIUM_STATE_DIR": "/state/servers/test",
+                           "MASURIUM_LAUNCHER_BOTS_DIR": "/home/bots",
+                           "MASURIUM_LAUNCHER_STATE_DIR": "/state"})
+        env = bridge.launcher_env()
+        check("a restart runs the launcher with the launcher's folders, not the bridge's",
+              env["MASURIUM_BOTS_DIR"] == "/home/bots" and env["MASURIUM_STATE_DIR"] == "/state", env)
+        for key in ("MASURIUM_LAUNCHER_BOTS_DIR", "MASURIUM_LAUNCHER_STATE_DIR"):
+            del os.environ[key]
+        env = bridge.launcher_env()
+        check("...and a bridge started by hand hands on what it has",
+              env["MASURIUM_BOTS_DIR"] == "/state/servers/test/bots", env)
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
     # A settings order arrives with an argument and is applied to the body. The
     # bridge talks to the bot with its own request_bot, so that is what is
     # replaced here.

@@ -1564,6 +1564,9 @@ def tests_server_apis():
               and env["MASURIUM_STATE_DIR"] == str(TMP / "state" / "servers" / "other"))
         check("...knows which instance it is, for a restart ordered from the game",
               env["MASURIUM_INSTANCE"] == "bob" and env["BOT_NAME"] == "Bob")
+        check("...and carries the launcher's own folders, for that restart to find the bot",
+              env["MASURIUM_LAUNCHER_BOTS_DIR"] == str(WS.bots_dir)
+              and env["MASURIUM_LAUNCHER_STATE_DIR"] == str(WS.state_dir), env)
         check("...and is told the PATH of its server's file", env.get("MASURIUM_SERVER_ENV") == str(own))
         check("...never the token itself", "own-token" not in "".join(env.values()))
         check("an instance whose server has no file of its own is told nothing",
