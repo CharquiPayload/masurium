@@ -2348,10 +2348,11 @@ def tests_masurium_update():
         updates.fetch_latest = real
         (WS.state_dir / updates.CACHE).unlink(missing_ok=True)
     (TMP / "clone" / ".git").mkdir(parents=True, exist_ok=True)
+    # Packages under /opt and /usr are Linux's; Windows has none of them.
     check("how this copy is updated, from where it lives: a clone, a package, anything else",
           "git pull" in updates.how_to_update(TMP / "clone")
-          and ".deb" in updates.how_to_update("/opt/masurium-launcher/app")
-          and "PKGBUILD" in updates.how_to_update("/usr/share/masurium-launcher")
+          and (os.name == "nt" or ".deb" in updates.how_to_update("/opt/masurium-launcher/app")
+               and "PKGBUILD" in updates.how_to_update("/usr/share/masurium-launcher"))
           and updates.one_line() in updates.how_to_update(TMP / "unpacked"))
     check("each platform's installer is run its way: sh for install.sh, PowerShell for install.ps1",
           updates.installer_command("x/install.sh") == ["sh", str(pathlib.Path("x/install.sh"))]

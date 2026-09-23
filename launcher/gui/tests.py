@@ -50,7 +50,12 @@ def check(description, condition, detail=""):
         failures.append(description)
 
 
-def wait(predicate, seconds=15):
+# Windows takes two seconds to say that nobody listens on a local port, and the
+# test servers are nobody: every look at them is slower there.
+WAIT = 45 if os.name == "nt" else 15
+
+
+def wait(predicate, seconds=WAIT):
     end = time.monotonic() + seconds
     while time.monotonic() < end:
         QApplication.processEvents()

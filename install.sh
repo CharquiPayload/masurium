@@ -87,7 +87,7 @@ def get(name):
 
 
 sums = get("SHA256SUMS").decode("utf-8", "replace")
-m = re.search(r"^([0-9a-f]{64}) [ *](masurium-launcher-[0-9][A-Za-z0-9.+~-]*\.tar\.gz)$", sums, re.M)
+m = re.search(r"^([0-9a-f]{64}) [ *](masurium-launcher-[0-9][A-Za-z0-9.+~-]*\.tar\.gz)\r?$", sums, re.M)
 if not m:
     sys.exit("install.sh: the release's SHA256SUMS names no masurium-launcher-<version>.tar.gz")
 data = get(m.group(2))

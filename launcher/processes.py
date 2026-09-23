@@ -216,11 +216,20 @@ def signal_game(port, hard=False):
 def stop_game(port, launcher_pid=None):
     """Everything that is the client on this port: the launcher's group if we
     know it, and whatever java carries the port, found by name. Waits for the
-    port to close, which is the one sign that the game is gone."""
+    port to close, which is the one sign that the game is gone.
+
+    On Windows the asking is only a formality: taskkill without /F asks a
+    window to close, and a headless game has none, so it would stay, and a
+    game still loading has no port open to say so. There the launcher's own
+    process must be gone too, and the insisting comes after a few seconds,
+    not twenty-five. (On Linux a stopped child is a zombie until its parent
+    reaps it, alive to a probe: the port is the sign there.)"""
+    def gone():
+        return not port_in_use(port) and not (WINDOWS and launcher_pid and pid_alive(launcher_pid))
     kill_tree(launcher_pid)
     signal_game(port)
-    if wait_for(lambda: not port_in_use(port), 25, every=0.5):
+    if wait_for(gone, 5 if WINDOWS else 25, every=0.5):
         return True
     kill_tree(launcher_pid, hard=True)
     signal_game(port, hard=True)
-    return wait_for(lambda: not port_in_use(port), 10, every=0.5)
+    return wait_for(gone, 10, every=0.5)

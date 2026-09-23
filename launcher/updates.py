@@ -41,8 +41,9 @@ CACHE = "masurium-latest.json"
 # What an installer leaves in a copy it made, saying which it was.
 INSTALLER = "INSTALLER"
 INSTALLERS = ("install.sh", "install.ps1")
-# The launcher's tarball in a release's SHA256SUMS, as sha256sum writes it.
-TARBALL = re.compile(r"^([0-9a-f]{64}) [ *](masurium-launcher-[0-9][A-Za-z0-9.+~-]*\.tar\.gz)$", re.M)
+# The launcher's tarball in a release's SHA256SUMS, as sha256sum writes it
+# (or a Windows editor, with its lines ending in \r\n).
+TARBALL = re.compile(r"^([0-9a-f]{64}) [ *](masurium-launcher-[0-9][A-Za-z0-9.+~-]*\.tar\.gz)\r?$", re.M)
 
 
 def fetch_latest():
