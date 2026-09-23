@@ -42,6 +42,7 @@ sys.path.insert(0, str(REPO))
 from launcher import cli, doctor, operations as ops, settings  # noqa: E402
 from launcher import bots, files, groups, keeper, packs, processes, rules  # noqa: E402
 from launcher.events import Fail  # noqa: E402
+from launcher import workspace as workspace_module  # noqa: E402
 from launcher.workspace import DEFAULT_HEAP, DEFAULT_VERSION, FIRST_PORT, Workspace  # noqa: E402
 
 # Every test runs in a workspace of its own, under TMP, home included: nothing
@@ -54,6 +55,11 @@ ENVIRON["MASURIUM_JAVA"] = str(FAKE_JAVA)
 WS = Workspace(TMP / "bots", TMP / "servers", TMP / "shared", TMP / "server.env",
                home=TMP, environ=ENVIRON, instances_dir=TMP / "instances", state_dir=TMP / "state",
                accounts_dir=TMP / "accounts")
+# Which port a new instance gets is decided among the tests' own instances: a
+# bot running for real on this machine held 8478, and six checks failed with
+# nothing wrong. Only the choosing is told so; everything else still asks the
+# machine whether a port is in use.
+workspace_module.port_in_use = lambda port: False
 
 
 # --- minimal harness --------------------------------------------------------
@@ -1649,12 +1655,16 @@ def tests_rules_model():
         check(f"what the {family} list starts with is the server mod's", ids == rules.FAMILIES[family][2], ids)
 
     for bad in ({"prefz": {}}, {"prefs": {"hunt_playerz": True}}, {"prefs": {"hunt_players": "yes"}},
-                {"food": {"veto": ["beef"]}}, {"food": {"ban": ["create:gear"]}},
+                {"food": {"veto": ["beef"]}}, {"food": {"ban": ["a:b:c"]}}, {"food": {"ban": [":cog"]}},
                 {"food": {"ban": ["beef"], "allow": ["beef"]}}, {"break": {"replace": 1}}, []):
         check(f"refused: {json.dumps(bad)}", fails(rules.parse, bad) is not None)
     layer = rules.parse({"food": {"ban": ["minecraft:Beef"]}, "prefs": {"Hunt_Players": True}})
     check("ids lose minecraft: and case; toggles their case",
           rules.dump(layer) == {"prefs": {"hunt_players": True}, "food": {"ban": ["beef"]}}, rules.dump(layer))
+    layer = rules.parse({"food": {"ban": ["Create:Cog", "cog"]}, "from": {"food.create:cog": "global"}})
+    check("a mod's id is an id too, whole or by its name alone",
+          rules.dump(layer) == {"food": {"ban": ["cog", "create:cog"]}, "from": {"food.create:cog": "global"}},
+          rules.dump(layer))
 
     layer, change = rules.edit(rules.empty(), ["pref", "hunt_players", "on"])
     check("pref <toggle> on", layer["prefs"] == {"hunt_players": True} and change == ("pref", "hunt_players", "on"))
