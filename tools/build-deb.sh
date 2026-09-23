@@ -2,8 +2,8 @@
 # The .deb of Masurium Launcher, for Ubuntu, Debian and their family, from this
 # repository: the program, the Masurium jars it was built with, and Qt for the
 # window as the wheels it was tested with, so installing needs no internet.
-# Run it on a Debian or Ubuntu machine, with the jars built (mod/ and each
-# addons/*: ./gradlew build).
+# Run it on a Debian or Ubuntu machine, with the mod built (cd mod && ./gradlew
+# build); the add-ons come from their releases (packaging/addons.txt).
 #
 #   tools/build-deb.sh     ->  dist/masurium-launcher_<version>_amd64.deb
 set -eu
@@ -35,10 +35,7 @@ echo "==> the program"
 cp -R "$ROOT/launcher" "$ROOT/mcp" "$ROOT/docs" "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/CHANGELOG.md" "$OPT/app/"
 find "$OPT/app" -name __pycache__ -type d -prune -exec rm -rf {} +
 cp "$core" "$OPT/app/jars/"
-for j in "$ROOT"/addons/*/build/libs/masurium-*.jar; do
-    case "$j" in *-sources.jar) continue ;; esac
-    if [ -f "$j" ]; then cp "$j" "$OPT/app/jars/"; fi
-done
+"$ROOT/tools/fetch-addons.sh" "$OPT/app/jars"
 ls "$OPT/app/jars"
 
 echo "==> Qt for Python $PYSIDE_VERSION, as wheels"

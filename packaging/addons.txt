@@ -1,0 +1,8 @@
+# The add-ons a release of Masurium Launcher carries in its jars/, each from
+# its own repository's release (github.com/CharquiPayload/masurium-veil, and so
+# on), checked against the checksum here before it goes in.
+# tools/fetch-addons.sh reads it.
+#
+# name              version   sha256 of <name>-<version>.jar
+masurium-veil       1.0.0     b6638d84c957fd6b9ee49bb16c4be0b2b74a5070438a3cf6423cad057b3293b6
+masurium-watut      1.0.0     f08d42e1a5ed74f630c31e12dd49fe2c66f528d4f9a608ac8caedd799955892d

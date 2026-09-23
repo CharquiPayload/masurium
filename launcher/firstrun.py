@@ -94,13 +94,13 @@ def masurium_in_shared(ws):
 
 def bundled_jars():
     """The Masurium jars that came with this program: jars/ in an installed
-    one or a release, or what a clone of the repository built (the mod and its
-    add-ons). The core first."""
+    one or a release (the mod and its add-ons), or the mod a clone of the
+    repository built; a clone's add-ons come from their own repositories. The
+    core first."""
     root = operations.REPO
     found = list((root / "jars").glob("masurium*.jar"))
     if not found:
         found = list((root / "mod" / "build" / "libs").glob("masurium-*.jar"))
-        found += list(root.glob("addons/*/build/libs/masurium-*.jar"))
     found = [j for j in found if "-sources" not in j.name]
     return sorted(found, key=lambda j: (not CORE_JAR.match(j.name), j.name))
 

@@ -1,6 +1,6 @@
 #!/bin/sh
-# Everything a release carries, into dist/: the Masurium jars (the mod and its
-# add-ons), the launcher as a folder for any Linux (install.sh inside), as a
+# Everything a release carries, into dist/: the Masurium jars (the mod, and the
+# add-ons from their own repositories' releases), the launcher as a folder for any Linux (install.sh inside), as a
 # .deb and as the PKGBUILD that makes its Arch package, install.sh on its own
 # (the one-line installer), and their checksums.
 # Run on Debian or Ubuntu, from a clean checkout.
@@ -14,16 +14,17 @@ OUT="$ROOT/dist"
 die() { printf 'release: %s\n' "$*" >&2; exit 1; }
 [ -n "$VERSION" ] || die "no __version__ in launcher/__init__.py"
 
-echo "==> building the mod and its add-ons"
+echo "==> building the mod"
 (cd "$ROOT/mod" && ./gradlew build --console=plain -q)
-for a in "$ROOT"/addons/*/; do (cd "$a" && ./gradlew build --console=plain -q); done
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
-for j in "$ROOT"/mod/build/libs/masurium-*.jar "$ROOT"/addons/*/build/libs/masurium-*.jar; do
+for j in "$ROOT"/mod/build/libs/masurium-*.jar; do
     case "$j" in *-sources.jar) continue ;; esac
     cp "$j" "$OUT/"
 done
+echo "==> the add-ons, from their releases (packaging/addons.txt)"
+"$ROOT/tools/fetch-addons.sh" "$OUT"
 
 echo "==> the launcher, for any Linux"
 STAGE=$(mktemp -d)

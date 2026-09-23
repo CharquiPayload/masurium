@@ -35,7 +35,7 @@ all yourself.
 | **Bridge** | reads the chat, wakes the brain when the bot is named, relays body notices | `mcp/bridge.py` |
 | **Claude Code** | thinking, only when needed | — |
 | **Masurium Launcher** | creates, starts, stops and watches bots; a keeper per bot holds the game's console | `launcher/` |
-| **Add-ons** | jars of their own, one per third-party mod the bot has to live with: one keeps Veil off a GPU that a headless bot does not have, another keeps WATUT from showing a working bot as away | `addons/` |
+| **Add-ons** | jars of their own, one per third-party mod the bot has to live with: one keeps Veil off a GPU that a headless bot does not have, another keeps WATUT from showing a working bot as away | repositories of their own: [masurium-veil](https://github.com/CharquiPayload/masurium-veil), [masurium-watut](https://github.com/CharquiPayload/masurium-watut) |
 
 The split is strict: **a question goes to the server, an action goes to the
 bot.** A dedicated server loads only the server and shared halves; the bot half
@@ -128,9 +128,11 @@ inline, a lambda, or a return type that no `import` would reveal.
   the instances by group, their actions, rules, settings and logs; it sets a
   new machine up by itself (the downloads, the way to the server, the first
   server), and installs as a desktop app. To do: a run on Windows.
-- **Add-ons**: separate jars that teach the bots one mod each. Two are there,
-  `addons/veil` (Veil without a GPU) and `addons/watut` (a bot at work is not
-  away, and it types while it thinks); the next ones teach *abilities*
+- **Add-ons**: separate jars that teach the bots one mod each, each in a
+  repository of its own. Two are there, [masurium-veil](https://github.com/CharquiPayload/masurium-veil)
+  (Veil without a GPU) and [masurium-watut](https://github.com/CharquiPayload/masurium-watut)
+  (a bot at work is not away, and it types while it thinks), and the launcher's
+  releases carry them; the next ones teach *abilities*
   (`masurium-create`...). To do for those: the
   core offers them a place to register their own `/masurium bot <bot> <add-on>
   ...` subcommands and their own per-bot settings, kept where the rest of the

@@ -222,7 +222,7 @@ def checks(ws):
             if carriers and not any(jar_family(j.name) == addon for j in every):
                 add(f"servers/{slug}: {mod_id}", False,
                     f"carried by {', '.join(carriers)}; a headless bot needs {addon}-<version>.jar "
-                    f"in shared/mods (see addons/)")
+                    f"in shared/mods (its releases: github.com/CharquiPayload/masurium-{mod_id})")
 
     old = ws.old_bots()
     offline_accounts = [k for k in ws.account_keys() if ws.account(k).offline]

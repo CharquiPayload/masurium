@@ -55,7 +55,8 @@ public final class Bot {
             if (loaded.test(e.getKey()) && !loaded.test(e.getValue())) {
                 return "this pack carries '" + e.getKey() + "', and a bot with no screen "
                         + "needs the '" + e.getValue() + "' add-on for it. Put its "
-                        + "jar next to masurium's (see addons/ in the repository).";
+                        + "jar next to masurium's (its releases: github.com/CharquiPayload/masurium-"
+                        + e.getKey() + ").";
             }
         }
         return null;

@@ -7,6 +7,16 @@
   woke in every single-player world of anyone who had the jar, opening a port on
   that machine and adding `/masurium`, for players who never run a bot. Bots join
   dedicated servers; a single-player world, opened to LAN or not, does not host them.
+- **Each add-on has a repository of its own:**
+  [masurium-veil](https://github.com/CharquiPayload/masurium-veil) and
+  [masurium-watut](https://github.com/CharquiPayload/masurium-watut), with their
+  history, their releases and their own tests on GitHub. They build against the
+  core's release, downloaded and checked. The launcher's releases still carry
+  them in `jars/`: `tools/release.sh` downloads the versions
+  `packaging/addons.txt` names, each checked against its checksum. A clone of
+  this repository brings the mod only.
+- **Every commit is tested on GitHub's machines**, the Python suites on Linux and
+  on Windows, the mod on Linux: the start of the Windows port.
 
 ## 1.0.0 (2026-09-23)
 

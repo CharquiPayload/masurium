@@ -115,14 +115,15 @@ install_here() {
         if [ -f "$HERE/$f" ]; then cp "$HERE/$f" "$PREFIX/app.new/"; fi
     done
     if [ -d "$HERE/docs" ]; then cp -R "$HERE/docs" "$PREFIX/app.new/"; fi
-    # The Masurium jars it came with: a release's jars/, or what a clone of the
-    # repository built. `masurium setup` puts them in shared/mods.
+    # The Masurium jars it came with: a release's jars/ (the mod and its add-ons),
+    # or the mod a clone of the repository built. `masurium setup` puts them in
+    # shared/mods.
     if [ -d "$HERE/jars" ]; then
         for j in "$HERE"/jars/*.jar; do
             if [ -f "$j" ]; then cp "$j" "$PREFIX/app.new/jars/"; fi
         done
     else
-        for j in "$HERE"/mod/build/libs/masurium-*.jar "$HERE"/addons/*/build/libs/masurium-*.jar; do
+        for j in "$HERE"/mod/build/libs/masurium-*.jar; do
             case "$j" in *-sources.jar) continue ;; esac
             if [ -f "$j" ]; then cp "$j" "$PREFIX/app.new/jars/"; fi
         done

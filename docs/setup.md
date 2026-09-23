@@ -17,8 +17,10 @@ that order. The rest can wait until you have a bot in the game.
 bots also need `masurium-veil-<version>.jar` in `shared/mods/`: a headless
 client refuses to start without it, saying so, and `doctor` says so before that.
 The add-on is for one exact Veil version; with another, NeoForge refuses to load
-it and a new add-on version is due. See `addons/veil/README.md`. The server does
-not need it.
+it and a new add-on version is due. See
+[masurium-veil](https://github.com/CharquiPayload/masurium-veil), where its
+releases are. The launcher's releases carry the add-ons, and `masurium setup`
+puts them in `shared/mods/` with the mod. The server does not need them.
 
 **Accounts: bots work online or offline**
 - **Online (recommended):** each bot uses its own purchased Minecraft Java

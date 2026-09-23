@@ -2561,17 +2561,15 @@ def tests_firstrun():
         httpd.shutdown()
 
     built = TMP / "fake-repo"
-    for d in ("mod/build/libs", "addons/watut/build/libs"):
-        (built / d).mkdir(parents=True, exist_ok=True)
+    (built / "mod/build/libs").mkdir(parents=True, exist_ok=True)
     (built / "mod/build/libs/masurium-1.0.0.jar").write_bytes(b"core")
     (built / "mod/build/libs/masurium-1.0.0-sources.jar").write_bytes(b"src")
-    (built / "addons/watut/build/libs/masurium-watut-1.0.0.jar").write_bytes(b"watut")
     real_repo = ops.REPO
     try:
         ops.REPO = built
         names = [j.name for j in firstrun.bundled_jars()]
-        check("the jars a clone built count as the ones it came with, the core first, no sources",
-              names == ["masurium-1.0.0.jar", "masurium-watut-1.0.0.jar"], names)
+        check("the mod a clone built counts as the one it came with, no sources (its add-ons are "
+              "their repositories')", names == ["masurium-1.0.0.jar"], names)
         (built / "jars").mkdir()
         (built / "jars" / "masurium-1.0.1.jar").write_bytes(b"release")
         check("...an installed program's jars/ wins", [j.name for j in firstrun.bundled_jars()]
