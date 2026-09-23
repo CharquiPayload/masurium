@@ -88,7 +88,11 @@ function Install-FromRelease([string[]]$passOn) {
         $name = $m.Groups[2].Value
         $tarball = Join-Path $tmp $name
         Get-Url "$Release/$name" $tarball
-        $got = (Get-FileHash -Algorithm SHA256 $tarball).Hash.ToLower()
+        # Hashed by .NET itself: Get-FileHash lives in a module that a
+        # PowerShell started from another one may not find.
+        $stream = [IO.File]::OpenRead($tarball)
+        try { $got = -join ([Security.Cryptography.SHA256]::Create().ComputeHash($stream) | ForEach-Object { $_.ToString("x2") }) }
+        finally { $stream.Dispose() }
         if ($got -ne $m.Groups[1].Value) { Die "$name did not arrive as the release has it (its checksum differs)" }
         & tar -xzf $tarball -C $tmp
         if ($LASTEXITCODE -ne 0) { Die "$name could not be unpacked" }

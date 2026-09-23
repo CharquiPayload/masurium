@@ -71,8 +71,8 @@ Type: filesandordirs; Name: "{app}\app"
 Type: filesandordirs; Name: "{app}\runtime"
 
 [Code]
-{ The `masurium` command: {app}\bin on this user's PATH, and off it again when
-  the program goes. The PATH of a user lives in the registry. }
+// The `masurium` command: the program's bin folder on this user's PATH, and
+// off it again when the program goes. The PATH of a user lives in the registry.
 const
   EnvKey = 'Environment';
 

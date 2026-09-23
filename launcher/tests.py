@@ -1071,7 +1071,9 @@ def tests_server_mod_missing():
     check("a server mod that does not answer stops the start before the game",
           isinstance(result, Fail) and result.code == "server_mod_down"
           and "Is Masurium in that server's mods folder" in text
-          and "starting alice" not in text and not inst.keeper_log.exists(), text)
+          and "starting alice" not in text and not inst.keeper_log.exists(),
+          f"{text}\n         keeper.log there: {inst.keeper_log.exists()} "
+          + " | ".join(files.tail_lines(inst.keeper_log, 4)))
     httpd = serve_a_server_mod(token="another")
     try:
         text, result = said(ops.start, inst)
@@ -2564,7 +2566,10 @@ def tests_firstrun():
     check("server.env is written, keeping the lines it had", values.get("MASURIUM_HOST") == "10.0.0.5"
           and values.get("MASURIUM_TOKEN") == "secret" and values.get("MASURIUM_INSTANCES_DIR") == "/somewhere",
           values)
-    check("...and only its user can read it: it holds the token", fresh.env_file.stat().st_mode & 0o077 == 0)
+    # Windows keeps who may read a file in its ACL, not in these bits; a file
+    # under the user's own folders is theirs alone there already.
+    check("...and only its user can read it: it holds the token",
+          os.name == "nt" or fresh.env_file.stat().st_mode & 0o077 == 0)
     firstrun.connect(fresh, "10.0.0.5", "8477", "secret", "", test=False)
     check("...an owner left empty goes", "MASURIUM_OWNER" not in fresh.env_values())
     httpd, port = fake_server_mod("right", [])
