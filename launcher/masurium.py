@@ -31,7 +31,14 @@ import sys
 if __name__ == "__main__":
     # The repository, not this folder, is where `launcher` is imported from:
     # with this folder first on the path, its modules would be importable by
-    # their bare names and could shadow others.
-    sys.path[0] = str(pathlib.Path(__file__).resolve().parent.parent)
+    # their bare names and could shadow others. An embedded Python (the one
+    # the Windows setup brings) takes its path from its ._pth file and does
+    # not put this folder on it at all: there the repository goes in front,
+    # and the standard library's entry stays where it is.
+    here = pathlib.Path(__file__).resolve().parent
+    if sys.path and pathlib.Path(sys.path[0] or ".").resolve() == here:
+        sys.path[0] = str(here.parent)
+    else:
+        sys.path.insert(0, str(here.parent))
     from launcher.cli import main
     sys.exit(main())

@@ -2354,6 +2354,12 @@ def tests_masurium_update():
           and (os.name == "nt" or ".deb" in updates.how_to_update("/opt/masurium-launcher/app")
                and "PKGBUILD" in updates.how_to_update("/usr/share/masurium-launcher"))
           and updates.one_line() in updates.how_to_update(TMP / "unpacked"))
+    setup_made = TMP / "setup-made"
+    setup_made.mkdir(exist_ok=True)
+    (setup_made / updates.INSTALLER).write_text("setup.exe\r\n")
+    check("a copy the Windows setup made is told to run the next setup, and does not update itself",
+          updates.made_by_setup(setup_made) and not updates.made_by_installer(setup_made)
+          and "MasuriumLauncherSetup" in updates.how_to_update(setup_made))
     check("each platform's installer is run its way: sh for install.sh, PowerShell for install.ps1",
           updates.installer_command("x/install.sh") == ["sh", str(pathlib.Path("x/install.sh"))]
           and updates.installer_command("x/install.ps1")[:1] == ["powershell"]

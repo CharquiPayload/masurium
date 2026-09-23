@@ -38,9 +38,12 @@ WINDOWS = os.name == "nt"
 # the state folder. Opening the window must not wait on the network.
 EVERY = 24 * 3600
 CACHE = "masurium-latest.json"
-# What an installer leaves in a copy it made, saying which it was.
+# What an installer leaves in a copy it made, saying which it was. A copy the
+# one-line installers made updates itself from the window; one the Windows
+# setup made is updated by the next setup.
 INSTALLER = "INSTALLER"
 INSTALLERS = ("install.sh", "install.ps1")
+SETUP = "setup.exe"
 # The launcher's tarball in a release's SHA256SUMS, as sha256sum writes it
 # (or a Windows editor, with its lines ending in \r\n).
 TARBALL = re.compile(r"^([0-9a-f]{64}) [ *](masurium-launcher-[0-9][A-Za-z0-9.+~-]*\.tar\.gz)\r?$", re.M)
@@ -106,6 +109,15 @@ def made_by_installer(root=None):
     return installer_of(root) is not None
 
 
+def made_by_setup(root=None):
+    """Whether the Windows setup (packaging/windows) made this copy."""
+    try:
+        said = (pathlib.Path(root or operations.REPO) / INSTALLER).read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    return said == SETUP
+
+
 def one_line(windows=WINDOWS):
     """The one-line installer of this platform."""
     return ONE_LINE_WINDOWS if windows else ONE_LINE
@@ -119,6 +131,8 @@ def how_to_update(root=None):
     made = installer_of(root)
     if made:
         return f"the window's Update now, or  {one_line(made == 'install.ps1')}  again"
+    if made_by_setup(root):
+        return "the new MasuriumLauncherSetup .exe from the release page: it updates this one"
     if root.parts[:2] in (("/", "opt"), ("/", "usr")):
         return "install the new package from the release page, the way this one was (the .deb, or the PKGBUILD)"
     return f"install the new release:  {one_line()}"

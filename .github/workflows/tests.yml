@@ -58,3 +58,27 @@ jobs:
       - name: build, and every test
         working-directory: mod
         run: ./gradlew build --console=plain
+
+  windows-setup:
+    name: Windows setup (.exe)
+    runs-on: windows-latest
+    # Being built: its failures are said, and do not paint the commit red.
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: build the setup
+        shell: pwsh
+        run: ./packaging/windows/build.ps1
+      - name: install it silently, use it, take it away
+        shell: pwsh
+        run: ./packaging/windows/check-setup.ps1
+      - name: keep the setup, to try by hand
+        uses: actions/upload-artifact@v7
+        with:
+          name: MasuriumLauncherSetup
+          path: dist/MasuriumLauncherSetup-*.exe
+          retention-days: 14

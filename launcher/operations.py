@@ -28,7 +28,7 @@ from .files import (LogWatch, link_dir, link_or_copy, link_target, log_has, read
 from .keeper import (GAME_OVER, HMC_READY, KEEPER_ENDED, KEEPER_FAILED, clear_run_files,
                      keeper_alive, keeper_ask, keeper_pid, launcher_pid)
 from .packs import CORE_JAR, compare_packs, jar_family, pack_mods, sync_mods
-from .processes import ENTRY, game_pids, is_ours, port_in_use, spawn_free, stop_game, terminate
+from .processes import ENTRY, PYTHON, game_pids, is_ours, port_in_use, spawn_free, stop_game, terminate
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 
@@ -486,7 +486,7 @@ def _start_steps(inst, report, cancel, launched):
     if cancel:
         cancel.check()
     take_place(inst)
-    spawn_free([sys.executable, str(ENTRY), "keeper", inst.key],
+    spawn_free([PYTHON, str(ENTRY), "keeper", inst.key],
                inst.keeper_log, cwd=ws.home, env=ws.child_env())
     launched.append(True)
 
@@ -661,7 +661,7 @@ def start_bridge(inst, on_event=None):
         if fresh:
             report.detail(f"Claude Code {fresh[1]} is out; this machine runs {fresh[0]}. To update "
                           f"its brain:  {brain.UPDATE}")
-        spawn_free([sys.executable, str(REPO / "mcp" / "bridge.py"), inst.name],
+        spawn_free([PYTHON, str(REPO / "mcp" / "bridge.py"), inst.name],
                    inst.bridge_log, cwd=inst.ws.home, env=bridge_env(inst))
         # The sign that it started is its own "listening" line, not that a
         # process exists: the bridge can exist and be dying. The log does not

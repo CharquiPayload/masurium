@@ -20,9 +20,12 @@
 - **Windows, on its way:** `install.ps1`, the Windows twin of `install.sh`
   (`irm .../install.ps1 | iex`), for one user and without administrator rights:
   the program, its own Python environment with Qt, a `masurium` command and a
-  Start menu entry; Update now runs it the way it runs `install.sh`. Javas
-  installed under Program Files are found. Tested on GitHub's Windows machine,
-  not yet on a Windows desktop.
+  Start menu entry; Update now runs it the way it runs `install.sh`. And a
+  classic setup, `MasuriumLauncherSetup-<version>.exe` (Inno Setup,
+  `packaging/windows`): Next, Next, Install, for one user, bringing a Python of
+  its own with Qt so the machine needs nothing else, with its uninstaller in
+  Windows' list of programs. Javas installed under Program Files are found.
+  Tested on GitHub's Windows machine, not yet on a Windows desktop.
 - **Ctrl+C on `masurium start` stops the game it launched on every Python.** On
   Python 3.12 and older (Ubuntu 24.04's, for one) a Ctrl+C that landed while the
   command waited made it leave at once, exit code 0, with the game still loading.

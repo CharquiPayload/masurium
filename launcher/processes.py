@@ -17,6 +17,20 @@ WINDOWS = os.name == "nt"
 ENTRY = pathlib.Path(__file__).resolve().parent / "masurium.py"
 
 
+def _console_python():
+    """The Python the launcher's own processes run on: this one, except that
+    on Windows the window runs on pythonw.exe, so that no console opens with
+    it, and a pythonw has no console output to hand its children; they get
+    the python.exe beside it (detached, they open no console either)."""
+    exe = pathlib.Path(sys.executable)
+    if WINDOWS and exe.name.lower() == "pythonw.exe" and (exe.parent / "python.exe").is_file():
+        return str(exe.parent / "python.exe")
+    return sys.executable
+
+
+PYTHON = _console_python()
+
+
 def run_quiet(args, timeout=20):
     try:
         r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
@@ -140,7 +154,7 @@ def spawn_free(args, log_path, cwd, env=None):
     belongs to nobody: a `start` still polling the server never holds a dead
     keeper as a zombie, so `stop`, run from elsewhere, sees it gone the moment
     it is. (Windows has no zombies; the middleman costs nothing there.)"""
-    middle = detached([sys.executable, str(ENTRY), "spawn",
+    middle = detached([PYTHON, str(ENTRY), "spawn",
                        "--log", str(log_path), "--cwd", str(cwd), "--"] + list(args),
                       log_path, cwd=cwd, env=env)
     middle.wait(timeout=15)
