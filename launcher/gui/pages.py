@@ -10,12 +10,12 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFileDialog, QFormL
                                QListWidgetItem, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QTableWidget,
                                QTableWidgetItem, QTabWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
-from .. import accounts, operations, rules, settings
+from .. import accounts, memory, operations, rules, settings
 from ..instances import Instance
 from ..events import Fail
 from ..files import tail_lines
 from . import anim, icons, theme
-from .common import ConsoleDialog, ask, monospace, muted, title
+from .common import ConsoleDialog, Dialog, ask, monospace, muted, ok_row, title
 from .widgets import Switch, switch_row
 
 def side_buttons(*buttons):
@@ -610,6 +610,184 @@ class PersonalityPage(QWidget):
     def _save(self):
         self.inst.personality.write_text(self.text.toPlainText().rstrip() + "\n", encoding="utf-8")
         self.win.say_text(f"personality of {self.inst.key} saved")
+
+
+class PlaceDialog(Dialog):
+    """A place to remember, or one to change: its name, what it is, its
+    dimension and its coordinates."""
+
+    def __init__(self, parent, place=None, dimension=None):
+        super().__init__(parent)
+        self.setWindowTitle("A place" if place is None else f"The place {place.name or place.type}")
+        form = QFormLayout(self)
+        self.name = QLineEdit(place.name if place else "")
+        self.name.setPlaceholderText("what it is called, like the factory")
+        form.addRow("Name", self.name)
+        self.type = QComboBox()
+        self.type.addItems(memory.TYPES)
+        self.type.setCurrentText(place.type if place else "point")
+        self.type.setToolTip("point: any spot someone named; the rest, what the bot uses there")
+        form.addRow("Type", self.type)
+        self.dimension = QComboBox()
+        self.dimension.setEditable(True)
+        self.dimension.addItems(memory.DIMENSIONS)
+        self.dimension.setCurrentText(place.dimension if place else (dimension or "overworld"))
+        form.addRow("Dimension", self.dimension)
+        coords = QHBoxLayout()
+        self.xyz = []
+        for axis, value in zip("xyz", (place.x, place.y, place.z) if place else (0, 64, 0)):
+            box = QSpinBox()
+            box.setRange(-30_000_000, 30_000_000)
+            box.setValue(value)
+            box.setPrefix(f"{axis}  ")
+            coords.addWidget(box)
+            self.xyz.append(box)
+        form.addRow("Where", coords)
+        form.addRow(ok_row(self, "Remember" if place is None else "Change", self.accept))
+
+    def place(self):
+        x, y, z = (b.value() for b in self.xyz)
+        return memory.Place(self.type.currentText(), self.dimension.currentText().strip().lower(), x, y, z,
+                            " ".join(self.name.text().split()))
+
+
+class MemoryPage(QWidget):
+    """What the bot remembers, per server: the places it knows, with their
+    coordinates and dimension, and the texts it wrote down. While it plays a
+    change goes to it at once (it holds its memory); otherwise, into its files."""
+
+    def __init__(self, win, inst):
+        super().__init__()
+        self.win, self.inst = win, inst
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.addWidget(title(f"Memory of {inst.key} · {inst.name}"))
+        v.addWidget(muted("What it remembers, per server: the places it knows, and the texts it wrote down. "
+                          "A place is also per dimension: in the Nether the same x and z are another spot. "
+                          "What it is told in the game lands here too; while it plays, a change here reaches it "
+                          "at once."))
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Server"))
+        self.server = QComboBox()
+        for s in memory.servers(inst):
+            self.server.addItem(s, s)
+        self.server.currentIndexChanged.connect(lambda _: self._fill())
+        row.addWidget(self.server)
+        row.addSpacing(16)
+        row.addWidget(QLabel("Dimension"))
+        self.dimension = QComboBox()
+        self.dimension.addItem("every dimension", None)
+        for d in memory.DIMENSIONS:
+            self.dimension.addItem(d, d)
+        self.dimension.currentIndexChanged.connect(lambda _: self._fill())
+        row.addWidget(self.dimension)
+        row.addStretch()
+        v.addLayout(row)
+        self.tabs = QTabWidget()
+        tab = QWidget()
+        h = QHBoxLayout(tab)
+        self.places = QTreeWidget()
+        self.places.setHeaderLabels(["Name", "Type", "Dimension", "x", "y", "z"])
+        self.places.setRootIsDecorated(False)
+        self.places.setColumnWidth(0, 220)
+        self.places.itemDoubleClicked.connect(lambda *_: self._change_place())
+        h.addWidget(self.places, 1)
+        h.addLayout(side_buttons(("Add", "plus", self._add_place), ("Edit", "edit", self._change_place),
+                                 ("Forget", "delete", self._forget_place)))
+        self.tabs.addTab(tab, icons.icon("pin"), "Coordinates")
+        tab = QWidget()
+        h = QHBoxLayout(tab)
+        self.texts = QTreeWidget()
+        self.texts.setHeaderLabels(["When", "What it remembers"])
+        self.texts.setRootIsDecorated(False)
+        self.texts.setWordWrap(True)
+        self.texts.setColumnWidth(0, 140)
+        self.texts.itemDoubleClicked.connect(lambda *_: self._rewrite())
+        h.addWidget(self.texts, 1)
+        h.addLayout(side_buttons(("Write", "plus", self._write), ("Edit", "edit", self._rewrite),
+                                 ("Forget", "delete", self._forget_text)))
+        self.tabs.addTab(tab, icons.icon("logs"), "Texts")
+        v.addWidget(self.tabs, 1)
+        self._fill()
+
+    def _where(self):
+        return self.server.currentData() or self.inst.slug
+
+    def _fill(self):
+        server, dim = self._where(), self.dimension.currentData()
+        self.places.clear()
+        for p in memory.places(self.inst, server):
+            if dim and p.dimension != dim:
+                continue
+            it = QTreeWidgetItem([p.name or "—", p.type, p.dimension, str(p.x), str(p.y), str(p.z)])
+            it.setData(0, Qt.UserRole, p)
+            self.places.addTopLevelItem(it)
+        if not self.places.topLevelItemCount():
+            self.places.addTopLevelItem(QTreeWidgetItem(["(nothing remembered here yet)"]))
+        self.texts.clear()
+        for entry in reversed(memory.diary(self.inst, server)):
+            when, _, text = entry.partition(" | ")
+            it = QTreeWidgetItem([when, text] if text else ["", entry])
+            it.setData(0, Qt.UserRole, entry)
+            it.setToolTip(1, text or entry)
+            self.texts.addTopLevelItem(it)
+        if not self.texts.topLevelItemCount():
+            self.texts.addTopLevelItem(QTreeWidgetItem(["", "(nothing written yet)"]))
+
+    def _chosen(self, tree, what):
+        items = tree.selectedItems()
+        value = items[0].data(0, Qt.UserRole) if items else None
+        if value is None:
+            self.win.alert("Nothing chosen", f"Choose {what} in the list first.")
+        return value
+
+    def _do(self, fn, *args):
+        try:
+            how = fn(self.inst, *args, server=self._where())
+        except Fail as e:
+            self.win.fail(e)
+        except OSError as e:
+            self.win.fail(Fail(f"{self.inst.key} did not answer: {e}", code="memory"))
+        else:
+            self.win.say_text(f"{self.inst.key}: " + ("told, it applies now" if how == "told" else "its memory changed"))
+        self._fill()
+
+    def _add_place(self):
+        d = PlaceDialog(self, dimension=self.dimension.currentData())
+        if d.exec():
+            self._do(memory.remember_place, d.place())
+
+    def _change_place(self):
+        old = self._chosen(self.places, "a place")
+        if old is None:
+            return
+        d = PlaceDialog(self, old)
+        if d.exec():
+            self._do(memory.change_place, old, d.place())
+
+    def _forget_place(self):
+        old = self._chosen(self.places, "a place")
+        if old is not None and ask(self, "Forget", f"Forget {old.name or old.type} at {old.x} {old.y} {old.z}?"):
+            self._do(memory.forget_place, old)
+
+    def _write(self):
+        text, ok = QInputDialog.getMultiLineText(self, "Something to remember", "What it remembers:")
+        if ok and text.strip():
+            self._do(memory.write, text)
+
+    def _rewrite(self):
+        entry = self._chosen(self.texts, "a text")
+        if entry is None:
+            return
+        text, ok = QInputDialog.getMultiLineText(self, "Change it", "What it remembers:",
+                                                 entry.partition(" | ")[2] or entry)
+        if ok:
+            self._do(memory.rewrite, entry, text)
+
+    def _forget_text(self):
+        entry = self._chosen(self.texts, "a text")
+        if entry is not None and ask(self, "Forget", "Forget this?\n\n" + entry):
+            self._do(memory.forget_text, entry)
 
 
 class LogsPage(QWidget):

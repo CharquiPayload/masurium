@@ -133,6 +133,11 @@ setting ignored it without a word.
   create:cog`. A name alone is that name in whatever mod has it, and named on
   the server it is looked up: `cog` is kept as `create:cog` when only Create
   has one; a name two mods share, or none has, is refused, saying why.
+- A Memory page for each instance: the places it knows, with their
+  coordinates and dimension, and the texts it wrote down, per server, to add,
+  change and forget. While it plays a change goes to the bot, which holds its
+  memory (its `/places` takes a dimension now, and its `/diary` an entry to
+  rewrite or forget); otherwise into its files.
 - Offline or a Microsoft account, one switch: an offline instance plays as the
   name it was given (`name`, for private servers), and may play in several
   games at once; one set to a Microsoft account plays as its player. In the

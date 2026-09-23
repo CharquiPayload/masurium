@@ -20,7 +20,7 @@ from PySide6.QtCore import QEvent, QSettings, Qt, QVariantAnimation  # noqa: E40
 from PySide6.QtGui import QColor, QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QToolButton  # noqa: E402
 
-from .. import brain, groups, instances, operations as ops, rules, workspace  # noqa: E402
+from .. import brain, groups, instances, memory, operations as ops, rules, workspace  # noqa: E402
 from ..workspace import Workspace  # noqa: E402
 from . import anim, dialogs, icons, theme, window as window_module  # noqa: E402
 from .widgets import Switch  # noqa: E402
@@ -242,7 +242,7 @@ def tests(app):
 
     print("\nEdit Instance: its pages, Prism's way")
     ed = win.edit_instance("alice")
-    check("its pages down the left", list(ed.pages) == ["Settings", "Rules", "Personality", "Mods", "Logs"],
+    check("its pages down the left", list(ed.pages) == ["Settings", "Rules", "Personality", "Memory", "Mods", "Logs"],
           list(ed.pages))
     check("...Launch and Kill at the bottom, and Help", {"Launch", "Kill", "Help", "Close"} <= set(buttons_of(ed)),
           buttons_of(ed))
@@ -268,6 +268,32 @@ def tests(app):
     check("a setting changed lands in the instance's layer, and only it",
           wait(lambda: alice.data.get("model") == "sonnet") and "fast_responses" not in alice.data, alice.data)
     shot(ed, "edit-instance")
+    config = alice.gamedir / "config"
+    config.mkdir(parents=True, exist_ok=True)
+    (config / "masurium-places-test.txt").write_text("table,overworld,1,64,2\npoint,the_nether,9,70,9,the bridge\n")
+    (config / "masurium-diary-test.txt").write_text("2026-09-20 10:00 | I built a house\n")
+    mem = ed.page("Memory")
+    mem._fill()
+    check("memory: its places, with their coordinates and dimension",
+          mem.places.topLevelItemCount() == 2 and mem.places.topLevelItem(1).text(0) == "the bridge"
+          and mem.places.topLevelItem(1).text(2) == "the_nether", mem.places.topLevelItemCount())
+    mem.dimension.setCurrentIndex(mem.dimension.findData("the_nether"))
+    check("...one dimension at a time, if asked", mem.places.topLevelItemCount() == 1)
+    check("...and the texts it wrote down", mem.texts.topLevelItem(0).text(1) == "I built a house")
+    dlg = dialogs.PlaceDialog(mem)
+    dlg.name.setText("  fábrica ")
+    for box, value in zip(dlg.xyz, (32, 67, 323)):
+        box.setValue(value)
+    check("a place to remember: its name, a point by default, the overworld, x y z",
+          dlg.place() == memory.Place("point", "overworld", 32, 67, 323, "fábrica"), dlg.place())
+    mem._do(memory.remember_place, dlg.place())
+    mem.dimension.setCurrentIndex(0)
+    check("...remembered, and listed", any(mem.places.topLevelItem(i).text(0) == "fábrica"
+                                          for i in range(mem.places.topLevelItemCount())))
+    mem.places.clearSelection()
+    mem._forget_place()
+    check("...Forget with nothing chosen says so", "Choose a place" in said["alerts"][-1])
+    shot(ed, "memory")
     logs = ed.page("Logs")
     check("logs: each one, or that there is nothing yet", logs.tabs.count() == 3
           and logs.views[0][0].toPlainText() != "")

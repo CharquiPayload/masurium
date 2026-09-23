@@ -859,6 +859,14 @@ public class MasuriumBot {
             Diary.note(memo);
             return "{\"ok\":true,\"noted\":true}";
         }
+        // The launcher's memory page: an entry, given whole, forgotten or rewritten.
+        String entry = q.getOrDefault("entry", "").trim();
+        if (!entry.isEmpty()) {
+            if (!Diary.change(entry, q.getOrDefault("text", ""))) {
+                return "{\"ok\":false,\"error\":\"that entry is not in my diary\"}";
+            }
+            return "{\"ok\":true}";
+        }
         int howMany = 20;
         try {
             howMany = Integer.parseInt(q.getOrDefault("how_many", "20").trim());
@@ -3367,12 +3375,20 @@ public class MasuriumBot {
         boolean forget = "1".equals(q.get("forget"));
         return inGame(() -> {
             var p = Minecraft.getInstance().player;
+            // Where, for the launcher's memory page: a place in another dimension than the
+            // one it stands in. Without it, the one it is in, as always.
+            String dimension = q.getOrDefault("dimension", "").trim().toLowerCase();
+            if (dimension.isEmpty()) dimension = Places.currentDimension();
+            if (!dimension.matches("[a-z0-9_./-]{1,64}")) {
+                return String.format("{\"ok\":false,\"error\":\"'%s' is not a dimension\"}",
+                        Request.escape(dimension));
+            }
             if (!remember.isEmpty() || forget) {
                 int x = Integer.parseInt(require(q, "x"));
                 int y = Integer.parseInt(require(q, "y"));
                 int z = Integer.parseInt(require(q, "z"));
                 if (forget) {
-                    if (!Places.forget(new BlockPos(x, y, z))) {
+                    if (!Places.forget(new BlockPos(x, y, z), dimension)) {
                         return "{\"ok\":false,\"error\":\"that spot was not "
                                + "in my memory\"}";
                     }
@@ -3397,11 +3413,11 @@ public class MasuriumBot {
                     // row is portal too and there is no route to it. That is how the bot
                     // ended up on the frame, "stuck on the edge".
                     BlockPos whereToNote = new BlockPos(x, y, z);
-                    if (remember.equals("portal")) {
+                    if (remember.equals("portal") && dimension.equals(Places.currentDimension())) {
                         whereToNote = Traveler.adjustPortal(
                                 Minecraft.getInstance(), whereToNote);
                     }
-                    if (Places.remember(remember, whereToNote, label)) {
+                    if (Places.remember(remember, whereToNote, label, dimension)) {
                         Logbook.note("places", String.format(
                                 "I remember %s at %d %d %d (I was told%s)",
                                 remember, whereToNote.getX(),

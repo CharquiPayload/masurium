@@ -19,6 +19,7 @@ tomorrow, both on the same functions.
     settings.py    settings in layers (instance < groups < global), what each
                    accepts, when it counts, and what is rendered for the bridge
     rules.py       a bot's rules (toggles, food, blocks), its own kept on its server
+    memory.py      what a bot remembers: its places, per dimension, and its texts, per server
     packs.py       what a pack is made of, read from the jars; the pack owns gamedir/mods
     api.py         the server mod's HTTP API
     keeper.py      the process that holds a game's console

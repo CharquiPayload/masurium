@@ -16,10 +16,11 @@ from ..instances import Instance
 from ..events import Fail
 from . import anim, icons, theme
 from .common import Dialog, close_row, muted, ok_row, title
-from .pages import (NEW_ACCOUNT, AccountChoice, AccountsPage, LauncherPage, LogsPage, ModsPage, PersonalityPage,
-                    RulesPage, ServersPage, SettingsPage)
+from .pages import (NEW_ACCOUNT, AccountChoice, AccountsPage, LauncherPage, LogsPage, MemoryPage, ModsPage,
+                    PersonalityPage, PlaceDialog, RulesPage, ServersPage, SettingsPage)
 
-PAGE_ICONS = {"Settings": "gear", "Rules": "rules", "Personality": "bot", "Mods": "cube", "Logs": "logs",
+PAGE_ICONS = {"Settings": "gear", "Rules": "rules", "Personality": "bot", "Memory": "pin", "Mods": "cube",
+              "Logs": "logs",
               "Launcher": "window", "Java": "cup", "Global settings": "globe", "Global rules": "rules",
               "Accounts": "account", "Servers": "server"}
 # The part of the setup guide each dialog's Help opens.
@@ -70,14 +71,15 @@ class PagedDialog(Dialog):
 
 
 class EditInstanceDialog(PagedDialog):
-    """Prism's Edit Instance: its settings, its rules, its personality, its
-    extra mods and its logs; Launch and Kill at the bottom, as in Prism's
-    console window."""
+    """Prism's Edit Instance: its settings, its rules, its personality, what
+    it remembers, its extra mods and its logs; Launch and Kill at the bottom,
+    as in Prism's console window."""
 
     def __init__(self, win, inst, start=None):
         pages = [("Settings", lambda: SettingsPage(win, inst)),
                  ("Rules", lambda: RulesPage(win, "instance", inst)),
                  ("Personality", lambda: PersonalityPage(win, inst)),
+                 ("Memory", lambda: MemoryPage(win, inst)),
                  ("Mods", lambda: ModsPage(win, inst)), ("Logs", lambda: LogsPage(win, inst))]
         super().__init__(win, f"Edit instance · {inst.key}  ({inst.name} on {inst.slug})", pages, start,
                          help="configuring-a-bot")

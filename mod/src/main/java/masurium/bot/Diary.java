@@ -105,6 +105,26 @@ final class Diary {
     }
 
     /**
+     * Forgets an entry, given whole ("2026-09-22 20:15 | ..."), or puts {@code text} in
+     * its place, keeping its date: the launcher's memory page. False if it is not there.
+     */
+    static synchronized boolean change(String entry, String text) {
+        load();
+        int i = entries.indexOf(entry.strip());
+        if (i < 0) return false;
+        String clean = text == null ? "" : text.strip();
+        if (clean.isEmpty()) {
+            entries.remove(i);
+        } else {
+            String old = entries.get(i);
+            int bar = old.indexOf(" | ");
+            entries.set(i, (bar >= 0 ? old.substring(0, bar + 3) : "") + clean);
+        }
+        save();
+        return true;
+    }
+
+    /**
      * Is this the first time it sees this?
      *
      * <p>Asked and marked at once: callers do it right when it is in front of them, and

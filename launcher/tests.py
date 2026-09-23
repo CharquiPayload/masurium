@@ -2077,6 +2077,94 @@ def tests_lead_in_place():
         said(ops.delete_instance, WS, key)
 
 
+def tests_memory():
+    print("\nMemory: the places it knows and what it wrote down, per server and per dimension")
+    from launcher import memory
+    import http.server
+    import threading
+    import urllib.parse
+    layout()
+    quick_server_env()
+    _, inst = said(ops.create, WS, "Mnemo", "test")
+    config = inst.gamedir / "config"
+    config.mkdir(parents=True, exist_ok=True)
+    (config / "masurium-places-test.txt").write_text(
+        "# Useful places of THIS server: type,dimension,x,y,z[,label]\n"
+        "table,overworld,1,64,2\npoint,the_nether,10,70,-5,the bridge, north end\n"
+        "bed,3,65,4\nnonsense,1,2,3\n")
+    (config / "masurium-diary-test.txt").write_text(
+        "# Diary of this server.\n2026-09-20 10:00 | I built a house\n#seen entity:cow\n")
+    (config / "masurium-places-other.txt").write_text("chest,overworld,0,60,0\n")
+    check("the servers it remembers something of: its own first, then the others",
+          memory.servers(inst) == ["test", "other"], memory.servers(inst))
+    places = memory.places(inst)
+    check("places are read with their dimension; an old line is the overworld; junk is skipped",
+          [(p.type, p.dimension, p.name) for p in places] == [
+              ("table", "overworld", ""), ("point", "the_nether", "the bridge, north end"), ("bed", "overworld", "")],
+          places)
+    check("texts are read, the marks of first sightings left out", memory.diary(inst) == ["2026-09-20 10:00 | I built a house"])
+
+    factory = memory.Place("point", "overworld", 32, 67, 323, "fábrica")
+    check("stopped, a place is written into its file", memory.remember_place(inst, factory) == "written"
+          and factory in memory.places(inst))
+    check("...the first sightings are kept", "#seen entity:cow" in (config / "masurium-diary-test.txt").read_text())
+    moved = memory.Place("point", "overworld", 33, 67, 323, "fábrica")
+    memory.change_place(inst, factory, moved)
+    check("a place changed: the old spot forgotten, the new one noted",
+          moved in memory.places(inst) and factory not in memory.places(inst))
+    memory.forget_place(inst, moved)
+    check("forgotten", moved not in memory.places(inst))
+    check("forgetting what it does not remember is said", fails(memory.forget_place, inst, moved) is not None)
+    for bad in (memory.Place("point", "overworld", 0, 0, 0, ""), memory.Place("house", "overworld", 0, 0, 0, "x"),
+                memory.Place("chest", "The Nether!", 0, 0, 0, "")):
+        check(f"refused: {bad.type} '{bad.name}' in {bad.dimension}", fails(memory.remember_place, inst, bad) is not None)
+    memory.write(inst, "  the  factory   is  north  ")
+    written = memory.diary(inst)[-1]
+    check("a text is written, dated, in one line", written.endswith(" | the factory is north") and len(written) > 20,
+          written)
+    memory.rewrite(inst, written, "the factory is south")
+    check("rewritten, it keeps its date", memory.diary(inst)[-1] == written.split(" | ")[0] + " | the factory is south")
+    memory.forget_text(inst, memory.diary(inst)[-1])
+    check("forgotten", memory.diary(inst) == ["2026-09-20 10:00 | I built a house"])
+    memory.remember_place(inst, factory, server="other")
+    check("another server's memory is its own", factory in memory.places(inst, "other")
+          and factory not in memory.places(inst))
+
+    # Playing: the bot holds its memory, so the change goes to it.
+    asked = []
+
+    class Hands(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            asked.append(urllib.parse.urlsplit(self.path))
+            body = b'{"ok": true}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+    hands = http.server.HTTPServer(("127.0.0.1", inst.port), Hands)
+    threading.Thread(target=hands.serve_forever, daemon=True).start()
+    try:
+        before = (config / "masurium-places-test.txt").read_text()
+        check("playing, a place is told to the bot, with its dimension, and the file is left to it",
+              memory.remember_place(inst, memory.Place("portal", "the_nether", 1, 2, 3, "")) == "told"
+              and asked[-1].path == "/places"
+              and urllib.parse.parse_qs(asked[-1].query) == {"remember": ["portal"], "x": ["1"], "y": ["2"],
+                                                              "z": ["3"], "dimension": ["the_nether"]}
+              and (config / "masurium-places-test.txt").read_text() == before, asked[-1:])
+        memory.rewrite(inst, "2026-09-20 10:00 | I built a house", "I built a big house")
+        check("...and so is a text", asked[-1].path == "/diary" and urllib.parse.parse_qs(asked[-1].query)
+              == {"entry": ["2026-09-20 10:00 | I built a house"], "text": ["I built a big house"]}, asked[-1:])
+        check("another server's memory is not the bot's right now: its file", memory.remember_place(
+            inst, memory.Place("bed", "overworld", 5, 5, 5, ""), server="other") == "written")
+    finally:
+        hands.shutdown()
+        hands.server_close()
+    said(ops.delete_instance, WS, "mnemo")
+
+
 def tests_claude_update():
     print("\nClaude Code: a newer one is said, never installed")
     layout()
@@ -2229,6 +2317,7 @@ if __name__ == "__main__":
     tests_offline_and_java()
     tests_delete()
     tests_lead_in_place()
+    tests_memory()
     tests_claude_update()
     tests_version()
     tests_rules_model()

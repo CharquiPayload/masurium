@@ -261,8 +261,15 @@ name to write, or a **Microsoft account**, chosen from the ones in Settings,
 Accounts (or added right there); then its server and its group. **Edit**
 opens an instance's own window, with its pages down the left: Settings (the
 same switch for its account, and the rest in sections), Rules, Personality,
-Mods (jars of its own) and Logs, and Launch and Kill at the bottom; a double
-click on an instance opens it at its logs. **Settings** has the launcher's own
+Memory, Mods (jars of its own) and Logs, and Launch and Kill at the bottom; a
+double click on an instance opens it at its logs. **Memory** is what the bot
+remembers, per server: its **coordinates** (the places it knows, each with its
+name, what it is and its dimension, since in the Nether the same x and z are
+another spot; a *point* is any spot with a name, like "the factory") and its
+**texts** (what it wrote down, dated). They can be added, changed and
+forgotten there; while the bot plays the change goes to it at once, and
+otherwise into its files (`gamedir/config/masurium-places-<server>.txt` and
+`masurium-diary-<server>.txt`). **Settings** has the launcher's own
 page (its colour style, animations, how often it looks at the instances),
 Java, the global settings and rules, the Microsoft accounts (logged in from
 the window through HeadlessMC's own questions) and the servers. Long operations run in the

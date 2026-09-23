@@ -189,8 +189,16 @@ final class Places {
      */
     static synchronized boolean remember(String type, BlockPos where,
                                          String label) {
+        return remember(type, where, label, currentDimension());
+    }
+
+    /**
+     * In a dimension of its choosing: the launcher's memory page notes a place in the
+     * Nether while the bot stands in the overworld.
+     */
+    static synchronized boolean remember(String type, BlockPos where, String label,
+                                         String dim) {
         if (!TYPES.contains(type)) return false;
-        String dim = currentDimension();
         Place before = load().get(key(dim, where));
         String et = label.isEmpty() && before != null
                 ? before.label() : label;
@@ -219,8 +227,12 @@ final class Places {
      *         something done while standing in front of the place.
      */
     static synchronized boolean forget(BlockPos where) {
-        boolean was = load().remove(
-                key(currentDimension(), where)) != null;
+        return forget(where, currentDimension());
+    }
+
+    /** In a dimension of the caller's choosing (the launcher's memory page). */
+    static synchronized boolean forget(BlockPos where, String dimension) {
+        boolean was = load().remove(key(dimension, where)) != null;
         if (was) save();
         return was;
     }
