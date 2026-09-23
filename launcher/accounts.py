@@ -48,7 +48,7 @@ class Account:
     def require(self):
         if not self.exists():
             raise Fail(f"there is no account {self.key}. These are: "
-                       + (", ".join(self.ws.account_keys()) or "(none yet: marionette.py account add)"),
+                       + (", ".join(self.ws.account_keys()) or "(none yet: masurium.py account add)"),
                        code="no_account")
         return self
 
@@ -173,7 +173,7 @@ def finish_login(ws, folder, key=None):
     if account.dir.exists():
         shutil.rmtree(folder, ignore_errors=True)
         raise Fail(f"there is already an account {key}: to log it in again, remove it first "
-                   f"(marionette.py account remove {key}).", code="exists")
+                   f"(masurium.py account remove {key}).", code="exists")
     folder.rename(account.dir)
     account.json.write_text(json.dumps({"name": name}, indent=2) + "\n", encoding="utf-8")
     return account
@@ -217,7 +217,7 @@ def remove(ws, key):
         raise Fail(f"the account {key} is in use: "
                    + "; ".join(x for x in (f"bots {', '.join(bots)}" if bots else "",
                                           f"instances {', '.join(insts)}" if insts else "") if x),
-                   lines=["set them to another account first:  marionette.py set --bot <bot> account ..."],
+                   lines=["set them to another account first:  masurium.py set --bot <bot> account ..."],
                    code="in_use")
     shutil.rmtree(account.dir)
 

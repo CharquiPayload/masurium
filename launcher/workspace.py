@@ -9,7 +9,7 @@ Four folders, outside the repo because they are heavy and are not code:
                            HeadlessMC, its logs and its own settings
     groups/<name>/         instances started together, a leader with its guards,
                            and the settings and rules they impose
-    shared/                what every instance uses: HeadlessMC and the Marionette mods
+    shared/                what every instance uses: HeadlessMC and the Masurium mods
 
 plus server.env, the way to the server mod's API; the state folder, where
 each server's bridges keep their sessions and channels; and the environment
@@ -51,8 +51,8 @@ class Server:
 
     @property
     def env_file(self):
-        """Its own way to its server mod (MARIONETTE_HOST, MARIONETTE_PORT,
-        MARIONETTE_TOKEN), when it has one. Apart from server.conf on
+        """Its own way to its server mod (MASURIUM_HOST, MASURIUM_PORT,
+        MASURIUM_TOKEN), when it has one. Apart from server.conf on
         purpose: server.conf can be shown and passed around, the token never."""
         return self.pack / "server.env"
 
@@ -76,7 +76,7 @@ class Workspace:
         self.environ = dict(os.environ if environ is None else environ)
         self.instances_dir = pathlib.Path(instances_dir) if instances_dir else self.bots_dir.parent / "instances"
         # Next to server.env by default, which is where the bridge and the MCP
-        # server always kept their state (~/.marionette).
+        # server always kept their state (~/.masurium).
         self.state_dir = pathlib.Path(state_dir) if state_dir else self.env_file.parent
         self.accounts_dir = pathlib.Path(accounts_dir) if accounts_dir else self.bots_dir.parent / "accounts"
         self.groups_dir = pathlib.Path(groups_dir) if groups_dir else self.bots_dir.parent / "groups"
@@ -88,22 +88,22 @@ class Workspace:
         to the home."""
         environ = dict(os.environ if environ is None else environ)
         home = pathlib.Path(home) if home else pathlib.Path.home()
-        env_file = pathlib.Path(environ.get("MARIONETTE_ENV")
-                                or home / ".marionette" / "server.env").expanduser()
+        env_file = pathlib.Path(environ.get("MASURIUM_ENV")
+                                or home / ".masurium" / "server.env").expanduser()
         values = read_env_file(env_file)
 
         def pick(key, default):
             value = environ.get(key) or values.get(key)
             return pathlib.Path(value).expanduser() if value else default
 
-        return cls(pick("MARIONETTE_BOTS_DIR", home / "bots"),
-                   pick("MARIONETTE_SERVERS_DIR", home / "servers"),
-                   pick("MARIONETTE_COMMON_DIR", home / "shared"),
+        return cls(pick("MASURIUM_BOTS_DIR", home / "bots"),
+                   pick("MASURIUM_SERVERS_DIR", home / "servers"),
+                   pick("MASURIUM_COMMON_DIR", home / "shared"),
                    env_file, home, environ,
-                   instances_dir=pick("MARIONETTE_INSTANCES_DIR", home / "instances"),
-                   state_dir=pick("MARIONETTE_STATE_DIR", env_file.parent),
-                   accounts_dir=pick("MARIONETTE_ACCOUNTS_DIR", home / "accounts"),
-                   groups_dir=pick("MARIONETTE_GROUPS_DIR", home / "groups"))
+                   instances_dir=pick("MASURIUM_INSTANCES_DIR", home / "instances"),
+                   state_dir=pick("MASURIUM_STATE_DIR", env_file.parent),
+                   accounts_dir=pick("MASURIUM_ACCOUNTS_DIR", home / "accounts"),
+                   groups_dir=pick("MASURIUM_GROUPS_DIR", home / "groups"))
 
     def __repr__(self):
         return (f"Workspace(bots={self.bots_dir}, instances={self.instances_dir}, "
@@ -112,34 +112,34 @@ class Workspace:
     # --- what the environment overrides ---------------------------------------
 
     def java_command(self):
-        """`java` from PATH, or whatever MARIONETTE_JAVA says: a machine whose
+        """`java` from PATH, or whatever MASURIUM_JAVA says: a machine whose
         default java is not 21 points this at the one that is."""
-        custom = self.environ.get("MARIONETTE_JAVA")
+        custom = self.environ.get("MASURIUM_JAVA")
         return [custom] if custom else ["java"]
 
     def heap(self):
         """The heap of a bot without a `heap` file of its own."""
-        return self.environ.get("MARIONETTE_HEAP") or DEFAULT_HEAP
+        return self.environ.get("MASURIUM_HEAP") or DEFAULT_HEAP
 
     def version_for(self, server):
         """The NeoForge version HeadlessMC launches: the server's, unless
-        MARIONETTE_VERSION says otherwise for every server (a test of a new
+        MASURIUM_VERSION says otherwise for every server (a test of a new
         NeoForge, say)."""
-        return self.environ.get("MARIONETTE_VERSION") or server.version
+        return self.environ.get("MASURIUM_VERSION") or server.version
 
     def child_env(self):
         """What the keeper, the bridge and the MCP server inherit: the same
         folders this workspace resolved, whatever way it resolved them, and a
         native Claude Code install (~/.local/bin, updates itself) first on PATH."""
         env = dict(self.environ)
-        env["MARIONETTE_BOTS_DIR"] = str(self.bots_dir)
-        env["MARIONETTE_SERVERS_DIR"] = str(self.servers_dir)
-        env["MARIONETTE_COMMON_DIR"] = str(self.shared_dir)
-        env["MARIONETTE_INSTANCES_DIR"] = str(self.instances_dir)
-        env["MARIONETTE_STATE_DIR"] = str(self.state_dir)
-        env["MARIONETTE_ACCOUNTS_DIR"] = str(self.accounts_dir)
-        env["MARIONETTE_GROUPS_DIR"] = str(self.groups_dir)
-        env["MARIONETTE_ENV"] = str(self.env_file)
+        env["MASURIUM_BOTS_DIR"] = str(self.bots_dir)
+        env["MASURIUM_SERVERS_DIR"] = str(self.servers_dir)
+        env["MASURIUM_COMMON_DIR"] = str(self.shared_dir)
+        env["MASURIUM_INSTANCES_DIR"] = str(self.instances_dir)
+        env["MASURIUM_STATE_DIR"] = str(self.state_dir)
+        env["MASURIUM_ACCOUNTS_DIR"] = str(self.accounts_dir)
+        env["MASURIUM_GROUPS_DIR"] = str(self.groups_dir)
+        env["MASURIUM_ENV"] = str(self.env_file)
         local_bin = str(self.home / ".local" / "bin")
         env["PATH"] = local_bin + os.pathsep + env.get("PATH", "")
         return env
@@ -166,15 +166,15 @@ class Workspace:
         write_json(self.config_file, data)
 
     def api(self):
-        """The connection to the server mod (MARIONETTE_HOST, MARIONETTE_PORT,
-        MARIONETTE_TOKEN, optionally MARIONETTE_OWNER). Without them nothing can
+        """The connection to the server mod (MASURIUM_HOST, MASURIUM_PORT,
+        MASURIUM_TOKEN, optionally MASURIUM_OWNER). Without them nothing can
         ask the server who is connected, so the launcher refuses to guess."""
         if not self.env_file.is_file():
-            raise Fail(f"missing {self.env_file} (MARIONETTE_HOST, MARIONETTE_PORT, MARIONETTE_TOKEN).",
+            raise Fail(f"missing {self.env_file} (MASURIUM_HOST, MASURIUM_PORT, MASURIUM_TOKEN).",
                        code="no_server_env")
         v = self.env_values()
-        return ServerApi(v.get("MARIONETTE_HOST"), v.get("MARIONETTE_PORT"),
-                         v.get("MARIONETTE_TOKEN"), v.get("MARIONETTE_OWNER"))
+        return ServerApi(v.get("MASURIUM_HOST"), v.get("MASURIUM_PORT"),
+                         v.get("MASURIUM_TOKEN"), v.get("MASURIUM_OWNER"))
 
     def api_for(self, server):
         """The server mod of THIS server: its own servers/<slug>/server.env,
@@ -183,8 +183,8 @@ class Workspace:
         /players, not found, and reported as not joined."""
         if server.env_file.is_file():
             v = read_env_file(server.env_file)
-            return ServerApi(v.get("MARIONETTE_HOST"), v.get("MARIONETTE_PORT"),
-                             v.get("MARIONETTE_TOKEN"), self.env_values().get("MARIONETTE_OWNER"))
+            return ServerApi(v.get("MASURIUM_HOST"), v.get("MASURIUM_PORT"),
+                             v.get("MASURIUM_TOKEN"), self.env_values().get("MASURIUM_OWNER"))
         return self.api()
 
     # --- servers ----------------------------------------------------------------
@@ -308,7 +308,7 @@ class Workspace:
             return inst
         hint = []
         if key.lower() in self.legacy_bots():
-            hint = [f"{key} is in the layout from before instances: marionette.py migrate"]
+            hint = [f"{key} is in the layout from before instances: masurium.py migrate"]
         raise Fail(f"there is no instance {key}.",
                    lines=hint or ["these are: " + (", ".join(self.instance_keys()) or "(none yet)")],
                    code="no_instance")

@@ -1,4 +1,4 @@
-# marionette-veil
+# masurium-veil
 
 An add-on: a jar of its own, next to the core, that teaches a bot to live with
 one third-party mod. This one is for [Veil](https://github.com/FoundryMC/Veil),
@@ -18,8 +18,8 @@ Veil the jar does nothing.
 
 ```bash
 (cd ../../mod && ./gradlew build)   # the core first: the add-on compiles against it
-./gradlew build                     # build/libs/marionette-veil-<version>.jar
-../../launcher/marionette.py deploy-mod build/libs/marionette-veil-*.jar
+./gradlew build                     # build/libs/masurium-veil-<version>.jar
+../../launcher/masurium.py deploy-mod build/libs/masurium-veil-*.jar
 ```
 
 The jar goes in `shared/mods/`, with the core: every bot links it. It is client

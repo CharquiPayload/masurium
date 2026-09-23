@@ -1,4 +1,4 @@
-"""python3 -m launcher: the same as launcher/marionette.py."""
+"""python3 -m launcher: the same as launcher/masurium.py."""
 import sys
 
 from .cli import main

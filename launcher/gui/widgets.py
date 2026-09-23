@@ -11,7 +11,7 @@ STATE_TEXT = {"in": "in the server", "loading": "loading…", "stopped": "stoppe
               "mute": "in the server, no bridge"}
 STATE_COLOUR = {"in": theme.IN_SERVER, "loading": theme.BUSY, "stopped": theme.STOPPED, "mute": theme.WRONG}
 # What a tile or a group header carries when it is dragged: "instance:<key>" or "group:<key>".
-MIME = "application/x-marionette-node"
+MIME = "application/x-masurium-node"
 
 
 def icon_of(view):

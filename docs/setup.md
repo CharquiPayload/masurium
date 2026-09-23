@@ -1,7 +1,7 @@
-# Setting up Marionette
+# Setting up Masurium
 
 Everything you have to do to get a bot playing. The [README](../README.md) says
-what Marionette is and how it is put together; this page is the part with the
+what Masurium is and how it is put together; this page is the part with the
 commands in it.
 
 If you only want to see it work, read **Requirements** and **Quick start**, in
@@ -11,10 +11,10 @@ that order. The rest can wait until you have a bot in the game.
 
 **Minecraft server**
 - Minecraft **1.21.1** with **NeoForge 21.1.x**.
-- The mod: `marionette-<version>.jar`, the same file the bots use.
+- The mod: `masurium-<version>.jar`, the same file the bots use.
 
 **If the server's pack carries Veil** (it ships inside Sable, among others), the
-bots also need `marionette-veil-<version>.jar` in `shared/mods/`: a headless
+bots also need `masurium-veil-<version>.jar` in `shared/mods/`: a headless
 client refuses to start without it, saying so, and `doctor` says so before that.
 The add-on is for one exact Veil version; with another, NeoForge refuses to load
 it and a new add-on version is due. See `addons/veil/README.md`. The server does
@@ -31,9 +31,9 @@ not need it.
   pipelines, not for playing without having bought Minecraft.
 
 **Bot machine** (can be the same machine)
-- Java **21** and Python **3.9+** (standard library only). The launcher is
-  written for every platform Python runs on, but so far it has only been run
-  on Linux.
+- Java **21** and Python **3.9+** (standard library only). The launcher
+  (Masurium Launcher) is written for every platform Python runs on, but so far
+  it has only been run on Linux.
 - [Claude Code](https://claude.com/claude-code), installed for the user that runs
   the bots, with a way to pay for it — see **The brain** below. A Claude
   subscription is **not** required.
@@ -41,7 +41,7 @@ not need it.
   [hmc-specifics](https://github.com/headlesshq/hmc-specifics) mod for 1.21.1
   NeoForge.
 - About **3 GB of RAM per bot** (each bot is a full Java client; a bot's `heap`
-  file, or `MARIONETTE_HEAP` for all of them, sets it).
+  file, or `MASURIUM_HEAP` for all of them, sets it).
 - Network access from the bot machine to the server's game port and to the
   server mod's HTTP port (8477 by default).
 
@@ -69,13 +69,13 @@ file you control:
 
 ```json
 {
-  "apiKeyHelper": "cat ~/.marionette/api.key"
+  "apiKeyHelper": "cat ~/.masurium/api.key"
 }
 ```
 
 ```bash
-printf '%s' 'sk-ant-...' > ~/.marionette/api.key
-chmod 600 ~/.marionette/api.key
+printf '%s' 'sk-ant-...' > ~/.masurium/api.key
+chmod 600 ~/.masurium/api.key
 ```
 
 Rotating a key is then overwriting that one file, with nothing else to change.
@@ -105,7 +105,7 @@ The documented path is the table above. Anything else is yours to verify.
 ### 1. Build the mod
 
 ```bash
-(cd mod && ./gradlew build)   # mod/build/libs/marionette-*.jar
+(cd mod && ./gradlew build)   # mod/build/libs/masurium-*.jar
 ```
 
 **One jar, both halves.** The same file goes in the Minecraft server's `mods/`
@@ -114,13 +114,13 @@ constructed (it is `@Mod(dist = Dist.CLIENT)`), and on a client the server half
 stays asleep unless you open a single-player or LAN world.
 
 If you are updating from a version that shipped two jars, take
-`marionette-server-*.jar` and `marionette-bot-*.jar` **out** of the folder: two
+`masurium-server-*.jar` and `masurium-bot-*.jar` **out** of the folder: two
 jars declaring the same mod and the game will not start.
 
 ### 2. Install it on the server
 
-Put `marionette-*.jar` in the server's `mods/` folder and start the
-server once. It writes `marionette.properties` next to the server jar:
+Put `masurium-*.jar` in the server's `mods/` folder and start the
+server once. It writes `masurium.properties` next to the server jar:
 
 ```properties
 host=127.0.0.1
@@ -139,25 +139,25 @@ comments on their own lines.
 ### 3. Prepare the bot machine
 
 ```text
-~/.marionette/server.env        connection to the server mod
+~/.masurium/server.env          connection to the server mod
 ~/shared/headlessmc-launcher.jar
-~/shared/mods/                  marionette-*.jar and hmc-specifics-*.jar
+~/shared/mods/                  masurium-*.jar and hmc-specifics-*.jar
 ~/servers/<slug>/server.conf    one folder per server you connect to
 ~/servers/<slug>/mods/          client-side mods that server requires (may be empty)
 ~/bots/                         created by the launcher: one folder per bot (a character)
 ~/instances/                    created by the launcher: one folder per instance (a bot on a server)
 ```
 
-`~/.marionette/server.env`:
+`~/.masurium/server.env`:
 
 ```bash
 # where the server mod listens, and its token
-MARIONETTE_HOST=192.168.1.10
-MARIONETTE_PORT=8477
-MARIONETTE_TOKEN=the-same-token
+MASURIUM_HOST=192.168.1.10
+MASURIUM_PORT=8477
+MASURIUM_TOKEN=the-same-token
 # optional: the player who runs the bots; also the owner of any bot
 # without an owner file
-MARIONETTE_OWNER=YourPlayerName
+MASURIUM_OWNER=YourPlayerName
 ```
 
 `~/servers/<slug>/server.conf`:
@@ -180,18 +180,18 @@ passed around without the token. The launcher then looks for each bot in its
 own server's `/players` and compares its pack with that server's `/mods`, and
 the bridge and the MCP server talk to that server (the launcher tells them
 the file's path, never the token). A server without a file of its own uses
-`server.env`, which also keeps what only it says, such as `MARIONETTE_OWNER`.
+`server.env`, which also keeps what only it says, such as `MASURIUM_OWNER`.
 `doctor` checks each server's mod, and that each such file is readable by you
 alone.
 
-The folders can be moved with `MARIONETTE_BOTS_DIR`, `MARIONETTE_INSTANCES_DIR`,
-`MARIONETTE_SERVERS_DIR`, `MARIONETTE_COMMON_DIR` and `MARIONETTE_STATE_DIR`
-(where the bridges keep their sessions and channels, `~/.marionette` by
+The folders can be moved with `MASURIUM_BOTS_DIR`, `MASURIUM_INSTANCES_DIR`,
+`MASURIUM_SERVERS_DIR`, `MASURIUM_COMMON_DIR` and `MASURIUM_STATE_DIR`
+(where the bridges keep their sessions and channels, `~/.masurium` by
 default), either in the environment or as more lines of `server.env`
-(`MARIONETTE_ENV` says where that file is). After building,
-`launcher/marionette.py deploy-mod` copies the mod into `shared/mods` safely,
+(`MASURIUM_ENV` says where that file is). After building,
+`launcher/masurium.py deploy-mod` copies the mod into `shared/mods` safely,
 even with bots running, and clears out any older jar that would declare the
-same mod twice. `MARIONETTE_JAVA` points the bots at a particular `java` when
+same mod twice. `MASURIUM_JAVA` points the bots at a particular `java` when
 the one on the PATH is not 21.
 
 ### 4. Create and start a bot
@@ -202,14 +202,15 @@ server, and it is what starts and stops: its game folder, its HeadlessMC, its
 logs, its port (`instances/<instance>/`). One bot can have several instances,
 on several servers.
 
-Everything goes through one command, `launcher/marionette.py`:
+Everything goes through one command, `launcher/masurium.py`, the command line of
+Masurium Launcher:
 
 ```bash
-launcher/marionette.py doctor            # the machine, the folders, the server: what is missing
-launcher/marionette.py account add      # once per Minecraft account: type `login`, follow the steps, then `quit`
-launcher/marionette.py create Alice <slug>   # the bot Alice and the instance alice on that server
-launcher/marionette.py set --bot alice account <account>   # it plays with that account
-launcher/marionette.py restart alice     # starts the client and, once it is in, its bridge
+launcher/masurium.py doctor            # the machine, the folders, the server: what is missing
+launcher/masurium.py account add      # once per Minecraft account: type `login`, follow the steps, then `quit`
+launcher/masurium.py create Alice <slug>   # the bot Alice and the instance alice on that server
+launcher/masurium.py set --bot alice account <account>   # it plays with that account
+launcher/masurium.py restart alice     # starts the client and, once it is in, its bridge
 ```
 
 For an offline bot on a private server with `online-mode=false`, create it with
@@ -229,19 +230,19 @@ one game at a time (`start` refuses a second one, wherever it would play) and
 its instances start one after another. `account` lists the accounts, whether
 each is still logged in and who uses it; `account remove` takes one out, once
 nobody uses it. (`account online` still means a login kept in the instance's
-own HeadlessMC, made with `marionette.py login <instance>`.)
+own HeadlessMC, made with `masurium.py login <instance>`.)
 
 Then say its name in the chat: `Alice, come here`.
 
-**The window.** The same launcher has a window, on the same code:
+**The window.** Masurium Launcher also has a window, on the same code:
 
 ```bash
 pip install PySide6-Essentials          # Qt for Python; the command line does not need it
-launcher/marionette.py gui
+launcher/masurium.py gui
 ```
 
 It is laid out as [Prism Launcher](https://prismlauncher.org/)'s, so it feels
-familiar to anyone who has used it (Marionette is not affiliated with Prism;
+familiar to anyone who has used it (Masurium is not affiliated with Prism;
 see the README). Across the top: **Add Instance** (with Add Group under its
 arrow), **Folders**, **Settings**, **Help** (doctor, this guide), and **Bots**
 and **Accounts** on the right. In the middle, every instance by group: its
@@ -279,7 +280,7 @@ machine without a screen, it can be shown on a Linux desktop with
 `ssh -X` (X11), with waypipe installed on both ends:
 
 ```bash
-waypipe -n ssh user@bots-machine /path/to/marionette/launcher/marionette.py gui
+waypipe -n ssh user@bots-machine /path/to/masurium/launcher/masurium.py gui
 ```
 
 The rest of the subcommands: `status` (every instance: client, hands, in the
@@ -316,8 +317,8 @@ starting it twice. While a command works on an instance it holds
 ends.
 
 **From the layout before instances.** Bots created before instances existed
-kept their game in their own folder. `marionette.py migrate --dry-run` says
-what it would do, and `marionette.py migrate` turns each one into a bot and an
+kept their game in their own folder. `masurium.py migrate --dry-run` says
+what it would do, and `masurium.py migrate` turns each one into a bot and an
 instance of the same name: the game folders are moved, not copied; what its
 bridge kept goes to its server's state folder; and a backup of every small file
 goes first to `<state>/backups/`. A bot that is running is left alone until it
@@ -329,17 +330,17 @@ Settings come in layers, weakest first: the **bot's** (`bots/<bot>/bot.json`),
 for every instance of it; the **instance's** (`instances/<instance>/instance.json`);
 its **groups'**, from its own outwards (see [Groups](#groups)); and the
 **global** config (`launcher.json`, next to `server.env`). A stronger layer
-wins where it says something. `marionette.py set` changes them with a check
+wins where it says something. `masurium.py set` changes them with a check
 first and says when the change counts; `doctor` names any value, edited by
 hand, that `set` would refuse.
 
 ```bash
-launcher/marionette.py set alice                      # every setting, its value, and where it comes from
-launcher/marionette.py set --bot alice model sonnet   # for every instance of the bot
-launcher/marionette.py set alice model haiku low      # for this instance only
-launcher/marionette.py set alice heap --default       # out of the instance: what is under, or the default
-launcher/marionette.py set --group team model sonnet  # imposed on everything in the group
-launcher/marionette.py set --global heap 4g           # imposed on every instance
+launcher/masurium.py set alice                        # every setting, its value, and where it comes from
+launcher/masurium.py set --bot alice model sonnet     # for every instance of the bot
+launcher/masurium.py set alice model haiku low        # for this instance only
+launcher/masurium.py set alice heap --default         # out of the instance: what is under, or the default
+launcher/masurium.py set --group team model sonnet    # imposed on everything in the group
+launcher/masurium.py set --global heap 4g             # imposed on every instance
 ```
 
 The personality is a text file of its own, `bots/<bot>/personality.txt`: who
@@ -349,10 +350,10 @@ players and how; it goes at the start of its prompt.
 | setting | layers | meaning |
 |---|---|---|
 | `account` | bot, instance | one of the launcher's accounts (`account add`), `offline` (private servers only), or `online` (a login kept in the instance) |
-| `owner` | all | the player the bot belongs to: it accepts their delicate orders, and they control it with `/marionette bot` on any server. It cannot be changed from inside the game |
+| `owner` | all | the player the bot belongs to: it accepts their delicate orders, and they control it with `/masurium bot` on any server. It cannot be changed from inside the game |
 | `model` | all | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`). The aliases `opus`, `sonnet`, `haiku` and `fable` always mean the newest of their family; `opus[1m]` and the like, a million tokens of context |
-| `heap` | all | the game's memory, e.g. `3g` (default `MARIONETTE_HEAP`, else `3g`) |
-| `java` | instance, group, global | the Java its game runs on: a path to a `java`, or a name on the PATH (default `MARIONETTE_JAVA`, else `java`); NeoForge 21.1 wants Java 21 |
+| `heap` | all | the game's memory, e.g. `3g` (default `MASURIUM_HEAP`, else `3g`) |
+| `java` | instance, group, global | the Java its game runs on: a path to a `java`, or a name on the PATH (default `MASURIUM_JAVA`, else `java`); NeoForge 21.1 wants Java 21 |
 | `java_args` | instance, group, global | extra JVM flags, e.g. `-XX:+UseZGC` (the heap is `heap`, not a flag here) |
 | `role` | bot, instance, group | `main` (takes orders, does jobs) or `guard` (see [Groups](#groups)) |
 | `fast_responses` | all | `yes` (default): its brain writes ahead of time, in its voice and language, the few things it says without thinking; `no`: plain English |
@@ -370,11 +371,11 @@ the player it escorts, being cornered) and a few of the bridge's (shutting
 down, busy). They are plain English in the code. With `fast_responses` on
 (the default), the first time its bridge starts the brain writes its own
 version of each, in its voice and its language, into
-`gamedir/config/marionette-phrases.properties`, and those are said from then
+`gamedir/config/masurium-phrases.properties`, and those are said from then
 on; they are written again when its personality changes, and on request:
 
 ```bash
-launcher/marionette.py phrases alice
+launcher/masurium.py phrases alice
 ```
 
 A version that lost a placeholder (the distance of the creeper, say) is not
@@ -398,14 +399,14 @@ A group is `groups/<group>/group.json`, and comes in two kinds:
   role `guard` that no dependency group names does not start, and says so.
 
 ```bash
-launcher/marionette.py group create alice-guards --leader alice   # a dependency group
-launcher/marionette.py group add alice-guards bob                 # bob guards alice (and takes the role)
-launcher/marionette.py group create team
-launcher/marionette.py group add team carol group:alice-guards    # instances and groups
-launcher/marionette.py groups                                     # the tree, and what is in no group
-launcher/marionette.py group start team                           # everything in it, leaders first
-launcher/marionette.py group stop team
-launcher/marionette.py group clone team                           # team-1, with copies of every instance
+launcher/masurium.py group create alice-guards --leader alice     # a dependency group
+launcher/masurium.py group add alice-guards bob                   # bob guards alice (and takes the role)
+launcher/masurium.py group create team
+launcher/masurium.py group add team carol group:alice-guards      # instances and groups
+launcher/masurium.py groups                                       # the tree, and what is in no group
+launcher/masurium.py group start team                             # everything in it, leaders first
+launcher/masurium.py group stop team
+launcher/masurium.py group clone team                             # team-1, with copies of every instance
 ```
 
 Groups nest, and each instance and each group is in **one** group at most, so
@@ -420,7 +421,7 @@ first if their heaps do not fit in the memory there is. One that does not
 start does not stop the rest, except its own guards. A clone of a group is a
 copy of the whole tree with copies of its instances: the same players as the
 originals, so `start` is what refuses to run both. An `escort` from before
-groups is turned into a dependency group by `marionette.py migrate`.
+groups is turned into a dependency group by `masurium.py migrate`.
 
 Standing orders ("if you run out of fuel, take it from the wooden chest") are
 still given by talking to the bot, and kept per server in the client's
@@ -439,7 +440,7 @@ thing:
 | layer | where it is kept | who changes it |
 |---|---|---|
 | **base** | the bot's `bot.json` (`"rules"`), with its server's `servers/<slug>/rules.json` on top | the launcher: `rules --bot`, `rules --server` |
-| **own** | on the server, per player | the launcher (`rules <instance> ...`) **and** `/marionette bot` in the game: one copy, the server's |
+| **own** | on the server, per player | the launcher (`rules <instance> ...`) **and** `/masurium bot` in the game: one copy, the server's |
 | **imposed** | the launcher's `launcher.json` (`"rules"`), next to `server.env` | the launcher only: `rules --global`. The game refuses to change it, and says who imposes it |
 
 Each layer names only what it decides; otherwise lists **add up** (the bot's
@@ -449,13 +450,13 @@ list, and what is under it, the golden apples every bot starts with included,
 no longer counts.
 
 ```bash
-launcher/marionette.py rules alice                          # every toggle and both lists, and who decides each
-launcher/marionette.py rules alice food ban rotten_flesh    # its own, like /marionette bot alice food ban ...
-launcher/marionette.py rules alice pref hunt_players default   # back to what is under
-launcher/marionette.py rules --bot alice break allow oak_log    # the bot's config, for all its instances
-launcher/marionette.py rules --server create food ban beef       # every bot on that server
-launcher/marionette.py rules --global pref hunt_players off      # imposed on every instance
-launcher/marionette.py rules --global food replace               # ...the whole food list, not just additions
+launcher/masurium.py rules alice                            # every toggle and both lists, and who decides each
+launcher/masurium.py rules alice food ban rotten_flesh      # its own, like /masurium bot alice food ban ...
+launcher/masurium.py rules alice pref hunt_players default   # back to what is under
+launcher/masurium.py rules --bot alice break allow oak_log    # the bot's config, for all its instances
+launcher/masurium.py rules --server create food ban beef         # every bot on that server
+launcher/masurium.py rules --global pref hunt_players off        # imposed on every instance
+launcher/masurium.py rules --global food replace                 # ...the whole food list, not just additions
 ```
 
 In a file, a layer reads:
@@ -477,25 +478,25 @@ player on the same server shares them, since the server keeps them per player.
 
 | command | who | what |
 |---|---|---|
-| `/marionette bot <bot>` | anyone | owner, admins, who it hears, whether its bridge answers, and which version of the bot mod it runs |
-| `/marionette bot <bot> shutdown` | owner, admins | stop the client and its bridge |
-| `/marionette bot <bot> restart` | owner, admins | restart the client and its bridge |
-| `/marionette bot <bot> logoff` | owner, admins | leave the server, keeping the client running |
-| `/marionette bot <bot> hear on\|off` | owner, admins | hear only its list, or everyone |
-| `/marionette bot <bot> hear add\|remove <player>` | owner, admins | edit the hear list |
-| `/marionette bot <bot> hear list` | anyone | the hear list and whether it is on |
-| `/marionette bot <bot> admins add\|remove <player>` | owner | edit the admins |
-| `/marionette bot <bot> pref` | anyone | every behaviour setting with its value, and who decides it |
-| `/marionette bot <bot> pref <key>` | anyone | what one setting does, and how it stands |
-| `/marionette bot <bot> pref <key> on\|off\|default` | owner, admins | switch a setting, or take it back to what its config says |
-| `/marionette bot <bot> food` | anyone | what it will not eat on its own |
-| `/marionette bot <bot> food ban\|allow\|default <item>` | owner, admins | edit the food ban |
-| `/marionette bot <bot> break` | anyone | what it may break by itself to make its way |
-| `/marionette bot <bot> break allow\|forbid\|default <block>` | owner, admins | edit that whitelist |
-| `/marionette owners` | anyone | every bot with its owner |
-| `/marionette status` | anyone | what each bot is doing, with health and position |
-| `/marionette hud on\|off` | players | your bots' state icons above your hotbar |
-| `/marionette scoreboard on\|off` | operators | a sidebar with every bot's state |
+| `/masurium bot <bot>` | anyone | owner, admins, who it hears, whether its bridge answers, and which version of the bot mod it runs |
+| `/masurium bot <bot> shutdown` | owner, admins | stop the client and its bridge |
+| `/masurium bot <bot> restart` | owner, admins | restart the client and its bridge |
+| `/masurium bot <bot> logoff` | owner, admins | leave the server, keeping the client running |
+| `/masurium bot <bot> hear on\|off` | owner, admins | hear only its list, or everyone |
+| `/masurium bot <bot> hear add\|remove <player>` | owner, admins | edit the hear list |
+| `/masurium bot <bot> hear list` | anyone | the hear list and whether it is on |
+| `/masurium bot <bot> admins add\|remove <player>` | owner | edit the admins |
+| `/masurium bot <bot> pref` | anyone | every behaviour setting with its value, and who decides it |
+| `/masurium bot <bot> pref <key>` | anyone | what one setting does, and how it stands |
+| `/masurium bot <bot> pref <key> on\|off\|default` | owner, admins | switch a setting, or take it back to what its config says |
+| `/masurium bot <bot> food` | anyone | what it will not eat on its own |
+| `/masurium bot <bot> food ban\|allow\|default <item>` | owner, admins | edit the food ban |
+| `/masurium bot <bot> break` | anyone | what it may break by itself to make its way |
+| `/masurium bot <bot> break allow\|forbid\|default <block>` | owner, admins | edit that whitelist |
+| `/masurium owners` | anyone | every bot with its owner |
+| `/masurium status` | anyone | what each bot is doing, with health and position |
+| `/masurium hud on\|off` | players | your bots' state icons above your hotbar |
+| `/masurium scoreboard on\|off` | operators | a sidebar with every bot's state |
 
 **Who controls a bot.** Its **owner** comes from the bot's own `owner` file,
 so it follows the bot to any server. The owner names **admins** on each server.
@@ -531,11 +532,11 @@ cannot inject anything.
 built from another version, and the half that does not understand a setting
 ignores it without a word. Its bridge reports the bot mod's version in every
 poll; when it differs from the server's, the server console says so once and
-`/marionette bot <bot>` shows both. A bridge older than this check reports no
+`/masurium bot <bot>` shows both. A bridge older than this check reports no
 version, and nothing is claimed about it.
 
 **Permission nodes.** Every action has a node for permission mods such as
-LuckPerms: `marionette.bot.shutdown`, `marionette.bot.restart`,
-`marionette.bot.logoff`, `marionette.bot.hear`, `marionette.bot.admins`,
-`marionette.bot.pref`, `marionette.bot.food` and `marionette.bot.break`.
+LuckPerms: `masurium.bot.shutdown`, `masurium.bot.restart`,
+`masurium.bot.logoff`, `masurium.bot.hear`, `masurium.bot.admins`,
+`masurium.bot.pref`, `masurium.bot.food` and `masurium.bot.break`.
 Nobody has them by default. Granting one lets that player use it on every bot.

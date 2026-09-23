@@ -25,8 +25,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 
 # The config is read on import, so a fake one is pointed at BEFORE.
 _cfg = pathlib.Path(tempfile.mkdtemp()) / "server.env"
-_cfg.write_text("MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT=1\nMARIONETTE_TOKEN=test\n")
-os.environ["MARIONETTE_ENV"] = str(_cfg)
+_cfg.write_text("MASURIUM_HOST=127.0.0.1\nMASURIUM_PORT=1\nMASURIUM_TOKEN=test\n")
+os.environ["MASURIUM_ENV"] = str(_cfg)
 
 sys.path.insert(0, str(HERE))
 import server  # noqa: E402
@@ -80,7 +80,7 @@ def tests_speaker():
                     "hear": {"mode": "list", "players": ["Friend"]}}
         return {"ok": True}
     with_response(record)
-    os.environ["MARIONETTE_SPEAKER"] = "Stranger"
+    os.environ["MASURIUM_SPEAKER"] = "Stranger"
     try:
         out = server.t_eat({"what": "salmon", "who": "Owner"})
         check("eat: banned food refused when the brain names someone who did not speak",
@@ -90,14 +90,14 @@ def tests_speaker():
         check("eat: banned food allowed when the one who spoke asked for it",
               ("/eat", {"what": "salmon"}) in seen[before:], seen[before:])
     finally:
-        os.environ.pop("MARIONETTE_SPEAKER", None)
+        os.environ.pop("MASURIUM_SPEAKER", None)
 
     # Taking the bot out of the game, and changing its own rules, are server
     # commands and not tools: a brain with no such tool cannot be talked into
     # using it. The ones that only READ stay, so it still knows its own rules.
     for name in ("add_admin", "remove_admin", "log_off", "restart_me",
                  "set_preference", "allow_break", "forbid_break", "veto_food"):
-        check(f"{name}: is not a tool any more (it is /marionette bot)",
+        check(f"{name}: is not a tool any more (it is /masurium bot)",
               name not in server.TOOLS)
         check(f"{name}: the bridge does not allow it either",
               f"mcp__bot__{name}" not in bridge.TOOLS.split())
@@ -269,7 +269,7 @@ def tests_speaker():
     check("who_commands: owner, admins and hearing come from the server",
           "Owner: Owner" in out and "Helper" in out and "Friend" in out, out)
     check("who_commands: it points to the server command, not to the chat",
-          "/marionette bot" in out and "shutdown" in out, out)
+          "/masurium bot" in out and "shutdown" in out, out)
 
     access = {"owner": "Owner", "admins": ["Helper"],
               "hear": {"mode": "list", "players": ["Friend"]}}
@@ -320,7 +320,7 @@ def tests_speaker():
           bridge.only_one_bridge(lock).close() is None)
 
     check("chat: asking to shut down points to the command",
-          "/marionette bot {name} {what}" in bridge.PHRASES["by_command"])
+          "/masurium bot {name} {what}" in bridge.PHRASES["by_command"])
 
 
 # --- what really matters: not lying -----------------------------------------
@@ -421,7 +421,7 @@ def tests_chests():
     """The chest memory is tested without the game: fake chest-handler
     outcomes are fed and it is checked that it notes, trims long lists, does
     not take without permission and does not place a covered chest."""
-    os.environ["MARIONETTE_CHESTS"] = str(pathlib.Path(tempfile.mkdtemp()) / "chests.json")
+    os.environ["MASURIUM_CHESTS"] = str(pathlib.Path(tempfile.mkdtemp()) / "chests.json")
     calls = []
 
     def fake(route, **kw):
@@ -524,7 +524,7 @@ def tests_chests():
     r = server.t_place({"what": "furnace", "x": 7, "y": 64, "z": 7})
     check("place: a covered furnace is placed anyway (only the chest needs air)",
           "Placed" in r, r)
-    del os.environ["MARIONETTE_CHESTS"]
+    del os.environ["MASURIUM_CHESTS"]
 
 
 def tests_places():
@@ -583,7 +583,7 @@ def tests_pending():
     notifies the brain with the outcome when it ends."""
     import bridge
     route = pathlib.Path(tempfile.mkdtemp()) / "pending.json"
-    os.environ["MARIONETTE_PENDING"] = str(route)
+    os.environ["MASURIUM_PENDING"] = str(route)
 
     def fake(r, **kw):
         if r == "/state":
@@ -629,7 +629,7 @@ def tests_pending():
     check("pending: a job cut by the limit is not written down (it will not finish alone)",
           "I cut it" in r and "walk" not in json.loads(route.read_text()),
           (r, route.read_text()))
-    del os.environ["MARIONETTE_PENDING"]
+    del os.environ["MASURIUM_PENDING"]
 
 
 def tests_tab():
@@ -674,7 +674,7 @@ def tests_tab():
         bridge.BOTS_DIR, bridge.NAME = old_dir, old_name
     bots_dir = pathlib.Path(tempfile.mkdtemp())
     (bots_dir / "bob").mkdir()
-    os.environ["MARIONETTE_BOTS"] = str(bots_dir)
+    os.environ["MASURIUM_BOTS"] = str(bots_dir)
     r = server.t_internal({"bot": "Bob", "text": "I am hungry"})
     fl = pathlib.Path(server._internal_file("Bob"))
     check("internal: writes one line in internal_<bot>.jsonl",
@@ -779,7 +779,7 @@ def tests_tab():
 
     check("tab: the server mod knows the seven states",
           {"idle", "working", "thinking", "combat", "error", "dead", "stuck"}
-          <= set(re.findall(r'"(\w+)", new Icon', (HERE.parent / "mod/src/main/java/marionette/server/Tab.java").read_text())))
+          <= set(re.findall(r'"(\w+)", new Icon', (HERE.parent / "mod/src/main/java/masurium/server/Tab.java").read_text())))
 
 
 def tests_stairs():
@@ -863,7 +863,7 @@ def talk_mcp(messages):
     entry = "\n".join(json.dumps(m) for m in messages) + "\n"
     p = subprocess.run([sys.executable, str(HERE / "server.py")],
                        input=entry, capture_output=True, text=True,
-                       timeout=30, env={**os.environ, "MARIONETTE_ENV": str(_cfg)})
+                       timeout=30, env={**os.environ, "MASURIUM_ENV": str(_cfg)})
     return [json.loads(l) for l in p.stdout.splitlines() if l.strip()]
 
 
@@ -983,33 +983,33 @@ def tests_chat():
 def tests_server_env():
     print("\nThe server's own server.env: read over the global one, when the launcher names it")
     own = _cfg.parent / "own-server.env"
-    own.write_text("MARIONETTE_HOST=10.1.1.1\nMARIONETTE_PORT=9\nMARIONETTE_TOKEN=own\n")
-    _cfg.write_text(_cfg.read_text() + "MARIONETTE_OWNER=Someone\n")
-    os.environ.pop("MARIONETTE_SERVER_ENV", None)
+    own.write_text("MASURIUM_HOST=10.1.1.1\nMASURIUM_PORT=9\nMASURIUM_TOKEN=own\n")
+    _cfg.write_text(_cfg.read_text() + "MASURIUM_OWNER=Someone\n")
+    os.environ.pop("MASURIUM_SERVER_ENV", None)
     try:
         c = bridge.cfg()
         check("without it, the global file is all there is",
-              (c["MARIONETTE_HOST"], c["MARIONETTE_TOKEN"]) == ("127.0.0.1", "test"), c)
-        os.environ["MARIONETTE_SERVER_ENV"] = str(own)
+              (c["MASURIUM_HOST"], c["MASURIUM_TOKEN"]) == ("127.0.0.1", "test"), c)
+        os.environ["MASURIUM_SERVER_ENV"] = str(own)
         c = bridge.cfg()
         check("bridge: the server's address and token win over the global ones",
-              (c["MARIONETTE_HOST"], c["MARIONETTE_PORT"], c["MARIONETTE_TOKEN"]) == ("10.1.1.1", "9", "own"), c)
-        check("bridge: ...and what only the global file says is kept", c.get("MARIONETTE_OWNER") == "Someone", c)
+              (c["MASURIUM_HOST"], c["MASURIUM_PORT"], c["MASURIUM_TOKEN"]) == ("10.1.1.1", "9", "own"), c)
+        check("bridge: ...and what only the global file says is kept", c.get("MASURIUM_OWNER") == "Someone", c)
         check("mcp server: the same, for the tools the brain calls",
               server.load_config() == ("10.1.1.1", "9", "own"))
-        os.environ["MARIONETTE_SERVER_ENV"] = str(own.parent / "missing.env")
+        os.environ["MASURIUM_SERVER_ENV"] = str(own.parent / "missing.env")
         check("a server file that is gone falls back to the global one",
-              bridge.cfg()["MARIONETTE_HOST"] == "127.0.0.1")
+              bridge.cfg()["MASURIUM_HOST"] == "127.0.0.1")
     finally:
-        os.environ.pop("MARIONETTE_SERVER_ENV", None)
-        _cfg.write_text("MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT=1\nMARIONETTE_TOKEN=test\n")
+        os.environ.pop("MASURIUM_SERVER_ENV", None)
+        _cfg.write_text("MASURIUM_HOST=127.0.0.1\nMASURIUM_PORT=1\nMASURIUM_TOKEN=test\n")
 
 
 def tests_phrases():
     print("\nPhrases: said without the brain, in its own voice once it wrote them")
     import tempfile as _tf
     d = pathlib.Path(_tf.mkdtemp())
-    f = d / "config" / "marionette-phrases.properties"
+    f = d / "config" / "masurium-phrases.properties"
     catalog = {"escort_creeper": "{player}, creeper {blocks} blocks from you!",
                "turning_back": "Turning back."}
     body = {"file": str(f), "catalog": catalog}
@@ -1030,7 +1030,7 @@ def tests_phrases():
         check("without versions, the English sentence, filled in",
               bridge.phrase("by_command", name="alice", what="shutdown")
               == "That is not done through the chat: my owner or an admin runs "
-                 "/marionette bot alice shutdown.")
+                 "/masurium bot alice shutdown.")
         n = bridge.write_phrases(ask=brain)
         check("the brain is asked once, for the body's sentences and the bridge's",
               len(asked) == 1 and "escort_creeper" in asked[0] and "shutdown" in asked[0])

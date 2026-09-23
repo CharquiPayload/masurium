@@ -13,7 +13,7 @@ import os
 import sys
 import time
 
-STOP_FLAG = "/tmp/marionette_stop"
+STOP_FLAG = "/tmp/masurium_stop"
 
 # The real registry has thousands. These are enough to test that an id that
 # does not exist is REJECTED instead of accepted, leaving the bot standing in
@@ -190,7 +190,7 @@ def main():
             respond(id_, {
                 "protocolVersion": requested,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "marionette-bot", "version": "0.1.0"},
+                "serverInfo": {"name": "masurium-bot", "version": "0.1.0"},
             })
         elif method == "tools/list":
             respond(id_, {"tools": [

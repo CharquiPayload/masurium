@@ -20,11 +20,11 @@ import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 REPO = HERE.parent
-TMP = pathlib.Path(tempfile.mkdtemp(prefix="marionette-test-"))
+TMP = pathlib.Path(tempfile.mkdtemp(prefix="masurium-test-"))
 
 # A game that is not a game: it reads its stdin, echoes each line to stdout
 # with a prefix, and claims the mod initialized when told to launch. The keeper
-# is started with this as its java, through MARIONETTE_JAVA.
+# is started with this as its java, through MASURIUM_JAVA.
 FAKE_JAVA = TMP / "fake_java.py"
 FAKE_JAVA.write_text(
     "#!" + sys.executable + "\n"
@@ -46,11 +46,11 @@ from launcher.workspace import DEFAULT_HEAP, DEFAULT_VERSION, FIRST_PORT, Worksp
 
 # Every test runs in a workspace of its own, under TMP, home included: nothing
 # here reads or writes the real ~/bots, ~/instances, ~/servers, ~/shared or
-# ~/.marionette.
+# ~/.masurium.
 ENVIRON = dict(os.environ)
-for k in ("HEAP", "VERSION", "MARIONETTE_HEAP", "MARIONETTE_VERSION", "MARIONETTE_ACCOUNT"):
+for k in ("HEAP", "VERSION", "MASURIUM_HEAP", "MASURIUM_VERSION", "MASURIUM_ACCOUNT"):
     ENVIRON.pop(k, None)
-ENVIRON["MARIONETTE_JAVA"] = str(FAKE_JAVA)
+ENVIRON["MASURIUM_JAVA"] = str(FAKE_JAVA)
 WS = Workspace(TMP / "bots", TMP / "servers", TMP / "shared", TMP / "server.env",
                home=TMP, environ=ENVIRON, instances_dir=TMP / "instances", state_dir=TMP / "state",
                accounts_dir=TMP / "accounts")
@@ -120,14 +120,14 @@ def layout():
     for d in ("bots", "instances", "servers/test/mods", "shared/mods"):
         (TMP / d).mkdir(parents=True, exist_ok=True)
     (TMP / "shared" / "headlessmc-launcher.jar").write_bytes(b"not really a jar")
-    (TMP / "shared" / "mods" / "marionette-1.0.0.jar").write_bytes(b"m")
+    (TMP / "shared" / "mods" / "masurium-1.0.0.jar").write_bytes(b"m")
     (TMP / "shared" / "mods" / "hmc-specifics-1.21.1-neoforge.jar").write_bytes(b"h")
     (TMP / "servers" / "test" / "mods" / "create-6.jar").write_bytes(b"c")
     (TMP / "servers" / "test" / "server.conf").write_text(
         "# a server\nHOST=10.0.0.5\nMC_PORT=25566\nDESCRIPTION=\"the test one\"\n")
     (TMP / "server.env").write_text(
-        "MARIONETTE_HOST=10.0.0.5\nMARIONETTE_PORT=1\nMARIONETTE_TOKEN=t\n"
-        "MARIONETTE_OWNER=Owner\n")
+        "MASURIUM_HOST=10.0.0.5\nMASURIUM_PORT=1\nMASURIUM_TOKEN=t\n"
+        "MASURIUM_OWNER=Owner\n")
 
 
 def second_server(slug="other"):
@@ -145,8 +145,8 @@ def remove_tree(path):
 def quick_server_env():
     """A server mod that refuses at once (127.0.0.1:1) instead of one that
     times out, so a `start` under test fails in a second, not in ten."""
-    (TMP / "server.env").write_text("MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT=1\n"
-                                    "MARIONETTE_TOKEN=t\n")
+    (TMP / "server.env").write_text("MASURIUM_HOST=127.0.0.1\nMASURIUM_PORT=1\n"
+                                    "MASURIUM_TOKEN=t\n")
 
 
 def serve_a_server_mod(players=(), token="t", store=None):
@@ -155,8 +155,8 @@ def serve_a_server_mod(players=(), token="t", store=None):
     `store`, it keeps rules in it too (see fake_server_mod). Returns the HTTP
     server, to shut down."""
     httpd, port = fake_server_mod(token, list(players), store)
-    (TMP / "server.env").write_text(f"MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT={port}\n"
-                                    "MARIONETTE_TOKEN=t\n")
+    (TMP / "server.env").write_text(f"MASURIUM_HOST=127.0.0.1\nMASURIUM_PORT={port}\n"
+                                    "MASURIUM_TOKEN=t\n")
     return httpd
 
 
@@ -165,7 +165,7 @@ def start_keeper(key="alice"):
     inst = WS.instance(key)
     inst.run.mkdir(parents=True, exist_ok=True)
     files.unlink_quietly(inst.client_log, inst.keeper_log)
-    processes.spawn_free([sys.executable, str(HERE / "marionette.py"), "keeper", key],
+    processes.spawn_free([sys.executable, str(HERE / "masurium.py"), "keeper", key],
                          inst.keeper_log, cwd=TMP, env=WS.child_env())
     return inst
 
@@ -198,9 +198,9 @@ def tests_files():
 def tests_workspace():
     print("\nWorkspace: where the folders are, decided once, per workspace")
     env = TMP / "ws.env"
-    env.write_text("MARIONETTE_SERVERS_DIR=/from/the/file\n")
-    ws = Workspace.from_environment({"MARIONETTE_ENV": str(env),
-                                     "MARIONETTE_BOTS_DIR": "/from/the/environment"}, home=TMP)
+    env.write_text("MASURIUM_SERVERS_DIR=/from/the/file\n")
+    ws = Workspace.from_environment({"MASURIUM_ENV": str(env),
+                                     "MASURIUM_BOTS_DIR": "/from/the/environment"}, home=TMP)
     check("the environment wins", ws.bots_dir == pathlib.Path("/from/the/environment"))
     check("then server.env", ws.servers_dir == pathlib.Path("/from/the/file"))
     check("then the default next to the home",
@@ -210,10 +210,10 @@ def tests_workspace():
     check("two workspaces do not share their folders", WS.bots_dir == TMP / "bots")
     child = WS.child_env()
     check("children inherit the folders this workspace resolved",
-          child["MARIONETTE_BOTS_DIR"] == str(TMP / "bots")
-          and child["MARIONETTE_INSTANCES_DIR"] == str(TMP / "instances")
-          and child["MARIONETTE_STATE_DIR"] == str(TMP / "state")
-          and child["MARIONETTE_ENV"] == str(TMP / "server.env"))
+          child["MASURIUM_BOTS_DIR"] == str(TMP / "bots")
+          and child["MASURIUM_INSTANCES_DIR"] == str(TMP / "instances")
+          and child["MASURIUM_STATE_DIR"] == str(TMP / "state")
+          and child["MASURIUM_ENV"] == str(TMP / "server.env"))
     check("...and ~/.local/bin first on PATH", child["PATH"].startswith(str(TMP / ".local" / "bin")))
     check("without server.env there is no API, and it is said",
           "missing" in told(fails(Workspace(TMP, TMP, TMP, TMP / "nope.env").api)))
@@ -358,7 +358,7 @@ def tests_clone():
     second_server("other")
     alice = WS.instance("alice")
     (alice.gamedir / "config").mkdir(parents=True, exist_ok=True)
-    (alice.gamedir / "config" / "marionette-places-test.txt").write_text("home 1 2 3\n")
+    (alice.gamedir / "config" / "masurium-places-test.txt").write_text("home 1 2 3\n")
     alice.extra_mods.mkdir(exist_ok=True)
     (alice.extra_mods / "minimap-1.jar").write_bytes(b"e")
     settings.set_value(alice, "heap", "4g")
@@ -370,7 +370,7 @@ def tests_clone():
     check("...its own settings copied", c.data.get("heap") == "4g")
     check("...its extra mods and its memories of that world",
           (c.extra_mods / "minimap-1.jar").exists()
-          and (c.gamedir / "config" / "marionette-places-test.txt").exists())
+          and (c.gamedir / "config" / "masurium-places-test.txt").exists())
     check("...and HeadlessMC pointed at the clone's own game folder",
           files.read_java_properties(c.hmc / "HeadlessMC" / "config.properties").get("hmc.gamedir")
           == str(c.gamedir))
@@ -429,7 +429,7 @@ def tests_prepare():
     ops.prepare_gamedir(inst, server)
     check("with no options.txt, one is written with just that", options.read_text() == "onboardAccessibility:false\n")
     check("the server is noted in the gamedir for the mod",
-          (inst.gamedir / "config" / "marionette-server.txt").read_text().strip() == "test")
+          (inst.gamedir / "config" / "masurium-server.txt").read_text().strip() == "test")
 
 
 # --- the launch line --------------------------------------------------------
@@ -443,18 +443,18 @@ def tests_launch_line():
     check("no -commands, ever", "-commands" not in line)
     check("-lwjgl and -paulscode", "-lwjgl" in line and "-paulscode" in line)
     check("offline account: -offline", " -offline " in line)
-    check("the name with its capitals", "-Dmarionette.name=Alice" in line)
+    check("the name with its capitals", "-Dmasurium.name=Alice" in line)
     check("headless, and the instance's own port",
-          "-Dmarionette.headless=true" in line and f"-Dmarionette.bot.port={FIRST_PORT}" in line)
+          "-Dmasurium.headless=true" in line and f"-Dmasurium.bot.port={FIRST_PORT}" in line)
     check("default heap", f"-Xmx{DEFAULT_HEAP}" in line)
     check("no language nor gender: the personality says those", "language" not in line and "gender" not in line)
-    WS.environ["MARIONETTE_HEAP"] = "1g"
-    WS.environ["MARIONETTE_VERSION"] = "neoforge-21.1.999"
+    WS.environ["MASURIUM_HEAP"] = "1g"
+    WS.environ["MASURIUM_VERSION"] = "neoforge-21.1.999"
     line = keeper.launch_line(inst, server)
-    check("MARIONETTE_HEAP and MARIONETTE_VERSION from the environment win",
+    check("MASURIUM_HEAP and MASURIUM_VERSION from the environment win",
           "-Xmx1g" in line and "launch neoforge-21.1.999 " in line)
     settings.set_value(bot, "heap", "4g")
-    check("...a bot's own heap wins over MARIONETTE_HEAP", "-Xmx4g " in keeper.launch_line(inst, server))
+    check("...a bot's own heap wins over MASURIUM_HEAP", "-Xmx4g " in keeper.launch_line(inst, server))
     settings.set_value(inst, "heap", "6g")
     check("...and the instance's over the bot's", "-Xmx6g " in keeper.launch_line(inst, server))
     data = inst.data
@@ -464,8 +464,8 @@ def tests_launch_line():
           "Evil" not in keeper.launch_line(inst, server) and "-Xmx1g " in keeper.launch_line(inst, server))
     settings.clear(inst, "heap")
     settings.clear(bot, "heap")
-    WS.environ.pop("MARIONETTE_HEAP")
-    WS.environ.pop("MARIONETTE_VERSION")
+    WS.environ.pop("MASURIUM_HEAP")
+    WS.environ.pop("MASURIUM_VERSION")
     WS.environ["HEAP"] = "1g"
     WS.environ["VERSION"] = "neoforge-21.1.999"
     line = keeper.launch_line(inst, server)
@@ -585,39 +585,39 @@ def tests_packs():
 
 def tests_deploy():
     print("\nDeploy: a new inode, and only the same family leaves")
-    check("the core's family is 'marionette'", packs.jar_family("marionette-1.0.0.jar") == "marionette")
-    check("an add-on's family keeps its name", packs.jar_family("marionette-veil-1.0.0.jar") == "marionette-veil")
+    check("the core's family is 'masurium'", packs.jar_family("masurium-1.0.0.jar") == "masurium")
+    check("an add-on's family keeps its name", packs.jar_family("masurium-veil-1.0.0.jar") == "masurium-veil")
     check("the core jar is told from an add-on by its name",
-          packs.CORE_JAR.match("marionette-1.0.0.jar") and not packs.CORE_JAR.match("marionette-veil-1.0.0.jar"))
+          packs.CORE_JAR.match("masurium-1.0.0.jar") and not packs.CORE_JAR.match("masurium-veil-1.0.0.jar"))
     layout()
     mods = TMP / "shared" / "mods"
-    for name in ("marionette-0.9.0.jar", "marionette-bot-0.8.0.jar", "marionette-veil-0.9.0.jar",
-                 "marionette-veil-1.0.0.jar", "marionette-1.0.0.jar", "hmc-specifics-1.21.1-neoforge.jar"):
+    for name in ("masurium-0.9.0.jar", "masurium-bot-0.8.0.jar", "masurium-veil-0.9.0.jar",
+                 "masurium-veil-1.0.0.jar", "masurium-1.0.0.jar", "hmc-specifics-1.21.1-neoforge.jar"):
         (mods / name).write_bytes(name.encode())
-    old_inode = (mods / "marionette-1.0.0.jar").stat().st_ino
-    built = TMP / "marionette-1.0.0.jar"
+    old_inode = (mods / "masurium-1.0.0.jar").stat().st_ino
+    built = TMP / "masurium-1.0.0.jar"
     built.write_bytes(b"fresh core")
     ops.deploy_mod(WS, str(built))
     left = sorted(p.name for p in mods.glob("*.jar"))
     check("the core is replaced through a new inode",
-          (mods / "marionette-1.0.0.jar").read_bytes() == b"fresh core"
-          and (mods / "marionette-1.0.0.jar").stat().st_ino != old_inode)
+          (mods / "masurium-1.0.0.jar").read_bytes() == b"fresh core"
+          and (mods / "masurium-1.0.0.jar").stat().st_ino != old_inode)
     check("older cores and the old two-file names are gone",
-          "marionette-0.9.0.jar" not in left and "marionette-bot-0.8.0.jar" not in left)
+          "masurium-0.9.0.jar" not in left and "masurium-bot-0.8.0.jar" not in left)
     check("add-ons and other mods are NOT touched by a core deploy",
-          {"marionette-veil-0.9.0.jar", "marionette-veil-1.0.0.jar", "hmc-specifics-1.21.1-neoforge.jar"} <= set(left))
-    addon = TMP / "marionette-veil-1.1.0.jar"
+          {"masurium-veil-0.9.0.jar", "masurium-veil-1.0.0.jar", "hmc-specifics-1.21.1-neoforge.jar"} <= set(left))
+    addon = TMP / "masurium-veil-1.1.0.jar"
     addon.write_bytes(b"fresh addon")
     target, gone = ops.deploy_mod(WS, str(addon))
     left = sorted(p.name for p in mods.glob("*.jar"))
     check("an add-on deploy replaces every older jar of that add-on only",
-          "marionette-veil-1.1.0.jar" in left and "marionette-veil-0.9.0.jar" not in left
-          and "marionette-veil-1.0.0.jar" not in left and "marionette-1.0.0.jar" in left, str(left))
+          "masurium-veil-1.1.0.jar" in left and "masurium-veil-0.9.0.jar" not in left
+          and "masurium-veil-1.0.0.jar" not in left and "masurium-1.0.0.jar" in left, str(left))
     check("...and says which ones it replaced",
-          target.name == "marionette-veil-1.1.0.jar" and sorted(gone) == ["marionette-veil-0.9.0.jar", "marionette-veil-1.0.0.jar"])
+          target.name == "masurium-veil-1.1.0.jar" and sorted(gone) == ["masurium-veil-0.9.0.jar", "masurium-veil-1.0.0.jar"])
     check("a jar that is not there is refused",
           "not a file" in told(fails(ops.deploy_mod, WS, str(TMP / "nope.jar"))))
-    for p in mods.glob("marionette-veil-*.jar"):
+    for p in mods.glob("masurium-veil-*.jar"):
         p.unlink()
 
 
@@ -636,26 +636,26 @@ def tests_doctor():
           any(l == "java 21" and ok is False for l, ok, _ in checks))
     check("the server mod at 10.0.0.5:1 is reported unreachable",
           any(l == "server mod answers" and ok is False for l, ok, _ in checks))
-    check("shared and the marionette jar are found",
-          any(l == "shared/mods/marionette" and ok for l, ok, _ in checks))
+    check("shared and the masurium jar are found",
+          any(l == "shared/mods/masurium" and ok for l, ok, _ in checks))
     check("bots and instances are checked apart",
           any(l == "bots/alice" and ok for l, ok, _ in checks)
           and any(l == "instances/alice" and ok for l, ok, _ in checks), [c for c in checks if "alice" in c.label])
-    (TMP / "shared" / "mods" / "marionette-0.9.0.jar").write_bytes(b"old")
+    (TMP / "shared" / "mods" / "masurium-0.9.0.jar").write_bytes(b"old")
     checks = doctor.checks(WS)
-    check("two marionette jars are a problem",
-          any(l == "shared/mods/marionette" and ok is False and "more than one" in d for l, ok, d in checks))
-    (TMP / "shared" / "mods" / "marionette-0.9.0.jar").unlink()
-    (TMP / "shared" / "mods" / "marionette-veil-1.0.0.jar").write_bytes(b"a")
+    check("two masurium jars are a problem",
+          any(l == "shared/mods/masurium" and ok is False and "more than one" in d for l, ok, d in checks))
+    (TMP / "shared" / "mods" / "masurium-0.9.0.jar").unlink()
+    (TMP / "shared" / "mods" / "masurium-veil-1.0.0.jar").write_bytes(b"a")
     checks = doctor.checks(WS)
     check("an add-on next to the core is not 'two cores'",
-          any(l == "shared/mods/marionette" and ok for l, ok, _ in checks)
+          any(l == "shared/mods/masurium" and ok for l, ok, _ in checks)
           and any(l == "shared/mods add-ons" and ok and "veil" in d for l, ok, d in checks))
-    (TMP / "shared" / "mods" / "marionette-veil-0.9.0.jar").write_bytes(b"b")
+    (TMP / "shared" / "mods" / "masurium-veil-0.9.0.jar").write_bytes(b"b")
     checks = doctor.checks(WS)
     check("two jars of one add-on are a problem",
           any(l == "shared/mods add-ons" and ok is False for l, ok, _ in checks))
-    for p in (TMP / "shared" / "mods").glob("marionette-veil-*.jar"):
+    for p in (TMP / "shared" / "mods").glob("masurium-veil-*.jar"):
         p.unlink()
 
     # A mod that carries Veil inside it (jar-in-jar), the way Sable does.
@@ -665,12 +665,12 @@ def tests_doctor():
     check("...and nothing where there is nothing", packs.pack_carries(TMP / "servers" / "test", "watut") == [])
     checks = doctor.checks(WS)
     check("Veil in a pack without the add-on is a problem",
-          any(l == "servers/test: veil" and ok is False and "marionette-veil" in d for l, ok, d in checks))
-    (TMP / "shared" / "mods" / "marionette-veil-1.0.0.jar").write_bytes(b"a")
+          any(l == "servers/test: veil" and ok is False and "masurium-veil" in d for l, ok, d in checks))
+    (TMP / "shared" / "mods" / "masurium-veil-1.0.0.jar").write_bytes(b"a")
     checks = doctor.checks(WS)
     check("...and not with the add-on in shared/mods",
           not any(l == "servers/test: veil" for l, ok, d in checks))
-    (TMP / "shared" / "mods" / "marionette-veil-1.0.0.jar").unlink()
+    (TMP / "shared" / "mods" / "masurium-veil-1.0.0.jar").unlink()
     carrier.unlink()
 
     bob = WS.instance("bob")
@@ -840,13 +840,13 @@ def tests_keeper_failures():
     print("\nKeeper failures: said at once, not after five minutes")
     httpd = serve_a_server_mod()
     bot = WS.instance("alice")
-    WS.environ["MARIONETTE_JAVA"] = str(TMP / "no-such-java")
+    WS.environ["MASURIUM_JAVA"] = str(TMP / "no-such-java")
     try:
         started = time.monotonic()
         text, code = run_cli("start", "Alice")
         took = time.monotonic() - started
     finally:
-        WS.environ["MARIONETTE_JAVA"] = str(FAKE_JAVA)
+        WS.environ["MASURIUM_JAVA"] = str(FAKE_JAVA)
     check("no java: start fails", code == 1, f"{code!r}")
     check("...in seconds", took < 30, f"{took:.0f}s")
     check("...saying it could not run java", "could not run" in text and "no-such-java" in text, text)
@@ -857,7 +857,7 @@ def tests_keeper_failures():
     slow = TMP / "slow_java.py"
     slow.write_text("#!" + sys.executable + "\nimport time\ntime.sleep(60)\n")
     slow.chmod(slow.stat().st_mode | stat.S_IEXEC)
-    WS.environ["MARIONETTE_JAVA"] = str(slow)
+    WS.environ["MASURIUM_JAVA"] = str(slow)
     import signal
     import threading
     game = {}
@@ -875,7 +875,7 @@ def tests_keeper_failures():
         took = time.monotonic() - started
     finally:
         killer.join()
-        WS.environ["MARIONETTE_JAVA"] = str(FAKE_JAVA)
+        WS.environ["MASURIUM_JAVA"] = str(FAKE_JAVA)
         if game.get("pid"):
             try:
                 os.killpg(game["pid"], signal.SIGKILL)
@@ -964,14 +964,14 @@ def tests_logwatch():
 
 
 def tests_server_mod_missing():
-    print("\nNo Marionette on the server: said before a game is loaded for nothing")
+    print("\nNo Masurium on the server: said before a game is loaded for nothing")
     inst = WS.instance("alice")
     quick_server_env()
     files.unlink_quietly(inst.keeper_log)
     text, result = said(ops.start, inst)
     check("a server mod that does not answer stops the start before the game",
           isinstance(result, Fail) and result.code == "server_mod_down"
-          and "Is Marionette in that server's mods folder" in text
+          and "Is Masurium in that server's mods folder" in text
           and "starting alice" not in text and not inst.keeper_log.exists(), text)
     httpd = serve_a_server_mod(token="another")
     try:
@@ -1037,7 +1037,7 @@ def tests_cancel():
     check("cancelled before it began: nothing is touched", isinstance(result, Cancelled)
           and "preparing" not in text and not bot.keeper_pid_f.exists(), text)
 
-    WS.environ["MARIONETTE_JAVA"] = str(slow_java())
+    WS.environ["MASURIUM_JAVA"] = str(slow_java())
     cancel = Cancel()
     game = {}
 
@@ -1054,7 +1054,7 @@ def tests_cancel():
         took = time.monotonic() - started
     finally:
         helper.join()
-        WS.environ["MARIONETTE_JAVA"] = str(FAKE_JAVA)
+        WS.environ["MASURIUM_JAVA"] = str(FAKE_JAVA)
     check("cancelled while the game loads: start raises Cancelled, in seconds",
           isinstance(result, Cancelled) and result.code == "cancelled" and took < 30,
           f"{result!r} after {took:.0f}s")
@@ -1067,8 +1067,8 @@ def tests_cancel():
     # The command line: the first Ctrl+C is a cancel, not an abandoned game.
     import signal
     env = dict(WS.child_env())
-    env["MARIONETTE_JAVA"] = str(slow_java())
-    run = subprocess.Popen([sys.executable, str(HERE / "marionette.py"), "start", "Alice"],
+    env["MASURIUM_JAVA"] = str(slow_java())
+    run = subprocess.Popen([sys.executable, str(HERE / "masurium.py"), "start", "Alice"],
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     try:
         loading = wait(lambda: keeper.keeper_pid(bot) and bot.client_pid_f.exists(), 20)
@@ -1325,9 +1325,9 @@ def tests_status():
 def tests_cli():
     print("\nCommand line: the same door as before, printing what the core reports")
     env = dict(WS.child_env())
-    r = subprocess.run([sys.executable, str(HERE / "marionette.py"), "servers"],
+    r = subprocess.run([sys.executable, str(HERE / "masurium.py"), "servers"],
                        capture_output=True, text=True, env=env)
-    check("marionette.py still works as a script", r.returncode == 0 and "test" in r.stdout, r.stdout + r.stderr)
+    check("masurium.py still works as a script", r.returncode == 0 and "test" in r.stdout, r.stdout + r.stderr)
     r = subprocess.run([sys.executable, "-m", "launcher", "servers"],
                        capture_output=True, text=True, env=env, cwd=str(REPO))
     check("...and so does python -m launcher", r.returncode == 0 and "test" in r.stdout, r.stdout + r.stderr)
@@ -1492,7 +1492,7 @@ def fake_server_mod(token, players, store=None):
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
-            if self.headers.get("X-Marionette-Token") != token:
+            if self.headers.get("X-Masurium-Token") != token:
                 self.send_response(401)
                 self.end_headers()
                 return
@@ -1525,11 +1525,11 @@ def fake_server_mod(token, players, store=None):
 def tests_server_apis():
     print("\nServer mods: each server can have its own, and each instance is looked for in its own")
     quick_server_env()
-    (TMP / "server.env").write_text((TMP / "server.env").read_text() + "MARIONETTE_OWNER=Owner\n")
+    (TMP / "server.env").write_text((TMP / "server.env").read_text() + "MASURIUM_OWNER=Owner\n")
     other = second_server("other")
     httpd, port = fake_server_mod("own-token", ["Bob"])
     own = other / "server.env"
-    own.write_text(f"MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT={port}\nMARIONETTE_TOKEN=own-token\n")
+    own.write_text(f"MASURIUM_HOST=127.0.0.1\nMASURIUM_PORT={port}\nMASURIUM_TOKEN=own-token\n")
     own.chmod(0o600)
     alice, bob = WS.instance("alice"), WS.instance("bob")
     data = bob.data
@@ -1560,14 +1560,14 @@ def tests_server_apis():
 
         env = ops.bridge_env(bob)
         check("the bridge of bob reads its server's bots, keeps its server's state",
-              env["MARIONETTE_BOTS_DIR"] == str(TMP / "state" / "servers" / "other" / "bots")
-              and env["MARIONETTE_STATE_DIR"] == str(TMP / "state" / "servers" / "other"))
+              env["MASURIUM_BOTS_DIR"] == str(TMP / "state" / "servers" / "other" / "bots")
+              and env["MASURIUM_STATE_DIR"] == str(TMP / "state" / "servers" / "other"))
         check("...knows which instance it is, for a restart ordered from the game",
-              env["MARIONETTE_INSTANCE"] == "bob" and env["BOT_NAME"] == "Bob")
-        check("...and is told the PATH of its server's file", env.get("MARIONETTE_SERVER_ENV") == str(own))
+              env["MASURIUM_INSTANCE"] == "bob" and env["BOT_NAME"] == "Bob")
+        check("...and is told the PATH of its server's file", env.get("MASURIUM_SERVER_ENV") == str(own))
         check("...never the token itself", "own-token" not in "".join(env.values()))
         check("an instance whose server has no file of its own is told nothing",
-              "MARIONETTE_SERVER_ENV" not in ops.bridge_env(alice))
+              "MASURIUM_SERVER_ENV" not in ops.bridge_env(alice))
 
         checks = doctor.checks(WS)
         check("doctor asks each server's own mod", any(
@@ -1580,7 +1580,7 @@ def tests_server_apis():
         check("a server.env others can read is a problem: it holds the token",
               any(l == "servers/other: server.env" and ok is False and "chmod 600" in d for l, ok, d in checks))
         own.chmod(0o600)
-        own.write_text(f"MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT={port}\nMARIONETTE_TOKEN=wrong\n")
+        own.write_text(f"MASURIUM_HOST=127.0.0.1\nMASURIUM_PORT={port}\nMASURIUM_TOKEN=wrong\n")
         checks = doctor.checks(WS)
         check("a wrong token is named as such",
               any(l == "servers/other: server mod" and ok is False and "wrong token" in d for l, ok, d in checks))
@@ -1618,14 +1618,14 @@ def tests_phrases():
         bridge.wait()
         inst.bridge_lock.unlink()
     text, code = run_cli("phrases", "alice")
-    check("`marionette.py phrases <instance>` is the command", code == 0 and "sentences" in text, text)
+    check("`masurium.py phrases <instance>` is the command", code == 0 and "sentences" in text, text)
 
 
 # --- rules ------------------------------------------------------------------
 
 def tests_rules_model():
     print("\nRules: three layers, worked out as the server mod works them out")
-    cases = json.loads((REPO / "mod/src/test/resources/marionette/rules-cases.json").read_text())
+    cases = json.loads((REPO / "mod/src/test/resources/masurium/rules-cases.json").read_text())
     for case in cases["cases"]:
         layers = [rules.parse(case[n]) for n in rules.LAYERS]
         held = rules.effective(*layers)
@@ -1635,7 +1635,7 @@ def tests_rules_model():
                 and all(rules.source(*layers, fam, key)[0] == who for fam, key, who in case["sources"]))
         check(f"the shared case: {case['name']}", good, f"{held}")
 
-    java = (REPO / "mod/src/main/java/marionette/common/Settings.java").read_text()
+    java = (REPO / "mod/src/main/java/masurium/common/Settings.java").read_text()
     import re
     theirs = {k: v == "true" for k, v in re.findall(r'toggle\("([a-z_]+)", (true|false),', java)}
     check("the toggles and their defaults are the server mod's", theirs == rules.TOGGLES,
@@ -1730,11 +1730,11 @@ def tests_rules():
               "older config" in ops.show_rules(inst).note)
 
         text, code = run_cli("rules", "rulesy")
-        check("`marionette.py rules <instance>` shows it",
+        check("`masurium.py rules <instance>` shows it",
               code == 0 and "hunt_players" in text and "salmon (set here)" in text
               and "imposed by global" in text, text)
         text, code = run_cli("rules", "rulesy", "break", "forbid", "dirt")
-        check("`marionette.py rules <instance> <change>` changes its own",
+        check("`masurium.py rules <instance> <change>` changes its own",
               code == 0 and store["rulesy"]["own"].get("break") == {"forbid": ["dirt"]}, text)
         text, code = run_cli("rules", "--bot", "rulesy")
         check("`rules --bot <bot>` shows the bot's layer", code == 0 and "food ban beef, cod" in text, text)
@@ -1763,7 +1763,7 @@ def tests_rules():
 
     store.clear()
     httpd = serve_a_server_mod(store=store)
-    WS.environ["MARIONETTE_JAVA"] = str(TMP / "no-such-java")
+    WS.environ["MASURIUM_JAVA"] = str(TMP / "no-such-java")
     try:
         text, result = said(ops.start, inst)
         check("start sends its config, the global rules and what waited, before the game",
@@ -1791,7 +1791,7 @@ def tests_rules():
         check("...one on the same server, the same player, shares them",
               "shares its own rules" in text and not rules.pending(twin), text)
     finally:
-        WS.environ["MARIONETTE_JAVA"] = str(FAKE_JAVA)
+        WS.environ["MASURIUM_JAVA"] = str(FAKE_JAVA)
         httpd.shutdown()
 
     old = serve_a_server_mod()
@@ -1932,11 +1932,11 @@ def tests_accounts():
                      "a = pathlib.Path('HeadlessMC/auth')\na.mkdir(parents=True, exist_ok=True)\n"
                      f"(a / '.accounts.json').write_text({hmc_logins('Herobrine')!r})\n")
     login.chmod(login.stat().st_mode | stat.S_IEXEC)
-    WS.environ["MARIONETTE_JAVA"] = str(login)
+    WS.environ["MASURIUM_JAVA"] = str(login)
     try:
         text, code = run_cli("account", "add")
     finally:
-        WS.environ["MARIONETTE_JAVA"] = str(FAKE_JAVA)
+        WS.environ["MASURIUM_JAVA"] = str(FAKE_JAVA)
     check("`account add` runs HeadlessMC and keeps what it logged in",
           code == 0 and WS.account("herobrine").name == "Herobrine", text)
     shutil.rmtree(WS.account("herobrine").dir)
@@ -2077,7 +2077,7 @@ def tests_migrate():
     (old / "personality.txt").write_text("You are Old.\n")
     (old / "hmc" / "HeadlessMC" / "config.properties").write_text(
         f"hmc.offline=true\nhmc.offline.username=Old\nhmc.gamedir={old / 'gamedir'}\n")
-    (old / "gamedir" / "config" / "marionette-places-test.txt").write_text("home 1 2 3\n")
+    (old / "gamedir" / "config" / "masurium-places-test.txt").write_text("home 1 2 3\n")
     (old / "run" / "client.log").write_text("an old log\n")
     state = TMP / "state"
     state.mkdir(exist_ok=True)
@@ -2088,7 +2088,7 @@ def tests_migrate():
     check("the old layout is recognized", WS.legacy_bots() == ["old"] and "old" not in WS.bot_keys())
     check("an instance command on it says to migrate", "migrate" in told(fails(WS.instance, "old")))
     text, code = run_cli("status")
-    check("...and so does status", "marionette.py migrate" in text or code == 0, text)
+    check("...and so does status", "masurium.py migrate" in text or code == 0, text)
     checks = doctor.checks(WS)
     check("...and doctor", any(l == "layout" and ok is False and "old" in d for l, ok, d in checks))
 
@@ -2120,7 +2120,7 @@ def tests_migrate():
     check("...and its personality, where it was", bot.personality.read_text() == "You are Old.\n")
     check("the instance keeps its server and its port", inst.data == {"bot": "old", "server": "test", "port": 8490})
     check("its game, HeadlessMC and logs were moved, not copied",
-          (inst.gamedir / "config" / "marionette-places-test.txt").exists()
+          (inst.gamedir / "config" / "masurium-places-test.txt").exists()
           and (inst.run / "client.log").exists() and not (old / "gamedir").exists())
     check("HeadlessMC now points at the game folder where it is",
           files.read_java_properties(inst.hmc / "HeadlessMC" / "config.properties").get("hmc.gamedir")

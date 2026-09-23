@@ -3,7 +3,7 @@ command line.
 
 It needs PySide6 (Qt for Python), which the core does not: the command line
 runs on the standard library alone, and nothing outside this package imports
-Qt. Started with  marionette.py gui  or  python -m launcher.gui.
+Qt. Started with  masurium.py gui  or  python -m launcher.gui.
 
     theme.py     how it looks: Fusion, with colour presets (lavender, classic; dark, light)
     icons.py     its icons, drawn in code, and the gesture each makes when hovered
@@ -29,9 +29,9 @@ def main(argv=None, ws=None):
     from .window import MainWindow
 
     app = QApplication.instance() or QApplication(list(argv or sys.argv))
-    app.setApplicationName("Marionette")
+    app.setApplicationName("Masurium Launcher")
     theme.apply(app)
-    app.setWindowIcon(QIcon(theme.avatar("Marionette", 64, colour=theme.ACCENT)))   # until it has a logo
+    app.setWindowIcon(QIcon(theme.avatar("Masurium", 64, colour=theme.ACCENT)))   # until it has a logo
     win = MainWindow(ws or Workspace.from_environment())
     win.show()
     return app.exec()

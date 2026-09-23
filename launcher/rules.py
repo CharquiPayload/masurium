@@ -7,8 +7,8 @@ first:
 
     base      the bot's config (bots/<bot>/bot.json, "rules"), with its
               server's on top (servers/<slug>/rules.json)
-    own       the instance's. `marionette.py rules <instance> ...` edits it
-              and so does /marionette bot in the game: it lives on the
+    own       the instance's. `masurium.py rules <instance> ...` edits it
+              and so does /masurium bot in the game: it lives on the
               server, once, and this launcher sends it CHANGES, never a copy
               that would undo what was changed in the game. A change that
               cannot reach the server waits in the instance's folder
@@ -26,7 +26,7 @@ A layer may also REPLACE a list: its entries are then the whole list, and
 what is under it, what every bot starts with included, no longer counts.
 
 The same rules are worked out by the server mod (mod/.../server/Rules.java);
-both are held to the same cases (mod/src/test/resources/marionette/
+both are held to the same cases (mod/src/test/resources/masurium/
 rules-cases.json).
 
 In a file, a layer looks like this, every part optional:
@@ -241,7 +241,7 @@ def say_source(layer, label=""):
 
 
 def edit(layer, words, where="rules"):
-    """One change to a layer, in the words of /marionette bot:
+    """One change to a layer, in the words of /masurium bot:
 
         pref <toggle> on|off|default
         food ban|allow|default <item>       break allow|forbid|default <block>
@@ -400,7 +400,7 @@ def ask(api, player, **params):
     except urllib.error.HTTPError as e:
         if e.code == 404:
             raise OldServerMod(f"the server mod at {api.address} is older than the rules: "
-                               "deploy the new one (marionette.py deploy-mod)", code="old_server_mod")
+                               "deploy the new one (masurium.py deploy-mod)", code="old_server_mod")
         if e.code in (401, 403):
             raise Fail(f"the server mod at {api.address} refused the token", code="server_mod_refused")
         try:

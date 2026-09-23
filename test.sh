@@ -29,13 +29,13 @@ python3 launcher/tests.py || failures=$((failures + 1))
 echo
 echo "═══ the window (python, Qt drawn offscreen) ═══"
 # It needs PySide6, which the rest does not: a python that has it is used, the
-# one MARIONETTE_GUI_PYTHON names, and without one the suite is skipped, said.
-gui_python="${MARIONETTE_GUI_PYTHON:-python3}"
+# one MASURIUM_GUI_PYTHON names, and without one the suite is skipped, said.
+gui_python="${MASURIUM_GUI_PYTHON:-python3}"
 if "$gui_python" -c "import PySide6" 2>/dev/null; then
   QT_QPA_PLATFORM=offscreen "$gui_python" -m launcher.gui.tests 2>&1 | grep -vE 'propagateSizeHints'
   [ "${PIPESTATUS[0]}" -eq 0 ] || failures=$((failures + 1))
 else
-  echo "  skipped: $gui_python has no PySide6 (MARIONETTE_GUI_PYTHON can name one that has it)"
+  echo "  skipped: $gui_python has no PySide6 (MASURIUM_GUI_PYTHON can name one that has it)"
 fi
 
 echo
@@ -57,7 +57,7 @@ elif [ "$seen" -eq 0 ]; then
   echo "$output" | tail -8 | sed 's/^/  /'
 else
   echo "  $seen java tests"
-  jar=$(ls mod/build/libs/marionette-*.jar 2>/dev/null | grep -v sources | head -1)
+  jar=$(ls mod/build/libs/masurium-*.jar 2>/dev/null | grep -v sources | head -1)
   if [ -z "$jar" ]; then
     failures=$((failures + 1))
     echo "  NO JAR CAME OUT of mod/build/libs"

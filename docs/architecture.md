@@ -91,7 +91,7 @@ the brain into must never be what a lock checks.**
 So everything that takes a bot out of the game, **or changes its own rules**, is
 a **server command**:
 
-- `/marionette bot <bot> shutdown|restart|logoff`, the lists `hear ...` and
+- `/masurium bot <bot> shutdown|restart|logoff`, the lists `hear ...` and
   `admins ...`, and the settings `pref ...`, `food ...` and `break ...`. The
   server knows for sure who typed a command
   (it looks at who typed it, not at the entity, so `/execute as` cannot
@@ -103,9 +103,9 @@ a **server command**:
   never fires later.
 - The **owner** lives in the bot's own `owner` file: it follows the bot to any
   server and cannot be changed from the game. **Admins** and the **hear list**
-  are per server, kept in `marionette_bots.json`. Operators get nothing
+  are per server, kept in `masurium_bots.json`. Operators get nothing
   by default, because a bot belongs to its owner and not to the server.
-  Permission nodes (`marionette.bot.*`) let a permissions mod grant more.
+  Permission nodes (`masurium.bot.*`) let a permissions mod grant more.
 - The brain has **no tool** that writes any of it. It keeps the ones that
   **read**: it can look at its settings, its food ban and its break whitelist,
   so it knows its own rules and can tell you what they are and which command
@@ -131,10 +131,10 @@ is mislabel a chest.
 ### Rules, in three layers
 
 The toggles, the food ban and the break whitelist are a bot's **rules**, kept by
-the server in `marionette_bots.json` in three layers (`server/Rules.java`):
+the server in `masurium_bots.json` in three layers (`server/Rules.java`):
 
 - **base**, what the bot is: its config and its server's, sent by the launcher;
-- **own**, edited by `/marionette bot` and by the launcher — one copy, the
+- **own**, edited by `/masurium bot` and by the launcher — one copy, the
   server's, so the launcher sends *changes* to it and never a copy that would
   undo what was changed in the game;
 - **imposed**, from the launcher's global config (and groups, later). A command
@@ -145,7 +145,7 @@ same thing, and lists add up unless a layer *replaces* one. What no layer names
 keeps what every bot starts with, from `common/Settings.java`, which **both
 sides read** so a key cannot exist on one and not the other. The launcher works
 the layers out the same way (`launcher/rules.py`), and both are held to one set
-of cases (`mod/src/test/resources/marionette/rules-cases.json`).
+of cases (`mod/src/test/resources/masurium/rules-cases.json`).
 
 The body is not told the layers, nor changes: every `/control` answer carries
 what the rules **come to**, whole — every toggle, each list entire — and the
@@ -159,7 +159,7 @@ that says where the orders start, so the bridge never saw them. Carrying the
 state has no such race.)
 
 The only lock left that depends on who spoke is eating banned food, and there
-the name comes from the bridge (`MARIONETTE_SPEAKER`), never from the brain.
+the name comes from the bridge (`MASURIUM_SPEAKER`), never from the brain.
 
 ## Tools answer when they know
 
@@ -179,7 +179,7 @@ every few seconds; the key carries the detail that makes two events different
 
 ## Navigation
 
-The path finder (`mod/src/main/java/marionette/common/Route.java`) is A* over the
+The path finder (`mod/src/main/java/masurium/common/Route.java`) is A* over the
 tiles where a player can stand, and it knows nothing about Minecraft: it asks a
 `World` interface two or three questions. That makes it testable against worlds
 drawn with text (`TextWorld`), in milliseconds.
@@ -359,7 +359,7 @@ to a server's pack is another way for them to drift apart.
 
 **A client pack is not the server's `mods` folder.** Server-only mods (and mods
 that break a headless client, such as some renderers) stay out; the bot's own
-helpers (`hmc-specifics`, the Marionette bot mod) come from `shared/`.
+helpers (`hmc-specifics`, the Masurium bot mod) come from `shared/`.
 
 Several servers may share an address and port (running one at a time), so the
 server selection really chooses **which mods the bot joins with**. Joining with
@@ -368,9 +368,9 @@ launcher says which pack it tried when it cannot join.
 
 **Each instance has its own port.** The bot mod opens an HTTP server on
 `127.0.0.1`; the port lives in `instance.json`, is passed as
-`-Dmarionette.bot.port`, and is written for the bridge (to know whom it talks
+`-Dmasurium.bot.port`, and is written for the bridge (to know whom it talks
 to). The
-bridge exports `MARIONETTE_BOT` so the MCP server, started by `claude`, inherits
+bridge exports `MASURIUM_BOT` so the MCP server, started by `claude`, inherits
 it.
 
 **No two names on one server may contain one another.** The bridge reacts when
@@ -380,7 +380,7 @@ it.
 **The keeper.** HeadlessMC takes its commands (`launch`, `connect`, `msg`) on
 its stdin, so something has to hold that stdin open for as long as the game
 runs. It used to be `tail -f` on a FIFO in `/tmp`, which does not exist on
-Windows. Now it is a process per instance, the keeper (`marionette.py keeper`,
+Windows. Now it is a process per instance, the keeper (`masurium.py keeper`,
 started by `start`), that owns the java process and listens on a localhost
 socket whose port is written in `instances/<instance>/run/keeper.port`. The launcher
 sends it `connect`; the bridge sends it `msg`; `@ping` and `@stop` are for the
@@ -413,7 +413,7 @@ It has two layers. **The core never prints.** It takes a `Workspace` (where
 the folders are, and what the environment overrides), reports what it does
 as `Event`s to a callback, and fails by raising `Fail`, whose message is the
 story and whose lines are the evidence. **The faces show it**: the command
-line (`cli.py`, reached through `launcher/marionette.py` or
+line (`cli.py`, reached through `launcher/masurium.py` or
 `python3 -m launcher`) prints the events; a window will draw the same events
 from the same functions. That is why the folders are an object and not
 module globals resolved at import: a window can change them without a
@@ -454,5 +454,5 @@ it changes fast and is tested without opening Minecraft.
 
 `gradle.properties` caps the Gradle heap at 1.5 GB, so a machine that runs bots
 at 3 GB each may not be able to build while they run. Deploy a new bot mod with
-`launcher/marionette.py deploy-mod` (a new inode, so running bots are not affected) and
+`launcher/masurium.py deploy-mod` (a new inode, so running bots are not affected) and
 restart the bots when convenient.

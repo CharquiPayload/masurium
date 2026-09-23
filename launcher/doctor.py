@@ -72,7 +72,7 @@ def checks(ws):
     major = java_major(text) if code == 0 else None
     add("java 21", major == 21,
         f"{' '.join(ws.java_command())}: {text.splitlines()[0] if text else 'not found'}"
-        + ("" if major in (None, 21) else "  (NeoForge 21.1 wants 21; MARIONETTE_JAVA can point at one)"))
+        + ("" if major in (None, 21) else "  (NeoForge 21.1 wants 21; MASURIUM_JAVA can point at one)"))
 
     claude = shutil.which("claude", path=ws.child_env()["PATH"])
     if claude:
@@ -88,7 +88,7 @@ def checks(ws):
         add("server.env", None, f"{ws.env_file} does not exist; not needed, every server has its own")
     elif ws.env_file.is_file():
         values = ws.env_values()
-        missing = [k for k in ("MARIONETTE_HOST", "MARIONETTE_PORT", "MARIONETTE_TOKEN")
+        missing = [k for k in ("MASURIUM_HOST", "MASURIUM_PORT", "MASURIUM_TOKEN")
                    if not values.get(k)]
         add("server.env", not missing, f"{ws.env_file}" + (f": missing {', '.join(missing)}" if missing else ""))
         if not missing:
@@ -115,15 +115,15 @@ def checks(ws):
     mods = shared / "mods"
     hmc = list(mods.glob("hmc-specifics*.jar")) if mods.is_dir() else []
     add("shared/mods/hmc-specifics", bool(hmc), hmc[0].name if hmc else "the `connect` command comes from it")
-    every = sorted(mods.glob("marionette-*.jar")) if mods.is_dir() else []
-    marionette = [j for j in every if CORE_JAR.match(j.name)]
-    if len(marionette) == 1:
-        add("shared/mods/marionette", True, marionette[0].name)
-    elif not marionette:
-        add("shared/mods/marionette", False, "no marionette-<version>.jar: build it and run deploy-mod")
+    every = sorted(mods.glob("masurium-*.jar")) if mods.is_dir() else []
+    masurium = [j for j in every if CORE_JAR.match(j.name)]
+    if len(masurium) == 1:
+        add("shared/mods/masurium", True, masurium[0].name)
+    elif not masurium:
+        add("shared/mods/masurium", False, "no masurium-<version>.jar: build it and run deploy-mod")
     else:
-        add("shared/mods/marionette", False,
-            "more than one: " + ", ".join(j.name for j in marionette) + " (two jars declaring the same mod)")
+        add("shared/mods/masurium", False,
+            "more than one: " + ", ".join(j.name for j in masurium) + " (two jars declaring the same mod)")
     addons = [j for j in every if not CORE_JAR.match(j.name)]
     families = {}
     for j in addons:
@@ -158,7 +158,7 @@ def checks(ws):
         if s.env_file.is_file():
             its_mods = None
             own = read_env_file(s.env_file)
-            missing = [k for k in ("MARIONETTE_HOST", "MARIONETTE_PORT", "MARIONETTE_TOKEN") if not own.get(k)]
+            missing = [k for k in ("MASURIUM_HOST", "MASURIUM_PORT", "MASURIUM_TOKEN") if not own.get(k)]
             if not WINDOWS and s.env_file.stat().st_mode & 0o077:
                 add(f"servers/{slug}: server.env", False,
                     f"{s.env_file} can be read by other users, and it holds the token: chmod 600 it")
@@ -199,7 +199,7 @@ def checks(ws):
     legacy = ws.legacy_bots()
     if legacy:
         add("layout", False, f"bots in the layout from before instances: {', '.join(legacy)} "
-            "(marionette.py migrate)")
+            "(masurium.py migrate)")
 
     if ws.config_file.is_file():
         try:
@@ -261,8 +261,8 @@ def checks(ws):
         if settings.get(inst, "account") == "online" and not players_in(logins):
             # HeadlessMC makes an EMPTY accounts file on its first run: the
             # folder being there never meant a login.
-            problems.append(f"online account never logged in (marionette.py login {inst.key}, or "
-                            "an account of the launcher: marionette.py account add)")
+            problems.append(f"online account never logged in (masurium.py login {inst.key}, or "
+                            "an account of the launcher: masurium.py account add)")
         group, place = groups.dependency_of(inst)
         if settings.get(inst, "role") == "guard" and place != "guard":
             problems.append("a guard, and no dependency group names it as one: it will not start")

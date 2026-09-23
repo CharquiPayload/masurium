@@ -26,7 +26,7 @@ class ServerApi:
         """The body of one answer. Raises when there is none (UNREACHABLE),
         HTTPError included, whose code says a wrong token (401/403)."""
         req = urllib.request.Request(f"http://{self.address}{route}",
-                                     headers={"X-Marionette-Token": self.token})
+                                     headers={"X-Masurium-Token": self.token})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read().decode("utf-8", "replace")
 

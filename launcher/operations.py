@@ -56,7 +56,7 @@ def create_bot(ws, name, key=None, account=None, on_event=None):
     bot = ws.bot(key)
     if bot.dir.exists():
         raise Fail(f"{bot.dir} already exists.", code="exists")
-    account = account or ws.environ.get("MARIONETTE_ACCOUNT") or "online"
+    account = account or ws.environ.get("MASURIUM_ACCOUNT") or "online"
     if account not in ("online", "offline") and not ws.account(account).exists():
         raise Fail(f"the account is online, offline or one of the accounts ({', '.join(ws.account_keys()) or 'none yet'}),"
                    f" not '{account}'.", code="bad_account")
@@ -81,7 +81,7 @@ def create_instance(ws, bot_key, slug, key=None, on_event=None):
     server = ws.server(slug)
     launcher_jar = ws.shared_dir / "headlessmc-launcher.jar"
     if not (ws.shared_dir / "mods").is_dir() or not launcher_jar.is_file():
-        raise Fail(f"missing {ws.shared_dir}: it holds HeadlessMC and the Marionette mods.",
+        raise Fail(f"missing {ws.shared_dir}: it holds HeadlessMC and the Masurium mods.",
                    code="no_shared")
     key = (key or ws.free_key(bot.key, ws.instance_keys())).lower()
     check_key(key, "instance")
@@ -109,7 +109,7 @@ def create_instance(ws, bot_key, slug, key=None, on_event=None):
 
 def create(ws, name, slug, account=None, bot_key=None, key=None, on_event=None):
     """The bot (if it is not there yet) and an instance of it on a server:
-    what `marionette.py create <name> <server>` does. Returns the instance."""
+    what `masurium.py create <name> <server>` does. Returns the instance."""
     report = report_to(on_event)
     bot_key = (bot_key or name).lower()
     bot = ws.bot(bot_key)
@@ -203,7 +203,7 @@ def clone_instance(ws, key, new_key=None, slug=None, on_event=None):
                 stage="created")
     _copy_own_rules(src, dst, report)
     if settings.get(dst, "account") == "online":
-        report.detail(f"online account: log it in once:  marionette.py login {new_key}")
+        report.detail(f"online account: log it in once:  masurium.py login {new_key}")
     return dst
 
 
@@ -219,7 +219,7 @@ def login_command(inst):
         return None
     if accounts.kind(value) == "account":
         raise Fail(f"{inst.key} plays with the account {value}: its login is the account's, "
-                   "made once with  marionette.py account add", code="has_account")
+                   "made once with  masurium.py account add", code="has_account")
     return (inst.ws.java_command() + ["-jar", "headlessmc-launcher.jar"],
             inst.hmc, inst.ws.child_env())
 
@@ -247,7 +247,7 @@ def account_turn(inst):
         return
     if not account.exists():
         raise Fail(f"{inst.key} plays with the account {account.key}, which is not there. "
-                   f"Log it in:  marionette.py account add --as {account.key}", code="no_account")
+                   f"Log it in:  masurium.py account add --as {account.key}", code="no_account")
     handle = try_lock(account.lock)
     if handle is None:
         raise Fail(f"another instance of the account {account.key} is starting right now "
@@ -283,7 +283,7 @@ def check_can_run(inst):
             continue
         if other.player == inst.player and other.slug == inst.slug:
             raise Fail(f"{inst.name} is already playing on {inst.slug}, as the instance {other.key}.",
-                       lines=[f"stop that one first:  marionette.py stop {other.key}"], code="player_taken")
+                       lines=[f"stop that one first:  masurium.py stop {other.key}"], code="player_taken")
         theirs = account_of(other)
         if mine != "offline" and theirs != "offline" and (
                 other.player == inst.player
@@ -291,7 +291,7 @@ def check_can_run(inst):
                     and mine.key == theirs.key)):
             raise Fail(f"{inst.name}'s account is already playing, on {other.slug} (instance {other.key}): "
                        "one Microsoft account plays in one game at a time.",
-                       lines=[f"stop that one first:  marionette.py stop {other.key}"], code="account_in_use")
+                       lines=[f"stop that one first:  masurium.py stop {other.key}"], code="account_in_use")
         if other.slug == inst.slug and (inst.player in other.player or other.player in inst.player):
             raise Fail(f"'{inst.name}' and '{other.name}' would be on {inst.slug} together, and one "
                        "name contains the other.",
@@ -326,13 +326,13 @@ def prepare_gamedir(inst, server):
     # The mod has no way of knowing WHICH server it joined (they may all share
     # an address and port): the launcher tells it. Per-server memories
     # (places, chests, orders...) are keyed on this.
-    (config / "marionette-server.txt").write_text(server.slug + "\n", encoding="utf-8")
+    (config / "masurium-server.txt").write_text(server.slug + "\n", encoding="utf-8")
     # A guard's leader, from its dependency group: its player, which the body
     # escorts, and its game folder, where the body reads the blocks the leader
     # may break (a guard shares them).
     leader = groups.leader_of(inst)
-    escort_f = config / "marionette-escort.txt"
-    leader_f = config / "marionette-escort-gamedir.txt"
+    escort_f = config / "masurium-escort.txt"
+    leader_f = config / "masurium-escort-gamedir.txt"
     if leader is not None:
         escort_f.write_text(leader.name + "\n", encoding="utf-8")
         leader_f.write_text(str(leader.gamedir.resolve()) + "\n", encoding="utf-8")
@@ -368,7 +368,7 @@ def join(inst, server, api, report, attempts, patience=18, cancel=None):
                 report.step(f"{inst.name} is IN (attempt {attempt}, {i * 10}s)", stage="in")
                 return True
             # A client that closed will not join however long this waits: the
-            # bot mod closes the game itself on a server without Marionette.
+            # bot mod closes the game itself on a server without Masurium.
             if not keeper_alive(inst):
                 report.detail("the client closed")
                 return False
@@ -410,20 +410,20 @@ def _leader_first(inst, report, cancel):
     role = settings.get(inst, "role")
     if "escort" in inst.data and place is None:
         raise Fail(f"{inst.key} names an escort, which is now a dependency group.",
-                   lines=["marionette.py migrate  turns it into one"], code="escort_retired")
+                   lines=["masurium.py migrate  turns it into one"], code="escort_retired")
     if role != "guard" and place != "guard":
         return
     if place != "guard":
         raise Fail(f"{inst.key} is a guard, and no dependency group names it as one: a guard "
                    "without a leader has nothing to do.",
-                   lines=[f"marionette.py group create <group> --leader <instance>, then  "
-                          f"marionette.py group add <group> {inst.key}",
-                          f"or it is not a guard:  marionette.py set {inst.key} role main"],
+                   lines=[f"masurium.py group create <group> --leader <instance>, then  "
+                          f"masurium.py group add <group> {inst.key}",
+                          f"or it is not a guard:  masurium.py set {inst.key} role main"],
                    code="guard_alone")
     if role != "guard":
         raise Fail(f"{inst.key} is a guard of {group.leader} in {group.id}, and its role is {role}.",
-                   lines=[f"marionette.py set {inst.key} role guard   or   "
-                          f"marionette.py group remove {group.key} {inst.key}"], code="guard_role")
+                   lines=[f"masurium.py set {inst.key} role guard   or   "
+                          f"masurium.py group remove {group.key} {inst.key}"], code="guard_role")
     leader = groups.leader_of(inst)
     if leader is None:
         raise Fail(f"{group.id} has no leader to guard ({group.leader} is not an instance).",
@@ -483,19 +483,19 @@ def _start_steps(inst, report, cancel, launched):
         else:
             raise Fail(f"{inst.key} is already running (keeper pid {read_pid(inst.keeper_pid_f)}, "
                        f"game pid {answer[3:]}) but not in the server.",
-                       lines=[f"try:  marionette.py connect {inst.key}   or   marionette.py stop {inst.key}"],
+                       lines=[f"try:  masurium.py connect {inst.key}   or   masurium.py stop {inst.key}"],
                        code="running")
     if port_in_use(inst.port):
         holders = game_pids(inst.port)
         raise Fail(f"port {inst.port} is already taken by a live client this launcher does not "
                    f"hold (pids {holders or 'unknown'}).",
-                   lines=[f"marionette.py stop {inst.key} takes it down, or give it another port:  "
-                          f"marionette.py set {inst.key} port <number>"],
+                   lines=[f"masurium.py stop {inst.key} takes it down, or give it another port:  "
+                          f"masurium.py set {inst.key} port <number>"],
                    code="port_taken")
     clear_run_files(inst)
     if cancel:
         cancel.check()
-    # Without Marionette on the server's side there is nothing for the bot to
+    # Without Masurium on the server's side there is nothing for the bot to
     # talk to (no /players, no chat for the bridge, no commands): said now,
     # before 3 GB of game are loaded for nothing. The bot mod checks the same
     # from inside the game, for a bot started without this launcher.
@@ -508,7 +508,7 @@ def _start_steps(inst, report, cancel, launched):
     except UNREACHABLE as e:
         raise Fail(f"the server mod of {inst.slug} does not answer at {api.address}: "
                    f"{getattr(e, 'reason', e)}.",
-                   lines=["Is Marionette in that server's mods folder, and is the server up?",
+                   lines=["Is Masurium in that server's mods folder, and is the server up?",
                           "(and are that address and port the ones in server.env?)"],
                    code="server_mod_down")
     # Its rules, before the game: what the bot is and what is imposed, and
@@ -582,7 +582,7 @@ def _start_steps(inst, report, cancel, launched):
         else:
             lines, code = [], "not_initialized"
             if settings.get(inst, "account") == "online":
-                lines.append(f"(online account: if HeadlessMC asked for a login, run marionette.py login {inst.key})")
+                lines.append(f"(online account: if HeadlessMC asked for a login, run masurium.py login {inst.key})")
             lines += tail_lines(inst.client_log, 5) + tail_lines(inst.keeper_log, 3)
         raise Fail("the hmc-specifics mod did not initialize. Without it there is no connect.",
                    lines=lines, code=code)
@@ -598,7 +598,7 @@ def _start_steps(inst, report, cancel, launched):
         crash = explain_crash(inst)
         raise Fail(f"the bot mod did not open port {inst.port}. It would join without hands.",
                    lines=crash[1] if crash else tail_lines(
-                       inst.client_log, 5, r"marionette_bot|address already in use|BindException"),
+                       inst.client_log, 5, r"masurium_bot|address already in use|BindException"),
                    code="crashed" if crash else "no_hands")
 
     # `connect` sent while the game is still loading talks to nobody, and an
@@ -639,7 +639,7 @@ def _start_steps(inst, report, cancel, launched):
 
 def connect(inst, on_event=None, cancel=None):
     """Puts back on the server an instance whose client is ALIVE at the title
-    screen (after /marionette bot <bot> logoff, or a failed connect). It
+    screen (after /masurium bot <bot> logoff, or a failed connect). It
     starts nothing."""
     report = report_to(on_event)
     inst.require()
@@ -647,7 +647,7 @@ def connect(inst, on_event=None, cancel=None):
     api = inst.ws.api_for(server)
     with operating(inst):
         if not keeper_alive(inst):
-            raise Fail(f"no live client of {inst.key}: use  marionette.py start {inst.key}",
+            raise Fail(f"no live client of {inst.key}: use  masurium.py start {inst.key}",
                        code="not_running")
         if api.is_inside(inst.name):
             report.step(f"{inst.name} is already in. Nothing to do.", stage="in")
@@ -657,7 +657,7 @@ def connect(inst, on_event=None, cancel=None):
         if join(inst, server, api, report, attempts=3, patience=12, cancel=cancel):
             return JOINED
     raise Fail("it did NOT join.",
-               lines=[f"If the client is hung:  marionette.py restart {inst.key}"], code="not_joined")
+               lines=[f"If the client is hung:  masurium.py restart {inst.key}"], code="not_joined")
 
 
 # --- the bridge ---------------------------------------------------------------
@@ -685,13 +685,13 @@ def bridge_env(inst):
     restarts THIS one."""
     env = inst.ws.child_env()
     env["BOT_NAME"] = inst.name
-    env["MARIONETTE_BOTS_DIR"] = str(inst.state / "bots")
-    env["MARIONETTE_STATE_DIR"] = str(inst.state)
-    env["MARIONETTE_INSTANCE"] = inst.key
-    env.pop("MARIONETTE_SERVER_ENV", None)
+    env["MASURIUM_BOTS_DIR"] = str(inst.state / "bots")
+    env["MASURIUM_STATE_DIR"] = str(inst.state)
+    env["MASURIUM_INSTANCE"] = inst.key
+    env.pop("MASURIUM_SERVER_ENV", None)
     own = inst.ws.servers_dir / inst.slug / "server.env"
     if inst.slug and own.is_file():
-        env["MARIONETTE_SERVER_ENV"] = str(own)
+        env["MASURIUM_SERVER_ENV"] = str(own)
     return env
 
 
@@ -838,7 +838,7 @@ def configure(target, key, value=None, clear=False, on_event=None):
         running = [i.key for i in affected if client_running(i)]
         if running:
             raise Fail(f"{', '.join(running)} running, and {key} is read when it starts. "
-                       f"Stop it first:  marionette.py stop {running[0]}", code="running")
+                       f"Stop it first:  masurium.py stop {running[0]}", code="running")
     if clear:
         settings.clear(target, key)
     else:
@@ -875,7 +875,7 @@ def add_account(ws, run_login, key=None, on_event=None):
         raise
     account = accounts.finish_login(ws, folder, key)
     report.step(f"account {account.key}: plays as {account.name}", stage="added")
-    report.detail(f"a bot plays with it with:  marionette.py set --bot <bot> account {account.key}")
+    report.detail(f"a bot plays with it with:  masurium.py set --bot <bot> account {account.key}")
     return account
 
 
@@ -908,7 +908,7 @@ def remove_account(ws, key, on_event=None):
 def phrases_file(inst):
     """Where its brain's versions of the sentences said without it are (see the
     bridge's write_phrases): in the game's config folder, which the body reads."""
-    return inst.gamedir / "config" / "marionette-phrases.properties"
+    return inst.gamedir / "config" / "masurium-phrases.properties"
 
 
 def rewrite_phrases(inst, on_event=None):
@@ -958,13 +958,13 @@ def create_group(ws, key, leader=None, on_event=None):
     if leader is None:
         group.save({"kind": groups.NORMAL, "instances": [], "groups": []})
         report.step(f"group {key} created: add instances and groups to it with  "
-                    f"marionette.py group add {key} ...", stage="created")
+                    f"masurium.py group add {key} ...", stage="created")
         return group
     lead = ws.instance(leader)
     _check_free(ws, lead)
     group.save({"kind": groups.DEPENDENCY, "leader": lead.key, "guards": []})
     report.step(f"dependency group {key} created, led by {lead.key} ({lead.name} on {lead.slug}): add its "
-                f"guards with  marionette.py group add {key} <instance>", stage="created")
+                f"guards with  masurium.py group add {key} <instance>", stage="created")
     return group
 
 
@@ -974,7 +974,7 @@ def _check_free(ws, node):
     if parent is not None:
         raise Fail(f"{node.id} is already in {parent.id}: one group at most, so what imposes on it is "
                    "never two groups that disagree.",
-                   lines=[f"take it out first:  marionette.py group remove {parent.key} {node.key}"],
+                   lines=[f"take it out first:  masurium.py group remove {parent.key} {node.key}"],
                    code="in_a_group")
     if isinstance(node, Instance) and groups.dependency_of(node)[1] == "leader":
         raise Fail(f"{node.key} leads a dependency group: that group goes in, not the instance.",
@@ -1029,7 +1029,7 @@ def group_remove(ws, key, refs, on_event=None):
         if node.key not in data.get(field, []):
             if group.kind == groups.DEPENDENCY and node.key == group.leader:
                 raise Fail(f"{node.key} leads {group.id}: delete the group instead "
-                           f"(marionette.py group delete {group.key}).", code="leader")
+                           f"(masurium.py group delete {group.key}).", code="leader")
             raise Fail(f"{node.id} is not in {group.id}.", code="not_in_group")
         data[field] = [k for k in data[field] if k != node.key]
         group.save(data)
@@ -1038,7 +1038,7 @@ def group_remove(ws, key, refs, on_event=None):
         report.step(f"{node.id} is out of {group.id}", stage="ungrouped")
         if group.kind == groups.DEPENDENCY and settings.get(node, "role") == "guard":
             report.detail(f"it is still a guard, with no leader: it will not start until it has one, or "
-                          f"marionette.py set {node.key} role main")
+                          f"masurium.py set {node.key} role main")
     return group
 
 
@@ -1265,11 +1265,11 @@ def _refuse_imposed(inst, change):
     if layer == "imposed":
         what = f"its whole {kind} list" if key == "*" or family in imposed["replace"] else key
         if label.startswith("group "):
-            fix = [f"that group's rules:  marionette.py rules --group {label[6:]} ...",
-                   f"or the groups around this instance leave it alone:  marionette.py set {inst.key} lock yes"]
+            fix = [f"that group's rules:  masurium.py rules --group {label[6:]} ...",
+                   f"or the groups around this instance leave it alone:  masurium.py set {inst.key} lock yes"]
         else:
-            fix = ["the global rules:  marionette.py rules --global ...",
-                   f"or this instance ignores them:  marionette.py set {inst.key} ignore_global yes"]
+            fix = ["the global rules:  masurium.py rules --global ...",
+                   f"or this instance ignores them:  masurium.py set {inst.key} ignore_global yes"]
         raise Fail(f"{what} is {rules.say_source(layer, label)}: it is changed there, not here",
                    lines=fix, code="imposed")
 
@@ -1518,7 +1518,7 @@ def _escorts_to_groups(ws, dry_run, report):
         if existing is None:
             if groups.parent_of(ws, leader) is not None:
                 report.warning(f"{leader.key} is in {groups.parent_of(ws, leader).id}: the new group "
-                               f"{key} is not put there; add it:  marionette.py group add ... group:{key}")
+                               f"{key} is not put there; add it:  masurium.py group add ... group:{key}")
             existing = ws.group(key)
             existing.save({"kind": groups.DEPENDENCY, "leader": leader.key, "guards": []})
         gdata = existing.data
@@ -1603,7 +1603,7 @@ def _migrate_legacy(ws, legacy, dry_run, report):
             report.warning(f"{key}: " + ", ".join(f"{k} {v}" for k, v in retired.items())
                            + " are no longer settings: say them in its personality.txt",
                            [str(ws.bot(key).personality)])
-    report.step("migrated. `marionette.py status` lists the instances.", stage="migrated")
+    report.step("migrated. `masurium.py status` lists the instances.", stage="migrated")
     return made
 
 
@@ -1650,10 +1650,10 @@ def deploy_mod(ws, jar=None, on_event=None):
         if not source.is_file():
             raise Fail(f"{source} is not a file", code="no_jar")
     else:
-        built = sorted(p for p in (REPO / "mod" / "build" / "libs").glob("marionette-*.jar")
+        built = sorted(p for p in (REPO / "mod" / "build" / "libs").glob("masurium-*.jar")
                        if "-sources" not in p.name and CORE_JAR.match(p.name))
         if not built:
-            raise Fail("no marionette jar in mod/build/libs: build it first", code="no_jar")
+            raise Fail("no masurium jar in mod/build/libs: build it first", code="no_jar")
         source = built[0]
     family = jar_family(source.name)
     target_dir = ws.shared_dir / "mods"
@@ -1665,15 +1665,15 @@ def deploy_mod(ws, jar=None, on_event=None):
     # A jar left behind would declare the same mod twice and the game would
     # refuse to start. Only the SAME family goes: the core never takes an
     # add-on with it, nor the other way round. For the core that covers the
-    # OLD TWO-FILE NAMES as well, marionette-bot-*.jar and
-    # marionette-server-*.jar. Unlinking is as safe as the rename: running
+    # OLD TWO-FILE NAMES as well, masurium-bot-*.jar and
+    # masurium-server-*.jar. Unlinking is as safe as the rename: running
     # bots keep their own link.
     gone = []
     for old in target_dir.glob("*.jar"):
         if old == target:
             continue
         same = jar_family(old.name) == family
-        legacy = family == "marionette" and re.match(r"^marionette-(bot|server)-\d", old.name)
+        legacy = family == "masurium" and re.match(r"^masurium-(bot|server)-\d", old.name)
         if same or legacy:
             old.unlink()
             gone.append(old.name)
@@ -1681,8 +1681,8 @@ def deploy_mod(ws, jar=None, on_event=None):
     if gone:
         report.detail(f"out: {', '.join(gone)}")
     report.detail("bots already in the game keep the old jar until they restart")
-    if family == "marionette":
+    if family == "masurium":
         report.warning("The SAME file goes in the Minecraft server's mods folder, and the old "
-                       "marionette-bot-*.jar / marionette-server-*.jar have to come out of it:",
-                       ["two jars declaring marionette_bot means the game does not start."])
+                       "masurium-bot-*.jar / masurium-server-*.jar have to come out of it:",
+                       ["two jars declaring masurium_bot means the game does not start."])
     return target, gone

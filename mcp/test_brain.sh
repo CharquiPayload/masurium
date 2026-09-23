@@ -8,7 +8,7 @@
 # It runs Claude Code against mcp/fake_server.py, a pretend bot, so it needs
 # the `claude` CLI logged in, and spends a few model calls.
 R="$(cd "$(dirname "$0")/.." && pwd)"
-FLAG=/tmp/marionette_stop
+FLAG=/tmp/masurium_stop
 MCP="{\"mcpServers\":{\"bot\":{\"command\":\"python3\",\"args\":[\"$R/mcp/fake_server.py\"]}}}"
 ALLOWED='mcp__bot__state mcp__bot__show_inventory mcp__bot__mine mcp__bot__go_to mcp__bot__long_task mcp__bot__stop'
 BRAIN='You are the brain of a Minecraft bot. Use the tools to act and to know.

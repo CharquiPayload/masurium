@@ -13,27 +13,27 @@ license = "MIT"
 # defaultRequire 0 and simply does not apply.
 
 [[mods]]
-modId = "marionette_veil"
+modId = "masurium_veil"
 version = "1.0.0"
-displayName = "Marionette: Veil without a GPU"
+displayName = "Masurium: Veil without a GPU"
 description = "Keeps Veil (bundled in Sable and others) from touching a GPU that a headless bot does not have. Client side only."
 authors = "CharquiPayload"
 
-[[mods.dependencies.marionette_veil]]
-modId = "marionette_bot"
+[[mods.dependencies.masurium_veil]]
+modId = "masurium_bot"
 type = "required"
 versionRange = "[1.0.0,)"
 ordering = "AFTER"
 side = "CLIENT"
 
-[[mods.dependencies.marionette_veil]]
+[[mods.dependencies.masurium_veil]]
 modId = "neoforge"
 type = "required"
 versionRange = "[21.1.0,)"
 ordering = "NONE"
 side = "CLIENT"
 
-[[mods.dependencies.marionette_veil]]
+[[mods.dependencies.masurium_veil]]
 modId = "minecraft"
 type = "required"
 versionRange = "[1.21.1,1.22)"
@@ -46,7 +46,7 @@ side = "CLIENT"
 # NeoForge refuses to load this add-on, and a new version of it is due, tested
 # against that Veil. Optional: without Veil in the pack the add-on loads and
 # does nothing.
-[[mods.dependencies.marionette_veil]]
+[[mods.dependencies.masurium_veil]]
 modId = "veil"
 type = "optional"
 versionRange = "[4.3.2]"
@@ -54,4 +54,4 @@ ordering = "NONE"
 side = "CLIENT"
 
 [[mixins]]
-config = "marionette_veil.mixins.json"
+config = "masurium_veil.mixins.json"

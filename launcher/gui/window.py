@@ -21,7 +21,7 @@ from .widgets import DependencySection, GroupSection, InstanceTile, icon_of
 
 REFRESH_MS = 3000
 LOOSE = ""            # the section of the instances in no group
-ISSUES = "https://github.com/CharquiPayload/marionette/issues"
+ISSUES = "https://github.com/CharquiPayload/masurium/issues"
 
 
 @dataclass
@@ -57,11 +57,11 @@ class MainWindow(QMainWindow):
         self.just_moved = None                # what was dropped, to show it arriving
         # What folds, the style, motion, how often it looks: remembered between
         # runs (a test hands in a file of its own).
-        self.store = store or QSettings("Marionette", "launcher")
+        self.store = store or QSettings("Masurium", "launcher")
         anim.enabled = self.store.value("appearance/animations", True, type=bool)
         icons.animated = self.store.value("appearance/animated_icons", True, type=bool)
         theme.apply(QApplication.instance(), self.store.value("appearance/style", theme.DEFAULT))
-        self.setWindowTitle("Marionette")
+        self.setWindowTitle("Masurium Launcher")
         self.resize(1180, 720)
 
         self._toolbar()
@@ -141,7 +141,7 @@ class MainWindow(QMainWindow):
         help_.addAction(icons.icon("help"), "Documentation", lambda: open_help())
         help_.addAction(icons.icon("logs"), "Report an issue", lambda: QDesktopServices.openUrl(QUrl(ISSUES)))
         help_.addSeparator()
-        help_.addAction(icons.icon("info"), "About Marionette", self.about)
+        help_.addAction(icons.icon("info"), "About Masurium Launcher", self.about)
         button("Help", "help", tip="Doctor, the documentation", menu=help_)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -201,10 +201,11 @@ class MainWindow(QMainWindow):
             self.refresh()
 
     def about(self):
-        box = MessageBox(QMessageBox.NoIcon, "About Marionette",
-                         f"<b>Marionette {__version__}</b><br>Minecraft bots that play as real clients, with "
-                         "Claude as their brain.<br><br>Its window follows Prism Launcher's, so it feels "
-                         "familiar. Marionette is an independent project, not affiliated with or endorsed by "
+        box = MessageBox(QMessageBox.NoIcon, "About Masurium Launcher",
+                         f"<b>Masurium Launcher {__version__}</b><br>Creates, starts and watches Masurium's "
+                         "bots: Minecraft bots that play as real clients, with Claude as their brain."
+                         "<br><br>Its window follows Prism Launcher's, so it feels "
+                         "familiar. Masurium is an independent project, not affiliated with or endorsed by "
                          "Prism Launcher, HeadlessMC or Baritone, and not an official Minecraft product: not "
                          "approved by or associated with Mojang or Microsoft.<br><br>MIT licence.",
                          QMessageBox.Ok, self)
@@ -367,7 +368,7 @@ class MainWindow(QMainWindow):
         s = self.side_layout
         if view is None and group is None:
             self.selected = None
-            s.addWidget(title("Marionette"))
+            s.addWidget(title("Masurium Launcher"))
             s.addSpacing(4)
             s.addWidget(muted("Select an instance to see what can be done with it, or a group by its name. "
                               "Right-click works too, and a double click opens an instance's logs."))

@@ -74,7 +74,7 @@ def arrows(colour):
     when it ends."""
     global _ARROWS
     if _ARROWS is None:
-        _ARROWS = tempfile.mkdtemp(prefix="marionette-arrows-")
+        _ARROWS = tempfile.mkdtemp(prefix="masurium-arrows-")
         atexit.register(shutil.rmtree, _ARROWS, True)
     paths = {}
     for name, points in (("down", ((1, 3), (9, 3), (5, 8))), ("up", ((1, 7), (9, 7), (5, 2)))):

@@ -41,8 +41,8 @@ def launch_line(inst, server):
     and then TWO consoles read the same stdin, stealing each other's lines),
     and -lwjgl, which removes rendering: no screen, no GPU.
 
-    -Dmarionette.name is what makes this client a bot at all.
-    -Dmarionette.bot.port: without it every bot would fight over 8478 and
+    -Dmasurium.name is what makes this client a bot at all.
+    -Dmasurium.bot.port: without it every bot would fight over 8478 and
     the second one would have no hands. What the body says on its own comes
     from the sentences its brain wrote (see the bridge's write_phrases), not
     from a language flag: the mod speaks plain English otherwise."""
@@ -54,8 +54,8 @@ def launch_line(inst, server):
     heap = settings.get(inst, "heap")
     if settings.problem(inst, "heap", heap):
         heap = ws.heap()
-    jvm = [f"-Xmx{heap}", f"-Dmarionette.name={inst.name}",
-           "-Dmarionette.headless=true", f"-Dmarionette.bot.port={inst.port}"]
+    jvm = [f"-Xmx{heap}", f"-Dmasurium.name={inst.name}",
+           "-Dmasurium.headless=true", f"-Dmasurium.bot.port={inst.port}"]
     extra = settings.get(inst, "java_args")
     if extra and not settings.problem(inst, "java_args", extra):
         jvm += extra.split()
@@ -67,7 +67,7 @@ def clear_run_files(inst):
 
 
 def keeper_main(inst, server):
-    """The keeper's whole life. Runs in a process of its own (marionette.py
+    """The keeper's whole life. Runs in a process of its own (masurium.py
     keeper), with its stdout on run/keeper.log."""
     inst.run.mkdir(parents=True, exist_ok=True)
 
@@ -230,7 +230,7 @@ def keeper_alive(inst):
 def keeper_pid(inst):
     """The pid in keeper.pid, only while it still is this instance's keeper."""
     pid = read_pid(inst.keeper_pid_f)
-    return pid if is_ours(pid, "marionette.py", "keeper", inst.key) else None
+    return pid if is_ours(pid, "masurium.py", "keeper", inst.key) else None
 
 
 def launcher_pid(inst):

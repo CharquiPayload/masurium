@@ -81,7 +81,7 @@ def _check_account(target, value):
     if value in ("offline", "online") or target.ws.account(value).exists():
         return None
     return ("offline, online, or one of the accounts: "
-            + (", ".join(target.ws.account_keys()) or "(none yet: marionette.py account add)"))
+            + (", ".join(target.ws.account_keys()) or "(none yet: masurium.py account add)"))
 
 
 def _check_owner(target, value):
@@ -136,7 +136,7 @@ def java_command(inst):
 
 
 def _owner_default(target):
-    return target.ws.env_values().get("MARIONETTE_OWNER", "")
+    return target.ws.env_values().get("MASURIUM_OWNER", "")
 
 
 def _heap_default(target):
@@ -144,7 +144,7 @@ def _heap_default(target):
 
 
 SETTINGS = {s.key: s for s in [
-    Setting("account", "one of the launcher's accounts (marionette.py account add), offline "
+    Setting("account", "one of the launcher's accounts (masurium.py account add), offline "
             "(private servers with online-mode=false), or online (a login kept in the instance)",
             "online", ("offline", "online"), applies="start", layers=(BOT, INSTANCE)),
     Setting("heap", "the game's memory (Java heap)", _heap_default, ("2g", "3g", "4g", "6g"),
@@ -156,7 +156,7 @@ SETTINGS = {s.key: s for s in [
             "each always the newest of its family; opus[1m] and the like for a million tokens of context) or "
             "a model's full id, and optionally an effort", "opus medium",
             ("opus medium", "opus high", "sonnet", "sonnet low", "haiku low", "fable"), applies="bridge"),
-    Setting("owner", "the player it belongs to: their delicate orders, /marionette bot anywhere",
+    Setting("owner", "the player it belongs to: their delicate orders, /masurium bot anywhere",
             _owner_default, applies="now"),
     Setting("java", "the Java its game runs on: a path to a java executable, or a name on the PATH "
             "(NeoForge 21.1 wants Java 21)", _java_default, applies="start", layers=(INSTANCE, GROUP, GLOBAL)),
@@ -180,8 +180,8 @@ LOWERCASE = ("account", "heap", "ignore_global", "lock", "role", "fast_responses
 RETIRED = {
     "language": "the personality says which language the bot speaks (personality.txt)",
     "gender": "the personality says who the bot is (personality.txt)",
-    "escort": "a guard's leader is its dependency group (marionette.py group create <group> "
-              "--leader <instance>, then group add <group> <guard>; marionette.py migrate turns an "
+    "escort": "a guard's leader is its dependency group (masurium.py group create <group> "
+              "--leader <instance>, then group add <group> <guard>; masurium.py migrate turns an "
               "escort into one)",
 }
 
@@ -404,7 +404,7 @@ def problems(target):
 
 # The flat files the bridge and the MCP server read in an instance's folder, one
 # value each, written only when a layer sets them: without the file they apply
-# the same defaults as the table above (MARIONETTE_OWNER for the owner). Plus
+# the same defaults as the table above (MASURIUM_OWNER for the owner). Plus
 # `escort`, the player of a guard's leader, from its dependency group.
 RENDERED = ("account", "model", "owner", "fast_responses")
 # Files an older launcher rendered, removed wherever they are left.

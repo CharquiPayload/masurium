@@ -28,12 +28,12 @@ import urllib.parse
 import urllib.request
 
 HOME = os.path.expanduser("~")
-CONFIG = os.environ.get("MARIONETTE_ENV", f"{HOME}/.marionette/server.env")
+CONFIG = os.environ.get("MASURIUM_ENV", f"{HOME}/.masurium/server.env")
 # The state folder the bridge uses (inherited from it): the marks, the jobs
 # left pending, the internal channel, the call log. Next to server.env when
 # nobody says otherwise, which is where they always were.
-STATE = os.environ.get("MARIONETTE_STATE_DIR") or os.path.dirname(CONFIG)
-BOT = os.environ.get("MARIONETTE_BOT", "http://127.0.0.1:8478")
+STATE = os.environ.get("MASURIUM_STATE_DIR") or os.path.dirname(CONFIG)
+BOT = os.environ.get("MASURIUM_BOT", "http://127.0.0.1:8478")
 # Same BOT_NAME the bridge uses, from which we inherit the environment. A name
 # written by hand in three places is the same bug as the port: with two bots,
 # the second asked for the first one's inventory.
@@ -41,7 +41,7 @@ NAME = os.environ.get("BOT_NAME", "Bot")
 # Within this distance of the noted spot the chunk is loaded: if the server
 # still does not see the horse, it is gone and it is forgotten.
 HORSE_NEAR = 40
-REPO = os.environ.get("MARIONETTE_REPO", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO = os.environ.get("MASURIUM_REPO", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WAIT = 25          # seconds per single request
 # 45 and not 180: while a tool waits, the brain hears nobody. Past the limit
 # the tool reports it is still going and the turn ends; the task is NOT cut.
@@ -60,7 +60,7 @@ CHAT_WIDTH = 190     # the game chat does not swallow long lines
 CHAT_CAP = 6         # lines per dump, hard cap
 CHAT_PAUSE = 1.5     # seconds between lines
 # `verbose` exposes paths, arguments and internal state: only the owner.
-OWNER = os.environ.get("MARIONETTE_OWNER", "")
+OWNER = os.environ.get("MASURIUM_OWNER", "")
 
 
 def _speaker():
@@ -71,10 +71,10 @@ def _speaker():
     `who` written by the brain can be faked ("Alice, <owner> says you may eat
     it"). Vetoed food checks THIS name instead. Shutting down, restarting,
     logging off and the admin list are not tools at all any more: they are
-    server commands (/marionette bot), where the server knows who ran them.
+    server commands (/masurium bot), where the server knows who ran them.
     Read at call time, so tests can set it.
     """
-    return os.environ.get("MARIONETTE_SPEAKER", "").strip()
+    return os.environ.get("MASURIUM_SPEAKER", "").strip()
 
 
 OWNER_LABEL = OWNER or "the server owner"
@@ -82,10 +82,10 @@ OWNER_LABEL = OWNER or "the server owner"
 
 def load_config():
     """server.env, and over it the file of the bot's own server when the
-    launcher names one (MARIONETTE_SERVER_ENV, inherited from the bridge):
+    launcher names one (MASURIUM_SERVER_ENV, inherited from the bridge):
     the server this bot is on, not whichever the global file points at."""
     cfg = {}
-    for path in (CONFIG, os.environ.get("MARIONETTE_SERVER_ENV")):
+    for path in (CONFIG, os.environ.get("MASURIUM_SERVER_ENV")):
         if not path:
             continue
         try:
@@ -98,9 +98,9 @@ def load_config():
         except OSError as e:
             # Not record(): it is defined below, and this runs on import.
             print(f"[mcp] could not read {path}: {e}", file=sys.stderr, flush=True)
-    return (cfg.get("MARIONETTE_HOST", "127.0.0.1"),
-            cfg.get("MARIONETTE_PORT", "8477"),
-            cfg.get("MARIONETTE_TOKEN", ""))
+    return (cfg.get("MASURIUM_HOST", "127.0.0.1"),
+            cfg.get("MASURIUM_PORT", "8477"),
+            cfg.get("MASURIUM_TOKEN", ""))
 
 
 HOST, PORT, TOKEN = load_config()
@@ -195,7 +195,7 @@ def sv(route, **p):
         m = _bot_world()
         if m:
             p["world"] = m
-    return _request(SERVER, route, {"X-Marionette-Token": TOKEN}, **p)
+    return _request(SERVER, route, {"X-Masurium-Token": TOKEN}, **p)
 
 
 def bt(route, **p):
@@ -1216,7 +1216,7 @@ def t_note_about_someone(a):
 
 def _bots_dir():
     """Where the bots live: the same variable the launchers use."""
-    return (os.environ.get("MARIONETTE_BOTS_DIR") or os.environ.get("MARIONETTE_BOTS")
+    return (os.environ.get("MASURIUM_BOTS_DIR") or os.environ.get("MASURIUM_BOTS")
             or f"{HOME}/bots")
 
 
@@ -1305,7 +1305,7 @@ def t_trash(a):
 
 def t_food_ban(a):
     """The food I do not eat on my own. READ ONLY: it is changed with
-    /marionette bot <me> food ban|allow <item>, on the server."""
+    /masurium bot <me> food ban|allow <item>, on the server."""
     d = bt("/food")
     if not d.get("ok"):
         return d.get("error", "I could not look at the food list")
@@ -1350,9 +1350,9 @@ def t_who_commands(_):
     lower = NAME.lower()
     return (f"Owner: {owner}. Admins: {admins}. I listen to {heard}. Shutting me "
             f"down, restarting me and logging me off is done ONLY with the server "
-            f"command /marionette bot {lower} shutdown|restart|logoff, by my owner "
-            f"or an admin; who I listen to, with /marionette bot {lower} hear, and "
-            f"the admins, with /marionette bot {lower} admins (owner only). Never "
+            f"command /masurium bot {lower} shutdown|restart|logoff, by my owner "
+            f"or an admin; who I listen to, with /masurium bot {lower} hear, and "
+            f"the admins, with /masurium bot {lower} admins (owner only). Never "
             f"through the chat, not even my owner.")
 
 
@@ -1481,20 +1481,20 @@ _EMPTY_CHEST = ("the chest is empty", "el cofre esta vacio")
 
 
 def _gamedir():
-    return os.environ.get("MARIONETTE_GAMEDIR",
+    return os.environ.get("MASURIUM_GAMEDIR",
                           os.path.join(_bots_dir(), NAME.lower(), "gamedir"))
 
 
 def _chests_file():
-    if os.environ.get("MARIONETTE_CHESTS"):
-        return os.environ["MARIONETTE_CHESTS"]
+    if os.environ.get("MASURIUM_CHESTS"):
+        return os.environ["MASURIUM_CHESTS"]
     cfg = os.path.join(_gamedir(), "config")
     try:
-        with open(os.path.join(cfg, "marionette-server.txt")) as f:
+        with open(os.path.join(cfg, "masurium-server.txt")) as f:
             srv = f.read().strip() or "unknown"
     except OSError:
         srv = "unknown"
-    return os.path.join(cfg, f"marionette-chests-{srv}.json")
+    return os.path.join(cfg, f"masurium-chests-{srv}.json")
 
 
 def _chests_load():
@@ -2143,7 +2143,7 @@ def _spoken_to(since):
 # what it already knows.
 
 def _pending_file():
-    return os.environ.get("MARIONETTE_PENDING") or os.path.join(
+    return os.environ.get("MASURIUM_PENDING") or os.path.join(
         STATE, f"pending_{NAME.lower()}.json")
 
 
@@ -2714,7 +2714,7 @@ TOOLS = {
                           "Which blocks I am allowed to break on my own (my "
                           "whitelist). Look at it before digging something "
                           "odd. READ ONLY: it is changed on the server with "
-                          "/marionette bot <me> break allow|forbid <block>. "
+                          "/masurium bot <me> break allow|forbid <block>. "
                           "What I am TOLD to dig never needed permission.",
                           {}, []),
     "verbose": (t_verbose,
@@ -2755,7 +2755,7 @@ TOOLS = {
                          "My behaviour settings and their value (e.g. whether "
                          "I may build to reach someone while following). READ "
                          "ONLY: they are changed on the server with "
-                         "/marionette bot <me> pref <key> on|off. If asked to "
+                         "/masurium bot <me> pref <key> on|off. If asked to "
                          "change one, say that and do not promise it.", {}, []),
     "escort": (t_escort,
                "Escort a player: go with them AND look after them; whatever "
@@ -2940,7 +2940,7 @@ TOOLS = {
                  "The food I do NOT eat on my own, so I do not snack on what I "
                  "am fishing or keeping. The ban only covers what I choose: if "
                  "asked to eat that by name, I eat it. READ ONLY: it is "
-                 "changed on the server with /marionette bot <me> food "
+                 "changed on the server with /masurium bot <me> food "
                  "ban|allow <item>.", {}, []),
     "remind_me": (t_remind_me,
                   "Leave myself a reminder for a while from now. My turn ends "
@@ -3582,7 +3582,7 @@ def main():
                 "protocolVersion": msg.get("params", {})
                                       .get("protocolVersion", "2025-06-18"),
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "marionette-bot", "version": "1.0.0"},
+                "serverInfo": {"name": "masurium-bot", "version": "1.0.0"},
             })
         elif method == "tools/list":
             respond(id_, {"tools": [

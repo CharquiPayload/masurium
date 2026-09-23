@@ -275,7 +275,7 @@ def operating(inst):
             handle = try_lock(lock)
             if handle is None:
                 raise Fail(f"another launcher command is working on {inst.id} right now "
-                           f"(pid {read_pid(lock) or '?'}). Wait for it, or see  marionette.py status",
+                           f"(pid {read_pid(lock) or '?'}). Wait for it, or see  masurium.py status",
                            code="busy")
             _OPERATING[str(lock)] = (me, handle)
     if handle is None:

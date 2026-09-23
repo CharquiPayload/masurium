@@ -4,8 +4,8 @@ plugins {
 }
 
 version = '1.0.0'
-group = 'marionette'
-base { archivesName = 'marionette' }
+group = 'masurium'
+base { archivesName = 'masurium' }
 
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(21)
@@ -19,15 +19,15 @@ neoForge {
     // server it joins, so the halves drifted apart and the one that did not
     // understand a setting ignored it without a word. One file cannot drift.
     //
-    // marionette_server needs both sides: on a dedicated server it is the whole mod,
-    // and on a client it is what an integrated world answers. marionette_bot is
+    // masurium_server needs both sides: on a dedicated server it is the whole mod,
+    // and on a client it is what an integrated world answers. masurium_bot is
     // @Mod(dist = Dist.CLIENT), so a dedicated server never constructs it and never
     // loads a client class through it — which BotSideTest keeps true.
     mods {
-        marionette_server {
+        masurium_server {
             sourceSet sourceSets.main
         }
-        marionette_bot {
+        masurium_bot {
             sourceSet sourceSets.main
         }
     }

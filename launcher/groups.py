@@ -259,7 +259,7 @@ def problems(ws):
                                       f"{leader.slug}: a guard plays where its leader does"))
                 if settings.get(guard, "role") != "guard":
                     out.append((g.id, f"{key} is one of its guards, and its role is "
-                                      f"{settings.get(guard, 'role')}: marionette.py set {key} role guard"))
+                                      f"{settings.get(guard, 'role')}: masurium.py set {key} role guard"))
         for key in ("settings", "rules"):
             if key in data and not isinstance(data[key], dict):
                 out.append((g.id, f"{key} is a JSON object"))

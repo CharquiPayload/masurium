@@ -70,7 +70,7 @@ p.getInventory().selected = slot;
 mc.getConnection().send(new ServerboundSetCarriedItemPacket(slot));
 ```
 
-That is `MarionetteBot.wieldNow`. Where a tick can be spent, spend it: it is the
+That is `MasuriumBot.wieldNow`. Where a tick can be spent, spend it: it is the
 cheap version of the same thing.
 
 **The client cannot vouch for anyone's health.** Right after hitting a zombie the
@@ -349,7 +349,7 @@ loads classes on demand: everything already loaded keeps working, and the first
 class needed after the copy is read from a zip whose index no longer matches,
 failing with an `Error` (not an `Exception`, so not even the HTTP server's
 `try` caught it; the connection just closed). Deploy with
-`marionette.py deploy-mod`: copy to a temporary name and rename. A new inode: running
+`masurium.py deploy-mod`: copy to a temporary name and rename. A new inode: running
 bots keep the old jar until their next start, when the sync links the new one.
 
 ---

@@ -1,6 +1,6 @@
-# Marionette
+# Masurium
 
-Minecraft bots with a brain. A Marionette bot joins your server as a regular
+Minecraft bots with a brain. A Masurium bot joins your server as a regular
 player, understands what people ask it in the chat, and does it: it mines,
 crafts, farms, fishes, builds from a blueprint, escorts players and fights off
 what attacks them. Direct orders are handled instantly; anything ambiguous is
@@ -22,13 +22,13 @@ build it, and how to get the first bot into the game.
 
 | layer | what it does | where |
 |---|---|---|
-| **Server half** | the source of truth: what is where, who is online, did it happen; server-side crafting | `mod/src/main/java/marionette/server/` |
-| **Bot half** | the hands, inside a headless client: walk, dig, place, fight, eat, use chests and furnaces | `mod/src/main/java/marionette/bot/` |
-| **Shared half** | what both need and neither owns: the path finder, the logbook, the settings and the phrases | `mod/src/main/java/marionette/common/` |
+| **Server half** | the source of truth: what is where, who is online, did it happen; server-side crafting | `mod/src/main/java/masurium/server/` |
+| **Bot half** | the hands, inside a headless client: walk, dig, place, fight, eat, use chests and furnaces | `mod/src/main/java/masurium/bot/` |
+| **Shared half** | what both need and neither owns: the path finder, the logbook, the settings and the phrases | `mod/src/main/java/masurium/common/` |
 | **MCP server** | the catalog of tools the brain can call | `mcp/server.py` |
 | **Bridge** | reads the chat, wakes the brain when the bot is named, relays body notices | `mcp/bridge.py` |
 | **Claude Code** | thinking, only when needed | — |
-| **Launcher** | creates, starts, stops and watches bots; a keeper per bot holds the game's console | `launcher/` |
+| **Masurium Launcher** | creates, starts, stops and watches bots; a keeper per bot holds the game's console | `launcher/` |
 | **Add-ons** | jars of their own, one per third-party mod the bot has to live with; the first keeps Veil off a GPU that a headless bot does not have | `addons/veil/` |
 
 The split is strict: **a question goes to the server, an action goes to the
@@ -58,7 +58,7 @@ because fighting is measured in ticks and a model round trip takes seconds.
   each person has done with the bot, standing orders by category, behaviour
   preferences.
 - **In-game integration**: state icons in the TAB list, an optional sidebar
-  with every bot, a hotbar notice for owners, and `/marionette bot` commands to
+  with every bot, a hotbar notice for owners, and `/masurium bot` commands to
   shut down, restart or log off a bot and choose who it listens to.
 - **Safety by construction**: the brain has no shell or file access, only the
   bot's tools; shutting down, restarting and logging off are server commands,
@@ -83,7 +83,7 @@ the launcher's keeper is run for real against a fake game that echoes what it
 is told.
 
 One of them is worth knowing about before changing anything: `BotSideTest` fails
-the build if anything in `marionette.server` or `marionette.common` so much as
+the build if anything in `masurium.server` or `masurium.common` so much as
 names a client class or the bot's half. Those two are all a dedicated server
 loads, and a client class touched there does not fail politely — it kills the
 startup, on the server of whoever downloaded the mod. It reads the **compiled**
@@ -105,7 +105,7 @@ inline, a lambda, or a return type that no `import` would reveal.
 - A per-bot configuration file generated on first start, with the behaviour
   toggles as `true`/`false`.
 - Release builds of the jar.
-- **Launcher**: the command line is done (`launcher/marionette.py`: bots, which
+- **Masurium Launcher**: the command line is done (`launcher/masurium.py`: bots, which
   are characters, and instances, a bot on a server, created, cloned, started,
   stopped and watched; settings in layers, bot < instance; each server with its
   own server mod; it compares the pack with the server's `/mods` before
@@ -114,13 +114,13 @@ inline, a lambda, or a return type that no `import` would reveal.
   layers kept on the server and editable from the launcher and the game, live;
   groups, plain ones that start together and a leader with its guards, nested,
   with settings and rules that impose on what is inside them, and a global
-  config over all). A window on the same code (`marionette.py gui`, PySide6):
+  config over all). A window on the same code (`masurium.py gui`, PySide6):
   the instances by group, their actions, rules, settings and logs. To do: a run
   on Windows.
 - **Add-ons**: separate jars that teach the bots one mod each. The first one is
   there, `addons/veil` (compatibility: Veil without a GPU); the next ones teach
-  *abilities* (`marionette-create`, `marionette-watut`...). To do for those: the
-  core offers them a place to register their own `/marionette bot <bot> <add-on>
+  *abilities* (`masurium-create`, `masurium-watut`...). To do for those: the
+  core offers them a place to register their own `/masurium bot <bot> <add-on>
   ...` subcommands and their own per-bot settings, kept where the rest of the
   per-bot settings live and handed to the bridge in the same poll, so an add-on
   needs no server of its own.
@@ -137,7 +137,7 @@ inline, a lambda, or a return type that no `import` would reveal.
 ## Where to use it
 
 **Only on private servers, or on servers whose owners explicitly allowed your
-bots.** Never take a Marionette bot to a public server such as Hypixel:
+bots.** Never take a Masurium bot to a public server such as Hypixel:
 
 - **You break their rules.** Public networks forbid bots and automated clients;
   the account gets banned, and you are the one breaking the rules.
@@ -154,7 +154,7 @@ ideally with a whitelist.
 
 ## Acknowledgements
 
-- **[Baritone](https://github.com/cabaletta/baritone)** (LGPL-3.0). Marionette's
+- **[Baritone](https://github.com/cabaletta/baritone)** (LGPL-3.0). Masurium's
   navigation was designed after studying Baritone: partial routes ("best so
   far"), goals as conditions, costs measured in ticks, time-bounded searches and
   favoring recent paths. The ideas were reimplemented from scratch; no Baritone
@@ -163,18 +163,24 @@ ideally with a whitelist.
   **[hmc-specifics](https://github.com/headlesshq/hmc-specifics)** by 3arthqu4ke and
   HeadlessHQ (MIT), which make it possible to run the bots as real clients without a
   screen. They are used as external tools and are not bundled.
-- **[Prism Launcher](https://prismlauncher.org/)** (GPL-3.0). Marionette began as a
+- **[Prism Launcher](https://prismlauncher.org/)** (GPL-3.0). Masurium began as a
   client mod run from Prism, one instance per bot, and its launcher follows Prism's
   lead: instances in groups, a panel of actions for the one selected, settings per
   instance over shared defaults. Nothing of Prism's code is used.
 - [NeoForge](https://neoforged.net/) and the Minecraft modding community.
 - [Claude Code](https://claude.com/claude-code) by Anthropic, the brain.
 
-Marionette is an independent project. It is not affiliated with, endorsed by or
+Masurium is an independent project. It is not affiliated with, endorsed by or
 sponsored by the Prism Launcher project, HeadlessMC or HeadlessHQ, or the Baritone
 project, and it is **not an official Minecraft product: not approved by or
 associated with Mojang or Microsoft**. Their names are used only to say where an
-idea came from or what Marionette works with; their logos and assets are not used.
+idea came from or what Masurium works with; their logos and assets are not used.
+
+## The name
+
+Masurium is the name three chemists gave element 43 in 1925, with the symbol
+**Ma**. Their discovery could not be confirmed, and the element is known today as
+technetium, so the name was free for a project to borrow, symbol included.
 
 ## License
 

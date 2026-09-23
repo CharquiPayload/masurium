@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel, Q
 from . import anim, icons, theme
 
 # Where Help leads: the setup guide, at the part about what is on screen.
-DOCS = "https://github.com/CharquiPayload/marionette/blob/main/docs/setup.md"
+DOCS = "https://github.com/CharquiPayload/masurium/blob/main/docs/setup.md"
 
 
 class Dialog(QDialog):

@@ -2,9 +2,14 @@
 
 ## 1.0.0 (unreleased)
 
-First public release of Marionette.
+First public release of Masurium. During development it was called Marionette;
+the name changed before any release because a server plugin with fake players
+already used it. Everything that carried the old name carries the new one:
+the mod ids (`masurium_server`, `masurium_bot`), the Java packages, the
+`/masurium` command, the `MASURIUM_*` variables, `~/.masurium` and the jars.
+The launcher is Masurium Launcher.
 
-**One jar for both sides.** The same `marionette-*.jar` goes in the Minecraft
+**One jar for both sides.** The same `masurium-*.jar` goes in the Minecraft
 server's `mods/` folder and in each bot client's. The bot half is
 `@Mod(dist = Dist.CLIENT)`, so a dedicated server never constructs it, and a test
 over the compiled classes fails the build if anything the server loads ever names a
@@ -19,7 +24,7 @@ setting ignored it without a word.
 - Server-side crafting with every loaded recipe, including modded ones, with the
   table-distance rule and honest reports of items dropped on the ground.
 - State icons next to bot names in the TAB list.
-- `/marionette bot <bot>` commands to shut down, restart or log off a bot, to
+- `/masurium bot <bot>` commands to shut down, restart or log off a bot, to
   manage its admins and hear list, and to change its behaviour settings, its
   food ban and the blocks it may break by itself. Allowed to its owner, its
   admins, the server console, or players granted permission nodes (LuckPerms
@@ -27,18 +32,18 @@ setting ignored it without a word.
   change by itself is what it learns about the world (places, chests, its diary,
   its own trash list). A setting decided while a bot is off is applied when its
   bridge comes back.
-- `/marionette` commands: bot owners, status, an optional sidebar with every bot,
+- `/masurium` commands: bot owners, status, an optional sidebar with every bot,
   and a hotbar notice for owners.
 - The server console says so, once, when a bot joins running a different version of
-  the bot mod than the server's, and `/marionette bot <bot>` shows both.
+  the bot mod than the server's, and `/masurium bot <bot>` shows both.
 - A bot's rules (its behaviour toggles, the food it does not eat on its own, the
   blocks it may break on its own) in three layers, kept in
-  `marionette_bots.json`: its config and what is imposed come from the
-  launcher, and its own layer is what `/marionette bot` edits. What is imposed
+  `masurium_bots.json`: its config and what is imposed come from the
+  launcher, and its own layer is what `/masurium bot` edits. What is imposed
   cannot be changed from the game, and the command says who imposes it; `pref`,
   `food` and `break` take `default` to go back to what is under, and show who
   decides each thing. The body is handed what the rules come to, whole, and
-  holds exactly that. A `marionette_bots.properties` from before is read once
+  holds exactly that. A `masurium_bots.properties` from before is read once
   into the bots' own layer.
 - `/rules`: a bot's three layers and what they come to, for the launcher.
 - `/mods`: every mod the server loaded, with its version, for a launcher to compare
@@ -47,7 +52,7 @@ setting ignored it without a word.
 - Bots do not pick up again what they tossed themselves.
 
 ### Launcher
-- One command, `launcher/marionette.py`, in Python with no dependencies and no
+- One command, `launcher/masurium.py`, in Python with no dependencies and no
   shell: `servers`, `create`, `login`, `start`, `connect`, `bridge`, `stop`,
   `restart`, `status`, `deploy-mod`, `doctor`. It replaced eight bash scripts.
 - Behind the command, a core that never prints: it reports what it does as
@@ -59,7 +64,7 @@ setting ignored it without a word.
   account, port) through one table that says what each
   accepts and when a change counts; a setting read at start is refused while
   the client runs. `doctor` names hand-edited values `set` would refuse.
-  `MARIONETTE_HEAP` and `MARIONETTE_VERSION` replace the old `HEAP` and
+  `MASURIUM_HEAP` and `MASURIUM_VERSION` replace the old `HEAP` and
   `VERSION`, names generic enough to be set by something else.
 - Bots and instances. A bot is a character (`bots/<bot>/bot.json` and its
   personality); an instance is a bot on a server and is what runs
@@ -70,10 +75,10 @@ setting ignored it without a word.
   anywhere) and says which instance is in the way. Each server's bridges keep
   their state apart, so two instances of one bot on two servers share nothing.
   `migrate` moves bots from the layout before instances, with a backup first.
-- No Marionette on the server, no bot there. `start` asks the server's mod
+- No Masurium on the server, no bot there. `start` asks the server's mod
   before it loads a game and says what is wrong (not there or not up, or a
   wrong token); and the bot mod itself, a few seconds after joining a server
-  whose command tree has no `/marionette`, leaves and closes its game, for a
+  whose command tree has no `/masurium`, leaves and closes its game, for a
   bot started without the launcher. A start that sees its client close while
   joining stops waiting at once.
 - Accounts, logged in once. `account add` opens HeadlessMC to log a Minecraft
@@ -102,7 +107,7 @@ setting ignored it without a word.
   the global config. `groups` shows the tree; `group clone` copies a group
   with copies of every instance in it. The `escort` setting became the
   dependency group, and `migrate` turns one into the other.
-- A window, `marionette.py gui` (PySide6, which the command line does not
+- A window, `masurium.py gui` (PySide6, which the command line does not
   need), on the same operations: every instance by group with how it is
   doing, and the actions for the one selected or for a group; the rules
   editor (each toggle and each list with who decides it, imposed ones
@@ -198,7 +203,7 @@ setting ignored it without a word.
 - What the body says by itself without waiting for the brain (a creeper next to
   whoever it escorts, being cornered, what it found exploring) is said in the
   bot's own voice: its brain writes its version of each sentence once
-  (`marionette.py phrases` writes them again), and plain English stands in for
+  (`masurium.py phrases` writes them again), and plain English stands in for
   any it has not written well.
 - Body notices that wake the brain, with per-key cooldowns, and an in-memory
   logbook for diagnosis.
@@ -207,7 +212,7 @@ setting ignored it without a word.
 - MCP server with the bot's tools; Claude Code sessions per bot with no shell or
   file access.
 - Chat bridge with instant stop words, a hear list that keeps strangers away
-  from the brain, orders from `/marionette bot` carried out without the model,
+  from the brain, orders from `/masurium bot` carried out without the model,
   per-bot owner, personality (which says the language it speaks) and model.
 - Nothing that takes a bot out of the game can be asked through the chat, and
   the one lock the brain still touches (vetoed food) checks the name the bridge
@@ -217,7 +222,7 @@ setting ignored it without a word.
 - Internal channel between a bot and its guards.
 
 ### Launchers and tests
-- Online (a logged-in Minecraft account, `marionette.py login`) or offline bot accounts.
+- Online (a logged-in Minecraft account, `masurium.py login`) or offline bot accounts.
 - Launchers to create, start, connect, restart and stop bots, with shared game
   files, per-server mod packs through hard links and safe mod deployment.
 - Tests that need no Minecraft: path finder, logbook, request parsing, bridge and

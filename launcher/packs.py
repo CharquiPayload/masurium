@@ -15,12 +15,12 @@ import zipfile
 from .files import link_or_copy
 
 MODS_TOML = "META-INF/neoforge.mods.toml"
-# The core is marionette-<version>.jar; an add-on is marionette-<name>-<version>.jar.
-CORE_JAR = re.compile(r"^marionette-\d")
+# The core is masurium-<version>.jar; an add-on is masurium-<name>-<version>.jar.
+CORE_JAR = re.compile(r"^masurium-\d")
 # Third-party mods a headless bot cannot run without an add-on, and the add-on's
 # jar family. The same table lives in the bot mod (Bot.ADDON_FOR), which refuses
 # to start without it; here it is caught before a 3 GB java is launched.
-ADDON_FOR = {"veil": "marionette-veil"}
+ADDON_FOR = {"veil": "masurium-veil"}
 
 
 def toml_mods(text, manifest_version=""):
@@ -146,8 +146,8 @@ def sync_mods(ws, gamedir, pack, extra=None):
 
 
 def jar_family(name):
-    """What is left of a jar's name before its version: `marionette` for the
-    core, `marionette-veil` for that add-on. Two jars of one family declare
+    """What is left of a jar's name before its version: `masurium` for the
+    core, `masurium-veil` for that add-on. Two jars of one family declare
     the same mod, and only one may stay."""
     m = re.match(r"^(.*?)-\d", name)
     return m.group(1) if m else name.removesuffix(".jar")

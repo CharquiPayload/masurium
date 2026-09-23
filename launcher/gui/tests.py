@@ -6,7 +6,7 @@ person does to the same operations the command line uses; the operations
 themselves are tested in launcher/tests.py.
 
 Run:  python3 -m launcher.gui.tests   (needs PySide6)
-With MARIONETTE_GUI_SHOTS=<folder>, it also leaves screenshots there.
+With MASURIUM_GUI_SHOTS=<folder>, it also leaves screenshots there.
 """
 import os
 import pathlib
@@ -26,8 +26,8 @@ from . import anim, dialogs, icons, theme, window as window_module  # noqa: E402
 from .widgets import Switch  # noqa: E402
 from .window import MainWindow  # noqa: E402
 
-TMP = pathlib.Path(tempfile.mkdtemp(prefix="marionette-gui-test-"))
-SHOTS = os.environ.get("MARIONETTE_GUI_SHOTS")
+TMP = pathlib.Path(tempfile.mkdtemp(prefix="masurium-gui-test-"))
+SHOTS = os.environ.get("MASURIUM_GUI_SHOTS")
 
 failures = []
 done = 0
@@ -65,12 +65,12 @@ def workspace():
     for d in ("bots", "instances", "servers/test/mods", "servers/other/mods", "shared/mods"):
         (TMP / d).mkdir(parents=True, exist_ok=True)
     (TMP / "shared" / "headlessmc-launcher.jar").write_bytes(b"not really a jar")
-    (TMP / "shared" / "mods" / "marionette-1.0.0.jar").write_bytes(b"m")
+    (TMP / "shared" / "mods" / "masurium-1.0.0.jar").write_bytes(b"m")
     (TMP / "servers" / "test" / "server.conf").write_text("HOST=127.0.0.1\nDESCRIPTION=\"the test one\"\n")
     (TMP / "servers" / "other" / "server.conf").write_text("HOST=127.0.0.2\n")
     # A server mod that refuses at once: every question to it fails in no time.
-    (TMP / "server.env").write_text("MARIONETTE_HOST=127.0.0.1\nMARIONETTE_PORT=1\nMARIONETTE_TOKEN=t\n")
-    environ = {k: v for k, v in os.environ.items() if not k.startswith("MARIONETTE_")}
+    (TMP / "server.env").write_text("MASURIUM_HOST=127.0.0.1\nMASURIUM_PORT=1\nMASURIUM_TOKEN=t\n")
+    environ = {k: v for k, v in os.environ.items() if not k.startswith("MASURIUM_")}
     ws = Workspace(TMP / "bots", TMP / "servers", TMP / "shared", TMP / "server.env", home=TMP, environ=environ,
                    instances_dir=TMP / "instances", state_dir=TMP / "state", accounts_dir=TMP / "accounts",
                    groups_dir=TMP / "groups")
@@ -122,7 +122,9 @@ def tests(app):
           folders[:6] == ["Instances", "Bots", "Groups", "Servers", "Shared", "Accounts"]
           and "Copy a folder's path" in folders, folders)
     check("...Help has Doctor and the documentation",
-          {"Doctor…", "Documentation", "About Marionette"} <= {a.text() for a in win.bar_buttons["Help"].menu().actions()})
+          {"Doctor…", "Documentation", "About Masurium Launcher"}
+          <= {a.text() for a in win.bar_buttons["Help"].menu().actions()})
+    check("the window is called Masurium Launcher", win.windowTitle() == "Masurium Launcher", win.windowTitle())
     check("there is a way out without a title bar: Quit (Ctrl+Q)",
           any(a.text() == "Quit" and not a.shortcut().isEmpty() for a in win.toolbar_actions()))
 

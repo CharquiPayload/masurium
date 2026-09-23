@@ -14,7 +14,7 @@ from .events import wait_for
 WINDOWS = os.name == "nt"
 # The command everybody types, and the one the launcher runs itself with for
 # its internal jobs (the keeper, the middleman of spawn_free).
-ENTRY = pathlib.Path(__file__).resolve().parent / "marionette.py"
+ENTRY = pathlib.Path(__file__).resolve().parent / "masurium.py"
 
 
 def run_quiet(args, timeout=20):
@@ -174,11 +174,11 @@ def kill_tree(pid, hard=False):
 
 
 def game_pids(port):
-    """Every java carrying -Dmarionette.bot.port=<port> on its command line:
+    """Every java carrying -Dmasurium.bot.port=<port> on its command line:
     the game itself, whoever started it. The last resort of `stop` and the
     truth for `status` when the keeper is gone. Linux reads /proc; elsewhere
     `ps` (POSIX) or PowerShell (Windows) say the same, more slowly."""
-    needle = f"-Dmarionette.bot.port={int(port)}"
+    needle = f"-Dmasurium.bot.port={int(port)}"
     found = []
     proc = pathlib.Path("/proc")
     if proc.is_dir():

@@ -7,7 +7,7 @@ is testing, not rewriting.
 
 Two layers. The core never prints: it takes a Workspace (where the folders
 are), reports what it does as Events and fails with Fail. The faces show it:
-the command line (cli.py, reached through marionette.py) today, a window
+the command line (cli.py, reached through masurium.py) today, a window
 tomorrow, both on the same functions.
 
     workspace.py   the three folders, server.env, the environment; the server registry
