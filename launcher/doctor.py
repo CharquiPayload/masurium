@@ -7,7 +7,7 @@ import sys
 import urllib.error
 from collections import namedtuple
 
-from . import brain, groups, rules, settings
+from . import __version__, brain, groups, rules, settings, updates
 from .api import UNREACHABLE
 from .instances import check_name
 from .events import Fail
@@ -95,6 +95,16 @@ def checks(ws):
             add("claude code up to date", None, "GitHub could not be asked which is the latest")
     else:
         add("claude code", False, "not on PATH (nor in ~/.local/bin): the brain has nothing to run")
+    # Masurium itself: said only when GitHub answers (a machine offline has
+    # nothing wrong with it for that).
+    fresh = updates.latest(ws)
+    if fresh:
+        have = brain.version_of(__version__)
+        if have and fresh[0] > have:
+            add("masurium up to date", None, f"{brain.dotted(fresh[0])} is out, this launcher is "
+                f"{brain.dotted(have)}: {updates.how_to_update()} ({fresh[1]})")
+        else:
+            add("masurium up to date", True, f"{__version__} is the latest")
 
     theirs = None
     own_api = [s for s in ws.servers() if s.env_file.is_file()]
@@ -148,6 +158,10 @@ def checks(ws):
             "; ".join(f"{f}: {', '.join(n)}" for f, n in twice.items()) + " (two jars of one add-on)")
     elif addons:
         add("shared/mods add-ons", True, ", ".join(j.name for j in addons))
+    from . import firstrun              # here: it imports this module
+    older = firstrun.older_jars(ws)
+    if older:
+        add("shared/mods up to date", None, firstrun.older_detail(older, "masurium.py setup"))
 
     slugs = ws.server_slugs()
     add("servers registered", bool(slugs), ", ".join(slugs) if slugs else f"nothing under {ws.servers_dir}")

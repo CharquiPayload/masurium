@@ -74,6 +74,13 @@ setting ignored it without a word.
   server's Masurium mod before writing `server.env` (readable by its user
   alone); registers the first server with the NeoForge version the server
   runs; and says how to get Java 21 and Claude Code when they are missing.
+- **Updates are said, never done by themselves.** Once a day the launcher asks
+  GitHub for Masurium's latest release, and when there is a newer one the
+  window says so on top (and `doctor`), with how that copy is updated: its
+  package, `install.sh` again, or `git pull`. An updated launcher brings newer
+  Masurium jars than the bots have: the window offers to put them in, saying
+  first that the server needs the same jar, and setup does it. A jar put in by
+  hand, newer than the launcher's, is never replaced by an older one.
 - The launcher's folders (instances, servers, shared, accounts, groups) live
   in `~/.local/share/masurium` by default instead of straight in the home; a
   machine that already has them in the home keeps using them there.

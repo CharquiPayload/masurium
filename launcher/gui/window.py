@@ -7,13 +7,14 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QImage, QKeySequence
-from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLineEdit, QListWidget,
+from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QMainWindow, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QStatusBar,
                                QToolBar, QToolButton, QVBoxLayout, QWidget)
 
 from .. import __version__, groups, operations, settings
 from ..instances import Instance
 from ..events import Cancelled, Fail
+from ..packs import CORE_JAR
 from . import anim, dialogs, icons, state, theme
 from .common import MessageBox, ask, muted, open_help, title
 from .tasks import Background, Tasks
@@ -90,7 +91,18 @@ class MainWindow(QMainWindow):
         self.side_holder.setContentsMargins(0, 0, 0, 0)
         self.side_content = None
         outer.addWidget(self.side)
-        self.setCentralWidget(body)
+        # What is newer than what this machine runs goes on top of it all:
+        # notices, one per kind of news (news()).
+        central = QWidget()
+        column = QVBoxLayout(central)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        self.notice_box = QVBoxLayout()
+        self.notice_box.setSpacing(0)
+        column.addLayout(self.notice_box)
+        column.addWidget(body, 1)
+        self.notices = {}
+        self.setCentralWidget(central)
         self.setStatusBar(QStatusBar())
 
         self.tasks.event.connect(self._event)
@@ -198,10 +210,102 @@ class MainWindow(QMainWindow):
     def first_run(self):
         """Offered when the window opens and a first bot would still lack
         something the launcher can get itself: a new machine, say. Asked on
-        a thread (java -version takes a moment) and shown when it answers."""
+        a thread (java -version takes a moment) and shown when it answers.
+        Then what is newer than what this machine runs: news()."""
         from .. import firstrun
-        self.background.ask(lambda: firstrun.ready(self.ws),
-                            lambda ready: None if ready else self.open_setup(), lambda e: None)
+
+        def answered(ready):
+            if not ready:
+                self.open_setup()
+            self.news()
+        self.background.ask(lambda: firstrun.ready(self.ws), answered, lambda e: None)
+
+    # --- what is newer, said on top -----------------------------------------------------------
+
+    def news(self):
+        """What is newer than what this machine runs, asked on a thread (GitHub
+        may take seconds to answer) and said in a notice on top, never done by
+        itself: a release of Masurium (updates.py), and the jars this launcher
+        brings when the bots run older ones (firstrun.older_jars). A notice
+        closed stays closed for what it said; a newer release, or other jars,
+        are said again."""
+        from .. import firstrun, updates
+        self.background.ask(lambda: (updates.newer(self.ws), firstrun.older_jars(self.ws)), self._news,
+                            lambda e: None)
+
+    def _news(self, found):
+        from .. import updates
+        release, older = found
+        if release and self.store.value("notices/release", "") != release[1]:
+            have, new, page = release
+            self.notice("release", "spark", f"Masurium {new} is out; this launcher is {have}. To update it, "
+                        f"{updates.how_to_update()}.",
+                        [("What is new", lambda: QDesktopServices.openUrl(QUrl(page)))], remember=new)
+        else:
+            self.notice("release", None)
+        jars = ",".join(jar.name for _, jar in older)
+        if older and self.store.value("notices/jars", "") != jars:
+            self.notice("jars", "cube", "This launcher brings a newer Masurium mod than the bots run: "
+                        + ", ".join(f"{name} → {jar.name}" for name, jar in older) + ".",
+                        [("Update the bots' mod…", lambda: self.update_jars(older)),
+                         ("Show the jar", lambda: self.open_folder(older[0][1].parent))], remember=jars)
+        else:
+            self.notice("jars", None)
+
+    def notice(self, key, icon, text=None, buttons=(), remember=None):
+        """A line on top of the instances, until it is closed or no longer
+        true; no text takes it away. `remember` is what closing it keeps, so
+        the same news is not said again."""
+        old = self.notices.pop(key, None)
+        if old:
+            old.hide()
+            old.deleteLater()
+        if text is None:
+            return
+        bar = QFrame()
+        bar.setObjectName("notice")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(12, 6, 8, 6)
+        mark = QLabel()
+        mark.setPixmap(icons.pixmap(icon, 18))
+        row.addWidget(mark)
+        said = QLabel(text)
+        said.setWordWrap(True)
+        row.addWidget(said, 1)
+        for label, fn in buttons:
+            b = QPushButton(label)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        later = QPushButton("Not now")
+        later.setToolTip("Closed, this is not said again; something newer is")
+        later.clicked.connect(lambda: self._close_notice(key, remember))
+        row.addWidget(later)
+        self.notices[key] = bar
+        self.notice_box.addWidget(bar)
+
+    def _close_notice(self, key, remember):
+        if remember is not None:
+            self.store.setValue(f"notices/{key}", remember)
+        self.notice(key, None)
+
+    def update_jars(self, older):
+        """The newer jars into shared/mods (firstrun.put_mods), once it is said
+        what the server needs. The bots in the game keep theirs until they
+        restart: a jar is swapped under none of them."""
+        from .. import firstrun
+        from .firstrun import TASK
+        core = [jar for _, jar in older if CORE_JAR.match(jar.name)]
+        text = (f"The bots start with {', '.join(jar.name for _, jar in older)} from their next start; the "
+                "ones in the game now keep the old one until they restart.")
+        if core:
+            text += (f"\n\nThe server needs the same jar, or the bots do not get in: put {core[0]} in its "
+                     "mods folder, in place of the old one, and restart it.")
+        if not ask(self, "Update the bots' mod", text + "\n\nPut it in for the bots?"):
+            return
+        ws = self.ws
+        if not self.tasks.run(TASK, "updating the bots' mod", lambda on_event, cancel: firstrun.put_mods(ws, on_event),
+                              then=lambda ok: self.news()):
+            self.alert("Busy", "The setup is already doing something: wait for it to finish.")
 
     def open_settings(self, start=None):
         dialogs.SettingsWindow(self, start=start).exec()

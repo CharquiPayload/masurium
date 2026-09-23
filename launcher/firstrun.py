@@ -9,6 +9,10 @@ checksums of the versions Masurium was tested with; the Masurium jars that came
 with the program put in shared/mods; server.env written, and kept private; the
 first server registered. What cannot be done from here (Java 21, Claude Code) is
 checked, and it is said how to get it.
+
+A launcher updated brings newer jars than the bots have: setup puts them in too
+(older_jars), and the window offers it, but nothing swaps them by itself: the
+server needs the same core jar, and a bot newer than its server no longer gets in.
 """
 import hashlib
 import os
@@ -24,7 +28,7 @@ from .api import UNREACHABLE, ServerApi
 from .doctor import env_keys, java_major
 from .events import Cancelled, Fail, report_to
 from .files import write_private
-from .packs import CORE_JAR
+from .packs import CORE_JAR, jar_family, jar_version
 from .processes import run_quiet
 from .workspace import DEFAULT_VERSION
 
@@ -101,6 +105,34 @@ def bundled_jars():
     return sorted(found, key=lambda j: (not CORE_JAR.match(j.name), j.name))
 
 
+def _newer_than(jar, others):
+    """Whether one of `others` is the same mod as `jar`, and newer."""
+    mine = jar_version(jar.name)
+    return bool(mine) and any(jar_family(o.name) == jar_family(jar.name) and (jar_version(o.name) or ()) > mine
+                              for o in others)
+
+
+def older_jars(ws):
+    """The Masurium jars the bots run that this launcher brings newer, as
+    (the name in shared/mods, the jar it brings) pairs, the core first. An
+    updated launcher leaves the bots on the jars they had until these are put
+    in (put_mods). Only mods the bots have: a missing core is setup's
+    ordinary job, and a jar put in by hand, newer than the launcher's, is no
+    older one."""
+    mods = ws.shared_dir / "mods"
+    there = sorted(mods.glob("masurium-*.jar")) if mods.is_dir() else []
+    brought = bundled_jars()
+    out = []
+    for jar in brought:
+        if _newer_than(jar, brought):
+            continue                       # a clone's build folder with an old build left in it
+        mine = jar_version(jar.name)
+        theirs = [t for t in there if jar_family(t.name) == jar_family(jar.name)]
+        if mine and theirs and all((jar_version(t.name) or mine) < mine for t in theirs):
+            out.append((theirs[-1].name, jar))
+    return out
+
+
 LOCAL = ("127.0.0.1", "localhost", "::1")
 
 
@@ -134,6 +166,9 @@ def needs(ws):
                      "no jar came with this launcher: download masurium-<version>.jar from the releases, or "
                      "build it (mod/: ./gradlew build), then  masurium.py deploy-mod <jar>"),
                     can=bool(bundled) and not mine))
+    older = older_jars(ws)
+    if older:
+        out.append(Need("newer_jars", "The Masurium mod, newer", False, older_detail(older), can=True))
     lacking = server_env_missing(ws)
     out.append(Need("server_env", "The server's Masurium mod", not lacking,
                     f"{ws.env_file}" if not lacking else
@@ -145,14 +180,26 @@ def needs(ws):
     return out
 
 
+def older_detail(older, who="setup"):
+    """What older_jars found, said: the bots' jars, the launcher's, and the
+    server's part in it when the core is among them."""
+    core = [jar for _, jar in older if CORE_JAR.match(jar.name)]
+    return (f"the bots run {', '.join(name for name, _ in older)}; this launcher brings "
+            f"{', '.join(jar.name for _, jar in older)}: {who} puts them in"
+            + (f". The server needs the same jar, or the bots do not get in: {core[0]} goes in its mods "
+               "folder, in place of the old one" if core else ""))
+
+
 def missing(ws):
     return [n for n in needs(ws) if not n.ok]
 
 
 def ready(ws):
     """Whether this machine has what its first bot needs, the things setup
-    can do included: what the window checks to decide whether to offer it."""
-    return not [n for n in needs(ws) if not n.ok and n.key not in ("java", "claude")]
+    can do included: what the window checks to decide whether to offer it.
+    Newer jars are not wanting: the bots run on the ones they have, and the
+    window offers those on their own."""
+    return not [n for n in needs(ws) if not n.ok and n.key not in ("java", "claude", "newer_jars")]
 
 
 # --- doing it ------------------------------------------------------------------
@@ -209,13 +256,18 @@ def fetch(ws, on_event=None, cancel=None, opener=None):
 def put_mods(ws, on_event=None):
     """The Masurium jars that came with the program, into shared/mods (with
     deploy-mod's care: an older jar of the same mod goes). Only those not
-    there already, byte for byte."""
+    there already, byte for byte, and never one older than what is there: a
+    jar put in by hand, newer, stays."""
     report = report_to(on_event)
+    mods = ws.shared_dir / "mods"
     put = []
-    for jar in bundled_jars():
-        there = ws.shared_dir / "mods" / jar.name
+    brought = bundled_jars()
+    for jar in brought:
+        there = mods / jar.name
         if there.is_file() and there.stat().st_size == jar.stat().st_size \
                 and there.read_bytes() == jar.read_bytes():
+            continue
+        if _newer_than(jar, brought) or _newer_than(jar, list(mods.glob("masurium-*.jar"))):
             continue
         path, _ = operations.deploy_mod(ws, jar, on_event=report)
         put.append(path)
@@ -340,7 +392,7 @@ def run(ws, host=None, port=None, token=None, owner=None, server=None, game_port
     report = report_to(on_event)
     if download_them:
         fetch(ws, report, cancel)
-    if bundled_jars() and not masurium_in_shared(ws):
+    if bundled_jars() and (not masurium_in_shared(ws) or older_jars(ws)):
         put_mods(ws, report)
     if server_env_missing(ws):
         values = ws.env_values() if ws.env_file.is_file() else {}

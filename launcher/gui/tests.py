@@ -20,7 +20,7 @@ from PySide6.QtCore import QEvent, QSettings, Qt, QVariantAnimation  # noqa: E40
 from PySide6.QtGui import QColor, QImage  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPushButton, QToolButton  # noqa: E402
 
-from .. import brain, groups, instances, memory, operations as ops, rules, workspace  # noqa: E402
+from .. import brain, groups, instances, memory, operations as ops, rules, updates, workspace  # noqa: E402
 from ..workspace import Workspace  # noqa: E402
 from . import anim, dialogs, icons, theme, window as window_module  # noqa: E402
 from .widgets import Switch  # noqa: E402
@@ -29,6 +29,8 @@ from .widgets import Switch  # noqa: E402
 # java carries its port on the whole machine (see launcher/tests.py).
 workspace.FIRST_PORT = instances.FIRST_PORT = 18478
 brain.fetch_latest = lambda: "v2.1.280"
+LATEST = lambda: ("v" + updates.__version__, "https://example.invalid/releases/latest")  # noqa: E731
+updates.fetch_latest = LATEST
 from .window import MainWindow  # noqa: E402
 
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="masurium-gui-test-"))
@@ -534,6 +536,52 @@ def tests(app):
     wait(lambda: False, 1.5)
     check("...one that has everything is not", not win_offered)
     del win.open_setup
+
+    print("\nWhat is newer, said on top")
+    check("the latest launcher, and the bots on its jars: nothing is said",
+          wait(lambda: False, 1) or not win.notices, list(win.notices))
+    (ws.state_dir / updates.CACHE).unlink(missing_ok=True)
+    updates.fetch_latest = lambda: ("v99.0.0", "https://example.invalid/v99.0.0")
+    win.news()
+    check("a newer Masurium is said in a notice on top", wait(lambda: "release" in win.notices))
+    bar = win.notices.get("release")
+    said = " ".join(lab.text() for lab in bar.findChildren(QLabel)) if bar else ""
+    check("...with its version, how this copy is updated, and its page",
+          "99.0.0" in said and updates.how_to_update() in said and "What is new" in buttons_of(bar), said)
+    shot(win, "notice")
+    next(b for b in bar.findChildren(QPushButton) if b.text() == "Not now").click()
+    check("...closed, it goes", "release" not in win.notices)
+    win.news()
+    wait(lambda: False, 1)
+    check("...and is not said again for that release", "release" not in win.notices)
+    updates.fetch_latest = LATEST
+    (ws.state_dir / updates.CACHE).unlink(missing_ok=True)
+
+    fake = TMP / "fake-launcher"
+    (fake / "jars").mkdir(parents=True)
+    (fake / "jars" / "masurium-1.0.1.jar").write_bytes(b"newer")
+    real_repo = ops.REPO
+    ops.REPO = fake
+    try:
+        win.news()
+        check("a launcher that brings a newer mod than the bots run says so", wait(lambda: "jars" in win.notices))
+        bar = win.notices.get("jars")
+        said = " ".join(lab.text() for lab in bar.findChildren(QLabel)) if bar else ""
+        check("...naming both jars, with a button to put it in and one to find it",
+              "masurium-1.0.0.jar" in said and "masurium-1.0.1.jar" in said
+              and {"Update the bots' mod…", "Show the jar"} <= set(buttons_of(bar)), said)
+        asked = []
+        window_module.ask = lambda parent, heading, text: asked.append(text) or True
+        next(b for b in bar.findChildren(QPushButton) if b.text() == "Update the bots' mod…").click()
+        check("...it asks first, saying the server needs the same jar",
+              asked and "server needs the same jar" in asked[0] and "masurium-1.0.1.jar" in asked[0], asked)
+        mods = ws.shared_dir / "mods"
+        check("...then puts it in: the old one goes, and the notice with it",
+              wait(lambda: (mods / "masurium-1.0.1.jar").is_file() and "jars" not in win.notices)
+              and not (mods / "masurium-1.0.0.jar").exists(), sorted(p.name for p in mods.iterdir()))
+    finally:
+        ops.REPO = real_repo
+        window_module.ask = lambda *a: True
     setup = SetupDialog(new_win)
     check("the setup lists what a first bot needs", wait(lambda: setup.list.count() >= 7 and setup.needs),
           setup.list.count())

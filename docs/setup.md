@@ -166,6 +166,20 @@ leaves both alone.
 **Claude Code** is installed apart, for the user that runs the bots:
 `curl -fsSL https://claude.ai/install.sh | bash`, then run `claude` once to sign in.
 
+**Updating.** The launcher never updates itself. Once a day it asks GitHub
+which is Masurium's latest release, and when there is a newer one the window
+says so on top (`masurium doctor` too), with how your copy is updated: the new
+`.deb` or `PKGBUILD`, installed the way the first one was; the new release's
+`./install.sh`, run again; or `git pull` in a clone. A notice closed is not
+shown again until there is something newer.
+
+An updated launcher brings the new Masurium jars, but the bots keep the ones
+in `shared/mods` until these are put in: the window offers it, and **Set up
+this machine** or `masurium setup` do it (a jar you put in by hand, newer than
+the launcher's, stays). **The server needs the same `masurium-<version>.jar`**
+in its `mods/` folder, in place of the old one, or the bots no longer get in.
+Bots already in the game keep the old jar until they restart.
+
 **Setting it up.** The first time the window opens, it offers **Set up this
 machine** (also in Help); in a terminal, `masurium setup` does the same,
 asking as it goes (or taking `--host`, `--port`, `--token`, `--owner`,

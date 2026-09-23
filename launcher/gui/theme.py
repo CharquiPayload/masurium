@@ -144,6 +144,7 @@ QFrame#card {{ background: {c['section']}; border: 1px solid {c['border']}; bord
 QLabel#cardTitle {{ color: {c['header']}; font-weight: bold; font-size: 11pt; }}
 QLabel#title {{ font-weight: bold; font-size: 13pt; }}
 QFrame#side {{ background: {c['panel']}; border-left: 1px solid {c['border']}; }}
+QFrame#notice {{ background: {c['tile_selected']}; border: none; border-bottom: 1px solid {c['accent']}; }}
 QPushButton {{ background: {c['button']}; border: 1px solid {c['strong_border']}; border-radius: 6px;
     padding: 6px 12px; }}
 QPushButton:hover {{ border-color: {c['hover']}; }}

@@ -43,7 +43,7 @@ FAKE_JAVA.chmod(FAKE_JAVA.stat().st_mode | stat.S_IEXEC)
 sys.path.insert(0, str(REPO))
 from launcher import cli, doctor, operations as ops, settings  # noqa: E402
 from launcher import files, groups, instances, keeper, packs, processes, rules  # noqa: E402
-from launcher import brain  # noqa: E402
+from launcher import brain, updates  # noqa: E402
 from launcher.events import Fail  # noqa: E402
 from launcher import workspace as workspace_module  # noqa: E402
 from launcher.workspace import DEFAULT_HEAP, DEFAULT_VERSION, FIRST_PORT, Workspace  # noqa: E402
@@ -63,8 +63,10 @@ WS = Workspace(TMP / "bots", TMP / "servers", TMP / "shared", TMP / "server.env"
 # the whole machine (processes.game_pids): with the same ports, running the
 # tests next to a real bot stopped that bot.
 FIRST_PORT = workspace_module.FIRST_PORT = instances.FIRST_PORT = 18478
-# Nor do they ask GitHub which Claude Code is the latest: that is pretended.
+# Nor do they ask GitHub which Claude Code, or which Masurium, is the latest:
+# that is pretended (this Masurium is).
 brain.fetch_latest = lambda: "v2.1.280"
+updates.fetch_latest = lambda: ("v" + updates.__version__, "https://example.invalid/releases/latest")
 
 
 # --- minimal harness --------------------------------------------------------
@@ -639,6 +641,8 @@ def tests_deploy():
     check("an add-on's family keeps its name", packs.jar_family("masurium-veil-1.0.0.jar") == "masurium-veil")
     check("the core jar is told from an add-on by its name",
           packs.CORE_JAR.match("masurium-1.0.0.jar") and not packs.CORE_JAR.match("masurium-veil-1.0.0.jar"))
+    check("a jar's version is what follows its family", packs.jar_version("masurium-1.0.1.jar") == (1, 0, 1)
+          and packs.jar_version("masurium-veil-1.0.12.jar") == (1, 0, 12) and packs.jar_version("masurium.jar") is None)
     layout()
     mods = TMP / "shared" / "mods"
     for name in ("masurium-0.9.0.jar", "masurium-bot-0.8.0.jar", "masurium-veil-0.9.0.jar",
@@ -2266,6 +2270,45 @@ def tests_claude_update():
         (WS.state_dir / brain.CACHE).unlink(missing_ok=True)
 
 
+def tests_masurium_update():
+    print("\nMasurium: a newer release is said, never installed")
+    layout()
+    (WS.state_dir / updates.CACHE).unlink(missing_ok=True)
+    asked = []
+    real = updates.fetch_latest
+    try:
+        updates.fetch_latest = lambda: asked.append(1) or ("v1.1.0", "https://example.invalid/v1.1.0")
+        check("an older launcher here: said, with the release's page",
+              updates.newer(WS, have="1.0.0", now=1000) == ("1.0.0", "1.1.0", "https://example.invalid/v1.1.0"))
+        check("...and GitHub is asked once a day, not every time the window opens",
+              updates.newer(WS, have="1.0.0", now=1000 + updates.EVERY - 1) is not None and len(asked) == 1)
+        check("the latest here, or one ahead of it (a clone): nothing to say",
+              updates.newer(WS, have="1.1.0", now=2000) is None and updates.newer(WS, have="1.2.0", now=2000) is None)
+        (WS.state_dir / updates.CACHE).unlink()
+        updates.fetch_latest = lambda: ("v99.0.0", "https://example.invalid/v99.0.0")
+        said = {c.label: c for c in doctor.checks(WS)}.get("masurium up to date")
+        check("doctor says it too, with how this copy is updated",
+              said is not None and said.ok is None and "99.0.0 is out" in said.detail
+              and updates.how_to_update() in said.detail, said)
+
+        def offline():
+            raise OSError("no network")
+        updates.fetch_latest = offline
+        (WS.state_dir / updates.CACHE).unlink()
+        check("without GitHub (or with the repository private): nothing is said, nothing breaks",
+              updates.newer(WS, have="1.0.0", now=5000) is None
+              and not any(c.label == "masurium up to date" for c in doctor.checks(WS)))
+    finally:
+        updates.fetch_latest = real
+        (WS.state_dir / updates.CACHE).unlink(missing_ok=True)
+    (TMP / "clone" / ".git").mkdir(parents=True, exist_ok=True)
+    check("how this copy is updated, from where it lives: a clone, a package, install.sh",
+          "git pull" in updates.how_to_update(TMP / "clone")
+          and ".deb" in updates.how_to_update("/opt/masurium-launcher/app")
+          and "PKGBUILD" in updates.how_to_update("/usr/share/masurium-launcher")
+          and "install.sh" in updates.how_to_update(TMP / ".local" / "share" / "masurium-launcher" / "app"))
+
+
 def tests_version():
     print("\nOne version for the launcher and the mod")
     import launcher
@@ -2476,6 +2519,41 @@ def tests_firstrun():
         check("they go into shared/mods", [p.name for p in put] == ["masurium-1.0.1.jar"]
               and (root / "shared" / "mods" / "masurium-1.0.1.jar").read_bytes() == b"release")
         check("...not again when they are there", firstrun.put_mods(fresh) == [])
+
+        mods = root / "shared" / "mods"
+        (built / "jars" / "masurium-1.0.1.jar").unlink()
+        (built / "jars" / "masurium-1.0.2.jar").write_bytes(b"newer")
+        (built / "jars" / "masurium-watut-1.0.2.jar").write_bytes(b"watut")
+        older = firstrun.older_jars(fresh)
+        check("a launcher updated brings a newer jar than the bots run: the one there, the one it brings",
+              [(n, j.name) for n, j in older] == [("masurium-1.0.1.jar", "masurium-1.0.2.jar")], older)
+        need = {n.key: n for n in firstrun.needs(fresh)}.get("newer_jars")
+        check("...setup lists it as something it can do, and says the server needs the same jar",
+              need is not None and not need.ok and need.can and "server needs the same jar" in need.detail, need)
+        real_needs = firstrun.needs
+        try:
+            firstrun.needs = lambda ws: [need]
+            check("...but it does not make a machine unready: the bots run on the old one",
+                  firstrun.ready(fresh))
+        finally:
+            firstrun.needs = real_needs
+        said = {c.label: c for c in doctor.checks(fresh)}.get("shared/mods up to date")
+        check("...doctor says it too", said is not None and said.ok is None and "masurium.py setup" in said.detail,
+              said)
+        put = firstrun.put_mods(fresh)
+        check("setup puts them in: the old one goes, and the add-on it brings comes",
+              sorted(p.name for p in put) == ["masurium-1.0.2.jar", "masurium-watut-1.0.2.jar"]
+              and not (mods / "masurium-1.0.1.jar").exists() and firstrun.older_jars(fresh) == [],
+              sorted(p.name for p in mods.iterdir()))
+        (built / "jars" / "masurium-1.0.2.jar").rename(built / "jars" / "masurium-1.0.1.jar")
+        check("a jar put in by hand, newer than the launcher's, stays: nothing older takes its place",
+              firstrun.older_jars(fresh) == [] and firstrun.put_mods(fresh) == []
+              and (mods / "masurium-1.0.2.jar").read_bytes() == b"newer")
+        (built / "jars" / "masurium-1.0.1.jar").unlink()
+        (built / "jars" / "masurium-watut-1.0.2.jar").unlink()
+        (built / "mod/build/libs/masurium-1.0.3.jar").write_bytes(b"core, again")
+        check("a clone's build folder with an old build left in it: only its newest counts",
+              [(n, j.name) for n, j in firstrun.older_jars(fresh)] == [("masurium-1.0.2.jar", "masurium-1.0.3.jar")])
     finally:
         ops.REPO = real_repo
 
@@ -2661,6 +2739,7 @@ if __name__ == "__main__":
     tests_lead_in_place()
     tests_memory()
     tests_claude_update()
+    tests_masurium_update()
     tests_version()
     tests_rules_model()
     tests_rules()

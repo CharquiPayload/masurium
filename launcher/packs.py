@@ -153,6 +153,13 @@ def jar_family(name):
     return m.group(1) if m else name.removesuffix(".jar")
 
 
+def jar_version(name):
+    """(1, 0, 1) from masurium-1.0.1.jar or masurium-veil-1.0.1.jar: the
+    version after its family; None when its name carries none."""
+    m = re.match(r"^-(\d+(?:\.\d+)*)", name[len(jar_family(name)):])
+    return tuple(int(x) for x in m.group(1).split(".")) if m else None
+
+
 def pack_carries(pack, mod_id):
     """The jars of a pack that are, or carry inside them, the mod with this id."""
     return [jar.name for jar in sorted((pathlib.Path(pack) / "mods").glob("*.jar"))

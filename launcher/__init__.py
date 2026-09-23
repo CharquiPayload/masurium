@@ -29,6 +29,7 @@ tomorrow, both on the same functions.
                    rules, groups, deploy-mod, migrate
     doctor.py      the checks, in the order things break
     brain.py       Claude Code, what the brain runs on: its version, and whether a newer one is out
+    updates.py     Masurium itself: whether a newer release is out, and how this copy is updated
     events.py      Event and Fail
     files.py       env files, locks, logs read as they grow
     cli.py         the command line

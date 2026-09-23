@@ -112,13 +112,13 @@ class SetupDialog(Dialog):
             self.list.addItem(it)
         lacking = {n.key for n in needs if not n.ok}
         busy = bool(self.win.tasks.busy(TASK))
-        self.get.setEnabled(not busy and any(n.can for n in needs
-                                             if n.key.startswith("download:") or n.key == "masurium"))
+        self.get.setEnabled(not busy and any(n.can for n in needs if n.key.startswith("download:")
+                                             or n.key in ("masurium", "newer_jars")))
         self.connect_button.setText("Connect" if "server_env" in lacking else "Connect again")
         self.add_button.setEnabled("server" in lacking)
         for w in (self.slug, self.address, self.game_port):
             w.setEnabled("server" in lacking)
-        self.first.setVisible(not [k for k in lacking if k not in ("java", "claude")])
+        self.first.setVisible(not [k for k in lacking if k not in ("java", "claude", "newer_jars")])
 
     # --- doing it ----------------------------------------------------------------------
 
@@ -136,7 +136,7 @@ class SetupDialog(Dialog):
 
         def work(on_event, cancel):
             got = firstrun.fetch(ws, on_event, cancel)
-            if not firstrun.masurium_in_shared(ws):
+            if not firstrun.masurium_in_shared(ws) or firstrun.older_jars(ws):
                 got += firstrun.put_mods(ws, on_event)
             return got
         self._run("getting what is missing", work)
