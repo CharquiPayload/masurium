@@ -7,7 +7,7 @@ import sys
 import urllib.error
 from collections import namedtuple
 
-from . import groups, rules, settings
+from . import brain, groups, rules, settings
 from .api import UNREACHABLE
 from .accounts import players_in
 from .bots import check_name
@@ -78,6 +78,15 @@ def checks(ws):
     if claude:
         code, text = run_quiet([claude, "--version"])
         add("claude code", code == 0, text.splitlines()[0] if text else claude)
+        have = brain.version_of(text) if code == 0 else None
+        latest = brain.latest(ws)
+        if have and latest and latest > have:
+            add("claude code up to date", None, f"{brain.dotted(latest)} is out, this machine runs "
+                f"{brain.dotted(have)}: {brain.UPDATE}")
+        elif have and latest:
+            add("claude code up to date", True, f"{brain.dotted(have)} is the latest")
+        elif have:
+            add("claude code up to date", None, "GitHub could not be asked which is the latest")
     else:
         add("claude code", False, "not on PATH (nor in ~/.local/bin): the brain has nothing to run")
 

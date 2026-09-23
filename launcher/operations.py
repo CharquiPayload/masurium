@@ -18,7 +18,7 @@ import time
 import urllib.error
 from dataclasses import dataclass
 
-from . import accounts, groups, rules, settings
+from . import accounts, brain, groups, rules, settings
 from .api import UNREACHABLE
 from .bots import Character, Instance, check_key, check_name, operating, write_json
 from .diagnosis import complaints, crash_report, explain_crash
@@ -721,6 +721,10 @@ def start_bridge(inst, on_event=None):
         inst.state.mkdir(parents=True, exist_ok=True)
         unlink_quietly(inst.bridge_log)
         report.step(f"starting the bridge of {inst.key}", stage="bridge")
+        fresh = brain.newer(inst.ws)
+        if fresh:
+            report.detail(f"Claude Code {fresh[1]} is out; this machine runs {fresh[0]}. To update "
+                          f"its brain:  {brain.UPDATE}")
         spawn_free([sys.executable, str(REPO / "mcp" / "bridge.py"), inst.name],
                    inst.bridge_log, cwd=inst.ws.home, env=bridge_env(inst))
         # The sign that it started is its own "listening" line, not that a

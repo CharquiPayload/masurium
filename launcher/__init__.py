@@ -27,6 +27,7 @@ tomorrow, both on the same functions.
     operations.py  create, clone, start, connect, bridge, stop, restart, status, set,
                    rules, groups, deploy-mod, migrate
     doctor.py      the checks, in the order things break
+    brain.py       Claude Code, what the brain runs on: its version, and whether a newer one is out
     events.py      Event and Fail
     files.py       env files, locks, logs read as they grow
     cli.py         the command line

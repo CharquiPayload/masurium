@@ -41,6 +41,7 @@ FAKE_JAVA.chmod(FAKE_JAVA.stat().st_mode | stat.S_IEXEC)
 sys.path.insert(0, str(REPO))
 from launcher import cli, doctor, operations as ops, settings  # noqa: E402
 from launcher import bots, files, groups, keeper, packs, processes, rules  # noqa: E402
+from launcher import brain  # noqa: E402
 from launcher.events import Fail  # noqa: E402
 from launcher import workspace as workspace_module  # noqa: E402
 from launcher.workspace import DEFAULT_HEAP, DEFAULT_VERSION, FIRST_PORT, Workspace  # noqa: E402
@@ -60,6 +61,8 @@ WS = Workspace(TMP / "bots", TMP / "servers", TMP / "shared", TMP / "server.env"
 # the whole machine (processes.game_pids): with the same ports, running the
 # tests next to a real bot stopped that bot.
 FIRST_PORT = workspace_module.FIRST_PORT = bots.FIRST_PORT = 18478
+# Nor do they ask GitHub which Claude Code is the latest: that is pretended.
+brain.fetch_latest = lambda: "v2.1.280"
 
 
 # --- minimal harness --------------------------------------------------------
@@ -2101,6 +2104,32 @@ def tests_lead_in_place():
         remove_tree(WS.bot(key).dir)
 
 
+def tests_claude_update():
+    print("\nClaude Code: a newer one is said, never installed")
+    layout()
+    (WS.state_dir / brain.CACHE).unlink(missing_ok=True)
+    check("a version is read from what Claude Code prints", brain.version_of("2.1.280 (Claude Code)")
+          == (2, 1, 280) and brain.version_of("v2.1.9") == (2, 1, 9) and brain.version_of("x") is None)
+    asked = []
+    real = brain.fetch_latest
+    try:
+        brain.fetch_latest = lambda: asked.append(1) or "v2.1.300"
+        check("an older one here: said, with how to update",
+              brain.newer(WS, have=(2, 1, 280), now=1000) == ("2.1.280", "2.1.300"))
+        check("...and GitHub is asked once, then its answer kept for hours",
+              brain.newer(WS, have=(2, 1, 280), now=2000) == ("2.1.280", "2.1.300") and len(asked) == 1)
+        check("the latest here: nothing to say", brain.newer(WS, have=(2, 1, 300), now=3000) is None)
+
+        def offline():
+            raise OSError("no network")
+        brain.fetch_latest = offline
+        check("without GitHub, after the hours pass: nothing is said, nothing breaks",
+              brain.newer(WS, have=(2, 1, 280), now=1000 + brain.EVERY + 1) is None)
+    finally:
+        brain.fetch_latest = real
+        (WS.state_dir / brain.CACHE).unlink(missing_ok=True)
+
+
 def tests_version():
     print("\nOne version for the launcher and the mod")
     import launcher
@@ -2234,6 +2263,7 @@ if __name__ == "__main__":
     tests_offline_and_java()
     tests_delete()
     tests_lead_in_place()
+    tests_claude_update()
     tests_version()
     tests_rules_model()
     tests_rules()
