@@ -563,4 +563,6 @@ version, and nothing is claimed about it.
 LuckPerms: `masurium.bot.shutdown`, `masurium.bot.restart`,
 `masurium.bot.logoff`, `masurium.bot.hear`, `masurium.bot.admins`,
 `masurium.bot.pref`, `masurium.bot.food` and `masurium.bot.break`.
-Nobody has them by default. Granting one lets that player use it on every bot.
+By default the server's operators (`/op`) have them all and nobody else does.
+A permissions mod decides otherwise: granting a node lets that player use it on
+every bot, and setting it to false takes it from an operator.

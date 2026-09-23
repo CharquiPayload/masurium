@@ -43,8 +43,9 @@ import java.util.regex.Pattern;
  *       it, log it off and manage who it hears. Only the owner manages admins, so one admin
  *       cannot throw out another.
  * </ul>
- * Permission nodes (LuckPerms and the like) and the server console are checked by
- * {@link BotCommands}, on top of this.
+ * Permission nodes (which the server's operators hold by default, and LuckPerms and the
+ * like can grant or take away) and the server console are checked by {@link BotCommands},
+ * on top of this.
  *
  * <p><b>Hearing.</b> With the list off the bot hears whoever names it. With it on
  * ({@code hear on}) it hears only its owner, its admins, the listed players and other bots:

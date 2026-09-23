@@ -28,8 +28,9 @@ setting ignored it without a word.
 - `/masurium bot <bot>` commands to shut down, restart or log off a bot, to
   manage its admins and hear list, and to change its behaviour settings, its
   food ban and the blocks it may break by itself. Allowed to its owner, its
-  admins, the server console, or players granted permission nodes (LuckPerms
-  and the like). The brain has no tool that writes any of it: what it can still
+  admins, the server console, the server's operators, or players granted
+  permission nodes (LuckPerms and the like, which can also take a node from an
+  operator). The brain has no tool that writes any of it: what it can still
   change by itself is what it learns about the world (places, chests, its diary,
   its own trash list). A setting decided while a bot is off is applied when its
   bridge comes back.

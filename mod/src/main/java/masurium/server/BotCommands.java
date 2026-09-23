@@ -68,11 +68,12 @@ import masurium.server.BotAccess.Action;
  *
  * <p>Each action also has a permission node: {@code masurium.bot.shutdown},
  * {@code .restart}, {@code .logoff}, {@code .hear}, {@code .admins}, {@code .pref},
- * {@code .food} and {@code .break}. Nobody has them by
- * default, not even operators, because a bot belongs to its owner and not to the server. A
- * permissions mod such as LuckPerms can grant them, and then they work on every bot. The
- * server console (and RCON) always may: whoever holds it controls everything already.
- * Command blocks and datapack functions may not.
+ * {@code .food} and {@code .break}. By default the server's operators have them all and
+ * nobody else does: whoever runs the server looks after the bots on it, as with anything
+ * else there. A permissions mod such as LuckPerms decides otherwise per player or group:
+ * it can grant a node to someone who is not an operator, or take it from one who is, and
+ * a node works on every bot. The server console (and RCON) always may: whoever holds it
+ * controls everything already. Command blocks and datapack functions may not.
  */
 final class BotCommands {
 
@@ -83,8 +84,17 @@ final class BotCommands {
     static {
         for (Action a : Action.values()) {
             NODES.put(a, new PermissionNode<>("masurium", "bot." + a.id(),
-                    PermissionTypes.BOOLEAN, (player, uuid, context) -> false));
+                    PermissionTypes.BOOLEAN, (player, uuid, context) -> operator(player)));
         }
+    }
+
+    /**
+     * What a node says when no permissions mod decides it: yes for the server's operators
+     * (whoever is in ops.json, at any level), no for everyone else.
+     */
+    static boolean operator(ServerPlayer player) {
+        return player != null && player.getServer() != null
+                && player.getServer().getPlayerList().isOp(player.getGameProfile());
     }
 
     private final BotAccess access;
@@ -252,7 +262,7 @@ final class BotCommands {
         }
         String what = switch (action) {
             case ADMINS -> "manage the admins of " + access.display(bot)
-                    + " (only its owner can)";
+                    + " (its owner or an operator can)";
             case HEAR -> "change who " + access.display(bot) + " hears";
             case PREF -> "change the settings of " + access.display(bot);
             case FOOD -> "change what " + access.display(bot) + " eats";
