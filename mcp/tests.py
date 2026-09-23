@@ -1126,6 +1126,57 @@ def tests_phrases():
         bridge.OWN_PHRASES.update(file=None, stamp=None, versions={}, asked=0)
 
 
+def tests_wait_for_item():
+    print("\nWaiting to be given: what came while it thought counts")
+    asked = []
+    gains = []
+
+    def world(route, **kw):
+        asked.append((route, kw))
+        if route == "/inventory":
+            return {"ok": True, "things": [{"what": "cactus", "count": 4},
+                                           {"what": "bread", "count": 10}]}
+        if route == "/received":
+            return gains[0] if gains else {"ok": False, "error": "HTTP 404"}
+        if route == "/chat":
+            # Spoken to at once: the wait ends on its first round.
+            return ({"messages": [{"who": "Bob", "text": "alice, over here"}]}
+                    if "since" in kw else {"last": 7})
+        return {"ok": True}
+    with_response(world)
+    real_sleep = server.time.sleep
+    server.time.sleep = lambda s: None
+    try:
+        os.environ["MASURIUM_HEARD_AT"] = "1000.000"
+        gains[:] = [{"ok": True, "gains": [{"what": "cactus", "count": 4, "ago_ms": 27400}]}]
+        out = server.t_wait_for_item({"what": "cactus"})
+        check("a gift that came while it thought is taken as received, without waiting",
+              out.startswith("I received 4 x cactus 27 s ago"), out)
+        check("...asked since a little before the message was heard",
+              ("/received", {"since_ms": 995000}) in asked, asked)
+
+        gains[:] = [{"ok": True, "gains": [{"what": "bread", "count": 2, "ago_ms": 5000}]}]
+        out = server.t_wait_for_item({"what": "cactus"})
+        check("something else that came is not what it waits for: it waits",
+              "spoken to while waiting" in out, out)
+
+        gains[:] = []
+        out = server.t_wait_for_item({"what": "cactus"})
+        check("an older body that does not keep what came: it waits, as before",
+              "spoken to while waiting" in out, out)
+
+        os.environ.pop("MASURIUM_HEARD_AT")
+        asked.clear()
+        gains[:] = [{"ok": True, "gains": [{"what": "cactus", "count": 4, "ago_ms": 1000}]}]
+        out = server.t_wait_for_item({"what": "cactus"})
+        check("an older bridge that does not say when it heard: the body is not asked",
+              "spoken to while waiting" in out
+              and not any(r == "/received" for r, _ in asked), (out, asked))
+    finally:
+        server.time.sleep = real_sleep
+        os.environ.pop("MASURIUM_HEARD_AT", None)
+
+
 if __name__ == "__main__":
     tests_honesty()
     tests_ids()
@@ -1142,6 +1193,7 @@ if __name__ == "__main__":
     tests_speaker()
     tests_server_env()
     tests_phrases()
+    tests_wait_for_item()
 
     print(f"\n{done - len(failures)}/{done} checks pass")
     if failures:

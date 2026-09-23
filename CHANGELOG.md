@@ -243,6 +243,10 @@ setting ignored it without a word.
 - One bridge per bot: a second one on the same bot refuses to start instead of
   answering everything twice.
 - Internal channel between a bot and its guards.
+- Waiting to be given something counts what came while the brain was still
+  thinking: the body notes when each thing reached its backpack (`/received`),
+  and the bridge says when it heard the message. A gift handed over faster
+  than the answer no longer leaves the bot waiting for another.
 
 ### Launchers and tests
 - Offline bots with a name of their own, or a logged-in Microsoft account.

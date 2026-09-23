@@ -1621,6 +1621,9 @@ def tests_phrases():
     fake.write_text("import time\ntime.sleep(30)\n")
     bridge = subprocess.Popen([sys.executable, str(fake), "Alice"])
     try:
+        # Looked at the instant it started, it was once not yet seen as a
+        # bridge (a loaded machine): the check waits until it is.
+        wait(lambda: processes.is_ours(bridge.pid, "bridge.py"), 5)
         inst.state.mkdir(parents=True, exist_ok=True)
         inst.bridge_lock.write_text(f"{bridge.pid}\n")
         text, result = said(ops.rewrite_phrases, inst)

@@ -1548,8 +1548,11 @@ def body_snapshot():
             f"and here it says fleeing=no, the danger IS OVER: do not tell it as present.]")
 
 
-def think(who, text):
-    """One call to the brain. The session persists between messages."""
+def think(who, text, heard_at=None):
+    """One call to the brain. The session persists between messages.
+
+    `heard_at` is when the message was heard (time.time()): the tools ask
+    the body what reached it since then (see wait_for_item)."""
     note = RECONNECTED[0] if RECONNECTED else ""
     # A body notice is not a conversation: nobody spoke and nobody is waiting.
     # Telling it "someone says" would lie about who is in front, and it would
@@ -1610,8 +1613,11 @@ def think(who, text):
         # server inherits: the locked tools read it from there and not from
         # what the brain writes, which a player can talk into lying.
         speaker = "" if who == BODY else who
+        env = {**os.environ, "MASURIUM_SPEAKER": speaker}
+        if heard_at:
+            env["MASURIUM_HEARD_AT"] = f"{heard_at:.3f}"
         r = subprocess.run(args, capture_output=True, text=True, timeout=BRAIN_TIMEOUT,
-                           env={**os.environ, "MASURIUM_SPEAKER": speaker})
+                           env=env)
         out = r.stdout.strip()
         if r.returncode != 0:
             log(f"brain failed rc={r.returncode}: {r.stderr.strip()[:150]}")
@@ -2283,7 +2289,7 @@ def listen(since, inbox, control_since=None):
             for a in n.get("notices", []):
                 log(f"[body] {a['text']}")
                 note_stair_foot(a["text"])
-                inbox.put((BODY, a["text"]))
+                inbox.put((BODY, a["text"], time.time()))
         except Exception:
             pass
         # One snapshot of the body per round: for the TAB icon and for the
@@ -2317,14 +2323,14 @@ def listen(since, inbox, control_since=None):
                         PENDING_F.write_text(json.dumps(now))
                         for a in notices:
                             log(f"[body] {a}")
-                            inbox.put((BODY, a))
+                            inbox.put((BODY, a, time.time()))
         except Exception:
             pass
         try:
             new_ones, internal_since = internal_new(internal_since)
             for of_, text in new_ones:
                 log(f"[internal from {of_}] {text}")
-                inbox.put((of_, INTERNAL + text))
+                inbox.put((of_, INTERNAL + text, time.time()))
         except Exception as e:
             log(f"could not read the internal channel: {e}")
         # Orders by command and the lists, before the chat: in mode `list`
@@ -2419,7 +2425,7 @@ def listen(since, inbox, control_since=None):
             # message.
             if THINKING.is_set() and inbox.empty():
                 say(phrase("busy"))
-            inbox.put((who, text))
+            inbox.put((who, text, time.time()))
 
 
 def last_note():
@@ -2539,7 +2545,7 @@ def main():
     threading.Thread(target=write_phrases, daemon=True).start()
 
     while True:
-        who, text = inbox.get()
+        who, text, heard_at = inbox.get()
         WITH_AI[0] = text.startswith(INTERNAL)
         THINKING.set()
         # An answer to someone is shown as typing; the body's own notices
@@ -2550,7 +2556,7 @@ def main():
         before = last_note()
         bytes_before = _calls_so_far()
         try:
-            response = think(who, text)
+            response = think(who, text, heard_at)
         finally:
             THINKING.clear()
             WITH_AI[0] = False

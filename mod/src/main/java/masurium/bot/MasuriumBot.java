@@ -35,6 +35,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -182,6 +183,8 @@ public class MasuriumBot {
     private final Traveler traveler = new Traveler(walker);
     private final Explorer explorer = new Explorer(traveler);
     private final ItemRecovery itemRecovery = new ItemRecovery(traveler, walker);
+    private final Received received = new Received();
+    private int receivedTicks;
 
     public MasuriumBot(IEventBus bus) {
         // A client that was not told to be a bot is left alone. Not a disabled mod: no
@@ -241,6 +244,7 @@ public class MasuriumBot {
             http.createContext("/place", x -> attend(x, this::place));
             http.createContext("/stop", x -> attend(x, this::stop));
             http.createContext("/inventory", x -> attend(x, this::inventory));
+            http.createContext("/received", x -> attend(x, this::received));
             http.createContext("/wield", x -> attend(x, this::wield));
             http.createContext("/mount", x -> attend(x, this::mount));
             http.createContext("/lead", x -> attend(x, this::lead));
@@ -381,6 +385,7 @@ public class MasuriumBot {
         // What the body lacks is always checked, emergency or not: it is looking, not
         // acting, and the brain decides what to do about it.
         Needs.tick();
+        noteWhatCameIn();
         PendingTasks.tick();
         Firsts.tick();
         escortByDefault();
@@ -2746,6 +2751,46 @@ public class MasuriumBot {
                     + "failure. If the bed is covered or broken, it does not set it\"}",
                     bed.getX(), bed.getY(), bed.getZ());
         });
+    }
+
+    /**
+     * What reached the backpack since {@code since_ms} (milliseconds of the clock), per
+     * {@link Received}: waiting to be given something, the brain asks what came while it
+     * was still thinking, not only what comes from then on.
+     */
+    private String received(Map<String, String> q) {
+        long since;
+        try {
+            since = Long.parseLong(q.getOrDefault("since_ms", "0").trim());
+        } catch (NumberFormatException e) {
+            return "{\"ok\":false,\"error\":\"since_ms has to be a number\"}";
+        }
+        long now = System.currentTimeMillis();
+        List<String> gains = new ArrayList<>();
+        for (Received.Gain g : received.since(since)) {
+            gains.add(String.format("{\"what\":\"%s\",\"count\":%d,\"ago_ms\":%d}",
+                    g.what(), g.count(), now - g.atMs()));
+        }
+        return "{\"ok\":true,\"gains\":[" + String.join(",", gains) + "]}";
+    }
+
+    /** Twice a second, the counts of the backpack, for {@link Received}. */
+    private void noteWhatCameIn() {
+        LocalPlayer me = Minecraft.getInstance().player;
+        if (me == null || ++receivedTicks % 10 != 0) return;
+        Map<String, Integer> counts = new HashMap<>();
+        var inv = me.getInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) count(counts, inv.getItem(i));
+        // What is held on the cursor while things are moved in a menu left the backpack
+        // only for a moment: coming back is not coming in.
+        count(counts, me.containerMenu.getCarried());
+        received.observe(me, counts, System.currentTimeMillis());
+    }
+
+    private static void count(Map<String, Integer> counts, net.minecraft.world.item.ItemStack stack) {
+        if (stack.isEmpty()) return;
+        counts.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).getPath(),
+                stack.getCount(), Integer::sum);
     }
 
     private String inventory(Map<String, String> q) throws Exception {

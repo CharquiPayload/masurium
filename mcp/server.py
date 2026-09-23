@@ -912,6 +912,30 @@ def _count(what):
                if not pats or any(pt in c["what"] for pt in pats))
 
 
+# A little before the message was heard counts too: the bridge reads the chat
+# every second or two, and a gift can come with the words.
+HEARD_SLACK = 5.0
+
+
+def _came_since_told(what):
+    """What of `what` reached me since I was told, per the body: (how many,
+    seconds since the first), or None when it cannot be known (no time from the
+    bridge, or a body that does not keep it)."""
+    try:
+        heard = float(os.environ.get("MASURIUM_HEARD_AT", ""))
+    except ValueError:
+        return None
+    d = bt("/received", since_ms=int((heard - HEARD_SLACK) * 1000))
+    if not d.get("ok"):
+        return None
+    pats = _patterns(what)
+    got = [g for g in d.get("gains", [])
+           if not pats or any(pt in g.get("what", "") for pt in pats)]
+    if not got:
+        return 0, 0
+    return sum(g.get("count", 0) for g in got), max(g.get("ago_ms", 0) for g in got) // 1000
+
+
 def t_wait_for_item(a):
     """Wait for someone to give me something, watching the inventory.
 
@@ -919,6 +943,10 @@ def t_wait_for_item(a):
     has to say "there, I gave you sticks". The turn stays here until the count
     goes up or the time runs out; without `what`, anything that comes in
     counts.
+
+    What came while the brain was still thinking counts too. Counting only
+    from here, a bot told "she will give you a cactus" already had it when it
+    started waiting, and stood 45 s waiting for another that never came.
     """
     what = str(a.get("what", "") or "").strip().lower()
     deadline = max(5, min(TASK_LIMIT, int(a.get("seconds", 45) or 45)))
@@ -926,6 +954,11 @@ def t_wait_for_item(a):
     before_all = _count("")
     if before is None:
         return "I could not look at my inventory"
+    early = _came_since_told(what)
+    if early and early[0] > 0:
+        return (f"I received {early[0]} x {what or 'things'} {early[1]} s ago, "
+                f"before I started waiting (I now carry {before}); carrying on "
+                "with my business")
     t0 = time.monotonic()
     chat = _chat_now()
     while time.monotonic() - t0 < deadline:
@@ -3200,7 +3233,8 @@ TOOLS = {
                       "inventory for up to 45 s and answer as soon as it comes "
                       "in. Use it when told 'I'll give you X' / 'here, take X' / "
                       "'come and I'll give you', already standing next to that "
-                      "person. Without `what`, anything that comes in counts.",
+                      "person. What already came since I was told counts too. "
+                      "Without `what`, anything that comes in counts.",
                       {"what": ("string", "What I wait for: id in English "
                                           "(stick, oak_log) or a generic word "
                                           "(wood, stone, food, pickaxe...). If "
