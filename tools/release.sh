@@ -1,7 +1,8 @@
 #!/bin/sh
 # Everything a release carries, into dist/: the Masurium jars (the mod and its
-# add-ons), the launcher as a folder for any Linux (install.sh inside) and as a
-# .deb, and their checksums. Run on Debian or Ubuntu, from a clean checkout.
+# add-ons), the launcher as a folder for any Linux (install.sh inside), as a
+# .deb and as the PKGBUILD that makes its Arch package, and their checksums.
+# Run on Debian or Ubuntu, from a clean checkout.
 #
 #   tools/release.sh
 set -eu
@@ -28,14 +29,20 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 dir="$STAGE/masurium-launcher-$VERSION"
 mkdir -p "$dir/jars"
-cp -R "$ROOT/launcher" "$ROOT/mcp" "$ROOT/docs" "$ROOT/install.sh" "$ROOT/README.md" "$ROOT/LICENSE" \
-      "$ROOT/CHANGELOG.md" "$dir/"
+cp -R "$ROOT/launcher" "$ROOT/mcp" "$ROOT/docs" "$ROOT/packaging" "$ROOT/install.sh" "$ROOT/README.md" \
+      "$ROOT/LICENSE" "$ROOT/CHANGELOG.md" "$dir/"
 cp "$OUT"/masurium-*.jar "$dir/jars/"
 find "$dir" -name __pycache__ -type d -prune -exec rm -rf {} +
 tar -C "$STAGE" -czf "$OUT/masurium-launcher-$VERSION.tar.gz" "masurium-launcher-$VERSION"
 
 echo "==> the launcher, as a .deb"
 "$ROOT/tools/build-deb.sh"
+
+echo "==> the PKGBUILD of its Arch package, for this tarball"
+maintainer=$(git -C "$ROOT" log -1 --format='%an <%ae>')
+sum=$(sha256sum "$OUT/masurium-launcher-$VERSION.tar.gz" | cut -d' ' -f1)
+sed -e "s|@VERSION@|$VERSION|" -e "s|@SHA256@|$sum|" -e "s|@MAINTAINER@|$maintainer|" \
+    "$ROOT/packaging/arch/PKGBUILD" > "$OUT/PKGBUILD"
 
 (cd "$OUT" && sha256sum -- * > SHA256SUMS)
 echo "==> dist/:"

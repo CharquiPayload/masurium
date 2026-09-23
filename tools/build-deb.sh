@@ -50,7 +50,7 @@ ls "$OPT/wheels"
 
 echo "==> the command, the menu entry, the icon"
 cp "$ROOT/packaging/deb/masurium" "$PKG/usr/bin/masurium"
-cp "$ROOT/packaging/deb/$NAME.desktop" "$PKG/usr/share/applications/"
+cp "$ROOT/packaging/$NAME.desktop" "$PKG/usr/share/applications/"
 for s in 32 48 64 128 256 512; do
     mkdir -p "$PKG/usr/share/icons/hicolor/${s}x${s}/apps"
     cp "$ROOT/launcher/gui/appicon/$NAME-$s.png" "$PKG/usr/share/icons/hicolor/${s}x${s}/apps/$NAME.png"

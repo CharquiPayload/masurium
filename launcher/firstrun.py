@@ -114,10 +114,11 @@ def server_env_missing(ws):
 def needs(ws):
     """Everything a first bot needs, in the order setup does it."""
     out = []
-    code, text = run_quiet(ws.java_command() + ["-version"])
+    java = ws.java_command()
+    code, text = run_quiet(java + ["-version"])
     major = java_major(text) if code == 0 else None
     out.append(Need("java", "Java 21", major == 21,
-                    (text.splitlines()[0] if major == 21 else
+                    (text.splitlines()[0] + ("" if java == ["java"] else f" ({java[0]})") if major == 21 else
                      (f"found Java {major}; " if major else "no Java found; ") + JAVA_HOW)))
     claude = shutil.which("claude", path=ws.child_env()["PATH"])
     out.append(Need("claude", "Claude Code", bool(claude), claude or CLAUDE_HOW))

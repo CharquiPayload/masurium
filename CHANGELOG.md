@@ -56,11 +56,17 @@ setting ignored it without a word.
 ### Launcher
 - **Installers**: a `.deb` for Ubuntu, Debian and their family (Qt for the
   window inside as wheels, so it installs without internet; Python and Java 21
-  asked of apt), and `install.sh` for any Linux, for one user and without sudo
-  (`--no-gui` for a machine without a screen, `--uninstall`). Both put
+  asked of apt), a `PKGBUILD` for Arch and its family (on the system's
+  `pyside6` and `jre21-openjdk-headless`), and `install.sh` for any Linux, for
+  one user and without sudo (`--no-gui` for a machine without a screen,
+  `--uninstall`). All of them put
   **Masurium Launcher** in the applications menu, with its own icon (element
   43's tile with only its symbol, Ma), and a `masurium` command.
   `tools/release.sh` builds them with the jars.
+- The bots find Java 21 by themselves when the machine's default `java` is
+  another version: a Java 21 in `/usr/lib/jvm` next to it is the one they run
+  on, without changing the machine's default (Arch makes the newest Java the
+  default). `MASURIUM_JAVA` still chooses any other.
 - **Setting a new machine up**: the window offers it the first time it opens
   (and from Help), `masurium setup` in a terminal. It downloads HeadlessMC and
   hmc-specifics, checked against the checksums of the versions Masurium was

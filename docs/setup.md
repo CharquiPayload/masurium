@@ -144,6 +144,12 @@ The launcher is what creates and runs the bots. From the releases:
   Double-click it, or `sudo apt install ./masurium-launcher_<version>_amd64.deb`.
   It brings Qt for the window inside (it installs without internet) and asks
   apt for Python and Java 21. `sudo apt remove masurium-launcher` takes it away.
+- **Arch Linux, CachyOS, EndeavourOS, Manjaro**: the release's `PKGBUILD`. In a
+  folder with it and the release's `masurium-launcher-<version>.tar.gz`,
+  `makepkg -si` builds the package and installs it, with the system's Qt for
+  Python (`pyside6`) and Java 21 (`jre21-openjdk-headless`), which lives beside
+  a newer default Java without replacing it. `sudo pacman -R masurium-launcher`
+  takes it away.
 - **Any other Linux**: `masurium-launcher-<version>.tar.gz`. Unpack it and run
   `./install.sh`: for your user alone, without sudo, with its own Python
   environment for the window (a download of about 100 MB, once). `./install.sh
@@ -233,8 +239,10 @@ default), either in the environment or as more lines of `server.env`
 (`MASURIUM_ENV` says where that file is). After building,
 `launcher/masurium.py deploy-mod` copies the mod into `shared/mods` safely,
 even with bots running, and clears out any older jar that would declare the
-same mod twice. `MASURIUM_JAVA` points the bots at a particular `java` when
-the one on the PATH is not 21.
+same mod twice. The bots run on the `java` on the PATH, or, when that one is
+another version, on a Java 21 installed beside it in `/usr/lib/jvm` (where
+Arch, Fedora, Debian and Ubuntu keep theirs); `MASURIUM_JAVA` points them at
+any other `java`.
 
 ### 4. Create and start a bot
 
@@ -413,7 +421,7 @@ players and how; it goes at the start of its prompt.
 | `owner` | instance, group, global | the player the bot belongs to: it accepts their delicate orders, and they control it with `/masurium bot` on any server. It cannot be changed from inside the game |
 | `model` | instance, group, global | the model and effort of its brain, e.g. `sonnet` or `haiku low` (default `opus medium`). The aliases `opus`, `sonnet`, `haiku` and `fable` always mean the newest of their family; `opus[1m]` and the like, a million tokens of context |
 | `heap` | instance, group, global | the game's memory, e.g. `3g` (default `MASURIUM_HEAP`, else `3g`) |
-| `java` | instance, group, global | the Java its game runs on: a path to a `java`, or a name on the PATH (default `MASURIUM_JAVA`, else `java`); NeoForge 21.1 wants Java 21 |
+| `java` | instance, group, global | the Java its game runs on: a path to a `java`, or a name on the PATH (default `MASURIUM_JAVA`, else `java` if it is 21, else a Java 21 in `/usr/lib/jvm`); NeoForge 21.1 wants Java 21 |
 | `java_args` | instance, group, global | extra JVM flags, e.g. `-XX:+UseZGC` (the heap is `heap`, not a flag here) |
 | `role` | instance, group | `main` (takes orders, does jobs) or `guard` (see [Groups](#groups)) |
 | `fast_responses` | instance, group, global | `yes` (default): its brain writes ahead of time, in its voice and language, the few things it says without thinking; `no`: plain English |

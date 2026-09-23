@@ -19,8 +19,8 @@ them play alongside you.
 
 **To install it**: the mod jar goes in your server's `mods/` folder, and
 **Masurium Launcher** on the machine that runs the bots: a `.deb` for Ubuntu and
-Debian, or `install.sh` for any Linux. The first time it opens, it sets the
-machine up. [docs/setup.md](docs/setup.md) has every step, and how to build it
+Debian, a `PKGBUILD` for Arch and its family, or `install.sh` for any Linux.
+The first time it opens, it sets the machine up. [docs/setup.md](docs/setup.md) has every step, and how to build it
 all yourself.
 
 ## How it works
@@ -109,9 +109,10 @@ inline, a lambda, or a return type that no `import` would reveal.
 
 - A per-bot configuration file generated on first start, with the behaviour
   toggles as `true`/`false`.
-- Release builds: `tools/release.sh` makes the jars, the launcher's `.deb`
-  and its folder for any Linux. To do: a Windows installer (and a portable
-  zip), an AUR package and an `.rpm`.
+- Release builds: `tools/release.sh` makes the jars, the launcher's `.deb`,
+  its `PKGBUILD` for Arch and its folder for any Linux. To do: a Windows
+  installer (and a portable zip), publishing the PKGBUILD in the AUR, and an
+  `.rpm`.
 - **Masurium Launcher**: the command line is done (`launcher/masurium.py`: bots,
   each one an instance — a player on a server, with its name, account,
   personality and settings — created, copied, started, stopped and watched;

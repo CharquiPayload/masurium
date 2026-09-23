@@ -251,6 +251,39 @@ def tests_workspace():
     check("a clone's name: the first of name, name-1, name-2... not taken",
           WS.free_key("alice", ["alice", "alice-1"]) == "alice-2" and WS.free_key("alice", []) == "alice")
 
+    # Javas side by side, as /usr/lib/jvm keeps them: the default one on PATH
+    # is a link into its folder, and each folder says its version in `release`.
+    jvm = TMP / "jvm"
+    for name, version in (("java-26-openjdk", "26.0.2"), ("java-21-openjdk", "21.0.8"), ("mystery", None)):
+        (jvm / name / "bin").mkdir(parents=True, exist_ok=True)
+        (jvm / name / "bin" / "java").write_text("#!/bin/sh\n")
+        (jvm / name / "bin" / "java").chmod(0o755)
+        if version:
+            (jvm / name / "release").write_text(f'IMPLEMENTOR="Arch Linux"\nJAVA_VERSION="{version}"\n')
+    path = TMP / "java-path"
+    path.mkdir(exist_ok=True)
+
+    def java_with(default, jvm_dir=jvm, **environ):
+        link = path / "java"
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        if default:
+            link.symlink_to(jvm / default / "bin" / "java")
+        ws = Workspace(TMP, TMP, TMP, TMP / "server.env", home=TMP, environ={"PATH": str(path), **environ})
+        ws.jvm_dir = jvm_dir
+        return ws.java_command()
+    check("a `java` of 21 on PATH is the one", java_with("java-21-openjdk") == ["java"])
+    check("the default is a newer Java: the 21 beside it, without changing the default",
+          java_with("java-26-openjdk") == [str(jvm / "java-21-openjdk" / "bin" / "java")])
+    check("...and with no java on PATH at all, the 21 of /usr/lib/jvm",
+          java_with(None) == [str(jvm / "java-21-openjdk" / "bin" / "java")])
+    check("a java that does not say its version is taken at its word",
+          java_with("mystery") == ["java"])
+    check("no 21 anywhere: `java`, and setup says which it found",
+          java_with("java-26-openjdk", jvm_dir=TMP / "no-jvm") == ["java"])
+    check("MASURIUM_JAVA wins over all of it",
+          java_with("java-26-openjdk", MASURIUM_JAVA="/opt/my-java/bin/java") == ["/opt/my-java/bin/java"])
+
 
 # --- names and servers ------------------------------------------------------
 
@@ -2529,6 +2562,67 @@ def tests_install():
     run("--uninstall")
 
 
+def tests_arch_package():
+    print("\nArch package: what its PKGBUILD puts where")
+    bash = shutil.which("bash")
+    if not bash:
+        print("  --   skipped: no bash to run the PKGBUILD with")
+        return
+    version = "9.9.9"
+    base = TMP / "arch"
+    src = base / "src" / f"masurium-launcher-{version}"
+    pkg = base / "pkg"
+    shutil.rmtree(base, ignore_errors=True)
+    src.mkdir(parents=True)
+    # The release's tarball, unpacked: what tools/release.sh puts in it.
+    skip = shutil.ignore_patterns("__pycache__")
+    for d in ("launcher", "mcp", "docs", "packaging"):
+        shutil.copytree(REPO / d, src / d, ignore=skip)
+    for f in ("README.md", "LICENSE", "CHANGELOG.md", "install.sh"):
+        shutil.copy(REPO / f, src / f)
+    (src / "jars").mkdir()
+    (src / "jars" / "masurium-9.9.9.jar").write_bytes(b"PK")
+    template = (REPO / "packaging" / "arch" / "PKGBUILD").read_text()
+    check("the PKGBUILD leaves the version, the checksum and the maintainer to the release",
+          all(k in template for k in ("@VERSION@", "@SHA256@", "@MAINTAINER@")))
+    pkgbuild = base / "PKGBUILD"
+    pkgbuild.write_text(template.replace("@VERSION@", version).replace("@SHA256@", "0" * 64)
+                        .replace("@MAINTAINER@", "Someone <someone@example.org>"))
+    # makepkg's part: the variables, and `python` (Arch's name for python3).
+    shim = base / "bin"
+    shim.mkdir()
+    (shim / "python").symlink_to(sys.executable)
+    env = dict(os.environ, PATH=str(shim) + os.pathsep + os.environ.get("PATH", ""))
+    r = subprocess.run([bash, "-euc", f'srcdir={src.parent}; pkgdir={pkg}; source {pkgbuild}; '
+                        f'[ "$pkgver" = {version} ] && [ "$arch" = any ] && cd "$srcdir" && package'],
+                       capture_output=True, text=True, env=env, timeout=120)
+    app = pkg / "usr" / "share" / "masurium-launcher"
+    check("package() puts the program in /usr/share/masurium-launcher, the jars with it",
+          r.returncode == 0 and (app / "launcher" / "masurium.py").is_file() and (app / "mcp" / "bridge.py").is_file()
+          and (app / "jars" / "masurium-9.9.9.jar").is_file(), r.stdout + r.stderr)
+    command = pkg / "usr" / "bin" / "masurium"
+    text = command.read_text() if command.is_file() else ""
+    check("...a `masurium` command that runs it on the system's Python",
+          command.is_file() and os.access(command, os.X_OK)
+          and "/usr/bin/python3 /usr/share/masurium-launcher/launcher/masurium.py" in text, text)
+    desktop = pkg / "usr" / "share" / "applications" / "masurium-launcher.desktop"
+    check("...the menu entry, its icon in every size and the license where Arch keeps them",
+          desktop.is_file() and "Exec=masurium gui" in desktop.read_text()
+          and all((pkg / f"usr/share/icons/hicolor/{s}x{s}/apps/masurium-launcher.png").is_file()
+                  for s in (32, 48, 64, 128, 256, 512))
+          and (pkg / "usr" / "share" / "licenses" / "masurium-launcher" / "LICENSE").is_file())
+    compiled = list((app / "launcher" / "__pycache__").glob("workspace.*.pyc"))
+    import marshal
+    origin = marshal.loads(compiled[0].read_bytes()[16:]).co_filename if compiled else ""
+    check("...compiled ahead, naming where the files end up, not where they were built",
+          origin == "/usr/share/masurium-launcher/launcher/workspace.py", origin)
+    check("...and nothing else of the build: no tarball leftovers like install.sh",
+          not (app / "install.sh").exists() and not (app / "packaging").exists())
+    ran = subprocess.run([sys.executable, str(app / "launcher" / "masurium.py"), "--help"],
+                         capture_output=True, text=True, env=env, timeout=60)
+    check("the packaged program runs", ran.returncode == 0 and "setup" in ran.stdout, ran.stderr)
+
+
 if __name__ == "__main__":
     tests_files()
     tests_workspace()
@@ -2574,6 +2668,7 @@ if __name__ == "__main__":
     tests_cli()
     tests_firstrun()
     tests_install()
+    tests_arch_package()
 
     print(f"\n{done - len(failures)}/{done} checks pass")
     if failures:
