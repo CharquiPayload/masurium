@@ -5,9 +5,10 @@ license = "MIT"
 # ONE jar, two mods. The same file goes in a server's mods folder and in a bot
 # client's, and each half only wakes up where it belongs:
 #
-#   masurium_server    needs BOTH sides. On a dedicated server it is the whole mod;
-#                      on a client it is what an integrated (single-player or LAN)
-#                      world answers, which is what lets a bot work in one.
+#   masurium_server    is @Mod(dist = Dist.DEDICATED_SERVER): on a dedicated server
+#                      it is the whole mod, and a client never constructs it, so a
+#                      player's own single-player or LAN world opens no port and
+#                      has no /masurium. Bots join dedicated servers only.
 #   masurium_bot       is @Mod(dist = Dist.CLIENT): a dedicated server never
 #                      constructs it, so none of its client classes are ever loaded
 #                      there. Its mixins are declared under "client" for the same
@@ -22,7 +23,7 @@ license = "MIT"
 modId = "masurium_server"
 version = "1.0.0"
 displayName = "Masurium"
-description = "Minecraft bots driven by an AI over HTTP: the server's answers and, on a client, the bot's hands."
+description = "Minecraft bots driven by an AI over HTTP: the server's answers and, on a bot's client, the bot's hands."
 authors = "CharquiPayload"
 
 [[mods.dependencies.masurium_server]]

@@ -89,4 +89,18 @@ class BotSideTest {
                     + "part of this jar?");
         }
     }
+
+    @Test
+    @DisplayName("a client never constructs the server half: a player's own world opens nothing")
+    void theServerHalfIsNeverConstructedOnAClient() throws IOException {
+        // Awake in a player's single-player world it opened a port and added /masurium
+        // for someone who never runs a bot. The tests run without NeoForge, so the
+        // annotation is read like everything above: from the compiled class, whose
+        // constant pool carries the Dist constant that @Mod(dist = ...) was given.
+        Path f = CLASSES.resolve("masurium").resolve("server").resolve("MasuriumServer.class");
+        assertTrue(Files.isRegularFile(f), "missing " + f);
+        String pool = new String(Files.readAllBytes(f), java.nio.charset.StandardCharsets.ISO_8859_1);
+        assertTrue(pool.contains("Lnet/neoforged/api/distmarker/Dist;") && pool.contains("DEDICATED_SERVER"),
+                "masurium_server must be @Mod(value = ..., dist = Dist.DEDICATED_SERVER)");
+    }
 }

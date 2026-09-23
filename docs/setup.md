@@ -111,7 +111,9 @@ The documented path is the table above. Anything else is yours to verify.
 **One jar, both halves.** The same file goes in the Minecraft server's `mods/`
 folder and in each bot client's. On a dedicated server the bot half is never
 constructed (it is `@Mod(dist = Dist.CLIENT)`), and on a client the server half
-stays asleep unless you open a single-player or LAN world.
+is never constructed either (`@Mod(dist = Dist.DEDICATED_SERVER)`). So a player
+who has the jar sees nothing of it, and a single-player world, opened to LAN or
+not, cannot host bots: they join dedicated servers.
 
 If you are updating from a version that shipped two jars, take
 `masurium-server-*.jar` and `masurium-bot-*.jar` **out** of the folder: two

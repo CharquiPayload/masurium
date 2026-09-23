@@ -15,6 +15,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
+import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.Mod;
@@ -59,8 +60,13 @@ import java.util.function.Supplier;
  * which is the safe choice when nobody said otherwise. It goes through a file and not
  * through JVM arguments because servers are often run by a panel, and touching the
  * arguments behind its back desyncs the panel from what really runs.
+ *
+ * <p><b>Only on a dedicated server.</b> A client never constructs this half: a
+ * single-player world, opened to LAN or not, hosts no bots. Awake there it opened a
+ * port and added {@code /masurium} to the world of every player who had the jar,
+ * most of whom never run a bot; the jar has to be invisible to them.
  */
-@Mod(MasuriumServer.ID)
+@Mod(value = MasuriumServer.ID, dist = Dist.DEDICATED_SERVER)
 public class MasuriumServer {
 
     public static final String ID = "masurium_server";
@@ -627,14 +633,6 @@ public class MasuriumServer {
         try {
             if (Files.exists(CONFIG)) {
                 try (var in = Files.newInputStream(CONFIG)) { p.load(in); }
-            } else if (server != null && !server.isDedicatedServer()) {
-                // A client. This half of the mod is awake here so a single-player or
-                // LAN world can answer bots, but nobody is hosting any: writing a
-                // config file into the folder of someone who just wanted to play is
-                // the jar failing to be invisible. It is written the first time a
-                // dedicated server starts, which is when it means something.
-                LOG.info("[masurium] no {} here, and not writing one: "
-                        + "this is a client", CONFIG);
             } else {
                 Files.writeString(CONFIG, """
                         # Masurium server mod: the source of truth for the bots.

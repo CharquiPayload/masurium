@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **A player's own world wakes nothing.** The server half is now
+  `@Mod(dist = Dist.DEDICATED_SERVER)`: a client never constructs it. In 1.0.0 it
+  woke in every single-player world of anyone who had the jar, opening a port on
+  that machine and adding `/masurium`, for players who never run a bot. Bots join
+  dedicated servers; a single-player world, opened to LAN or not, does not host them.
+
 ## 1.0.0 (2026-09-23)
 
 First public release of Masurium. During development it was called Marionette;
