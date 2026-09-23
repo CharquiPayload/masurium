@@ -375,10 +375,15 @@ class MainWindow(QMainWindow):
     # --- reading --------------------------------------------------------------------------
 
     def refresh(self):
-        """A new snapshot, read on a thread; the window draws it when it comes."""
+        """A new snapshot, read on a thread; the window draws it when it comes.
+        Asked for while one is being read, it is read again once that one
+        comes: the one on its way may have been read before what was just done
+        (a new instance, say), and without a second look the window showed it
+        only at the next tick of the timer."""
         if self.reading:
+            self.again = True
             return
-        self.reading = True
+        self.reading, self.again = True, False
         self.background.ask(lambda: state.read(self.ws), self._snapshot, self._snapshot_failed)
 
     def _snapshot(self, snap):
@@ -391,10 +396,14 @@ class MainWindow(QMainWindow):
             self._update_tiles()
         self._draw_side()
         self._status()
+        if self.again:
+            self.refresh()
 
     def _snapshot_failed(self, e):
         self.reading = False
         self.statusBar().showMessage(f"could not read the instances: {e}")
+        if self.again:
+            self.refresh()
 
     # --- the instances, by group ------------------------------------------------------------
 

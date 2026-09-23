@@ -75,8 +75,16 @@ def run(name):
     if code == 0:
         return True
     lines = out.splitlines()
-    failed = [l for i, l in enumerate(lines) if l.startswith("  FAIL ")
-              or (i and lines[i - 1].startswith("  FAIL ") and l.startswith("         "))]
+    # A FAIL line and what its check said under it: every line up to the next
+    # check, the next heading or a blank one.
+    failed, inside = [], False
+    for line in lines:
+        if line.startswith("  FAIL "):
+            inside = True
+        elif not line.strip() or line.startswith(("  ok ", "  -- ")) or not line.startswith(" "):
+            inside = False
+        if inside:
+            failed.append(line)
     where = f"{name} suite on {sys.platform}"
     annotate("error", f"{where}: exit {code}", failed or ["no FAIL line: see the last lines"])
     annotate("warning", f"{where}: its last lines", lines[-TAIL:])

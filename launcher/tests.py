@@ -1175,7 +1175,7 @@ def tests_cancel():
     finally:
         if run.poll() is None:
             run.kill()
-    logs = [f"--- {f.name}: " + " | ".join(files.tail_lines(f, 6)) for f in (bot.keeper_log, bot.client_log)]
+    logs = [f"         {f.name}: " + " | ".join(files.tail_lines(f, 6)) for f in (bot.keeper_log, bot.client_log)]
     check("Ctrl+C on `start` while loading: exit code 130", loading and run.returncode == 130,
           f"{run.returncode} (SIGINT here: {signal.getsignal(signal.SIGINT)}) {out}\n" + "\n".join(logs))
     check("...saying it cancels, and stopping the game it launched",
