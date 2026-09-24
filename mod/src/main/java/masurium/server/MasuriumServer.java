@@ -112,6 +112,8 @@ public class MasuriumServer {
         NeoForge.EVENT_BUS.register(owners);
         NeoForge.EVENT_BUS.register(botCommands);
         NeoForge.EVENT_BUS.register(statusBoard);
+        // EXPERIMENT (branch experiment/server-bots): bots on the server itself.
+        NeoForge.EVENT_BUS.register(new masurium.server.puppet.Puppets());
     }
 
     /**

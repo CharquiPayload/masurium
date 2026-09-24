@@ -21,7 +21,7 @@ license = "MIT"
 
 [[mods]]
 modId = "masurium_server"
-version = "1.0.0"
+version = "1.0.0+puppets"
 displayName = "Masurium"
 description = "Minecraft bots driven by an AI over HTTP: the server's answers and, on a bot's client, the bot's hands."
 authors = "CharquiPayload"
@@ -42,7 +42,7 @@ side = "BOTH"
 
 [[mods]]
 modId = "masurium_bot"
-version = "1.0.0"
+version = "1.0.0+puppets"
 displayName = "Masurium (bot)"
 description = "The hands of the bot: look and act in the world, driven over HTTP by the agent. Client side only."
 authors = "CharquiPayload"

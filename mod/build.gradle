@@ -3,7 +3,7 @@ plugins {
     id 'net.neoforged.moddev' version '2.0.78'
 }
 
-version = '1.0.0'
+version = '1.0.0+puppets'
 group = 'masurium'
 base { archivesName = 'masurium' }
 
@@ -23,6 +23,16 @@ neoForge {
     // and on a client it is what an integrated world answers. masurium_bot is
     // @Mod(dist = Dist.CLIENT), so a dedicated server never constructs it and never
     // loads a client class through it — which BotSideTest keeps true.
+    // EXPERIMENT (branch experiment/server-bots): a dedicated server to try the
+    // puppets on, `./gradlew runServer`, in run-server/.
+    runs {
+        server {
+            server()
+            gameDirectory = project.file('run-server')
+            programArgument '--nogui'
+        }
+    }
+
     mods {
         masurium_server {
             sourceSet sourceSets.main

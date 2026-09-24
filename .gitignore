@@ -30,3 +30,6 @@ node_modules/
 
 # Packages built by tools/
 dist/
+
+# The dev server of experiment/server-bots
+run-server/
