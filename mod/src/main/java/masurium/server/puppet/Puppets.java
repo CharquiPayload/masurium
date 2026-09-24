@@ -283,15 +283,55 @@ public final class Puppets {
         if (!NAME.matcher(name + count).matches()) {
             return fail(source, name + count + " is no player name: 3 to 16 letters, digits or _");
         }
+        // Each on a tile of its own around the spot: a batch on one tile crams, and past
+        // the maxEntityCramming game rule (24) the crowd squishes itself to death.
+        List<Vec3> spots = spots(source.getLevel(), source.getPosition(), count);
         int in = 0;
         for (int i = 1; i <= count; i++) {
-            if (spawn(source, name + i)) in++;
+            if (spawn(source, name + i, spots.get(i - 1))) in++;
         }
         return say(source, in + " of " + count + " puppets are in: " + name + "1 to " + name + count);
     }
 
+    /**
+     * {@code n} places around {@code at}, a tile each, in rings outwards: free for a body,
+     * over solid ground, at its height or a block or two up or down. Short of free tiles,
+     * the rest stand at {@code at} itself.
+     */
+    private static List<Vec3> spots(ServerLevel level, Vec3 at, int n) {
+        List<Vec3> out = new ArrayList<>();
+        BlockPos c = BlockPos.containing(at);
+        for (int ring = 0; ring <= 16 && out.size() < n; ring++) {
+            for (int dx = -ring; dx <= ring && out.size() < n; dx++) {
+                for (int dz = -ring; dz <= ring && out.size() < n; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != ring) continue;
+                    for (int dy : new int[]{0, 1, -1, 2, -2}) {
+                        BlockPos feet = c.offset(dx, dy, dz);
+                        if (roomFor(level, feet)) {
+                            out.add(new Vec3(feet.getX() + 0.5, feet.getY(), feet.getZ() + 0.5));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        while (out.size() < n) out.add(at);
+        return out;
+    }
+
+    private static boolean roomFor(ServerLevel level, BlockPos feet) {
+        BlockPos below = feet.below();
+        return level.getBlockState(below).isFaceSturdy(level, below, Direction.UP)
+                && level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
+                && level.getBlockState(feet.above()).getCollisionShape(level, feet.above()).isEmpty();
+    }
+
     /** One puppet where the source stands; false, saying why, if it cannot come in. */
     private static boolean spawn(CommandSourceStack source, String name) {
+        return spawn(source, name, source.getPosition());
+    }
+
+    private static boolean spawn(CommandSourceStack source, String name, Vec3 at) {
         if (!NAME.matcher(name).matches()) {
             fail(source, name + " is no player name: 3 to 16 letters, digits or _");
             return false;
@@ -305,7 +345,14 @@ public final class Puppets {
         GameProfile profile = new GameProfile(UUIDUtil.createOfflinePlayerUUID(name), name);
         PuppetPlayer body = new PuppetPlayer(server, level, profile);
         server.getPlayerList().placeNewPlayer(new PuppetConnection(), body, CommonListenerCookie.createInitial(profile, false));
-        Vec3 at = source.getPosition();
+        // A name that died before comes back with the body it saved when it left: dead,
+        // and a puppet has no death screen to press "respawn" on. It comes back as a
+        // respawn would bring it: whole, not burning, not falling over.
+        if (body.isDeadOrDying()) {
+            body.setHealth(body.getMaxHealth());
+            body.deathTime = 0;
+            body.clearFire();
+        }
         body.teleportTo(level, at.x, at.y, at.z, source.getRotation().y, 0);
         Puppet p = new Puppet(body);
         body.pilot = () -> pilot(p);
