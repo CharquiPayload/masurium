@@ -14,10 +14,13 @@ import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.commands.arguments.ResourceArgument;
 import net.minecraft.commands.arguments.ScoreHolderArgument;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.DisconnectionDetails;
 import net.minecraft.network.chat.Component;
@@ -27,6 +30,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -49,6 +53,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -72,6 +77,8 @@ import java.util.stream.Collectors;
  *   /masurium puppet follow &lt;who&gt; &lt;player&gt;  walks after them
  *   /masurium puppet stop &lt;who&gt;             stands still
  *   /masurium puppet remove &lt;who&gt;           leaves
+ *   /masurium puppet hunt &lt;who&gt; &lt;mob&gt; [count] kills that many each (every one around)
+ *   /masurium puppet clear &lt;who&gt; &lt;from&gt; &lt;to&gt; breaks every block in the box
  *   /masurium puppet list | stats [reset]
  * </pre>
  *
@@ -85,6 +92,8 @@ public final class Puppets {
     private static final Pattern NAME = Pattern.compile("[A-Za-z0-9_]{3,16}");
     /** At most this many puppets from one spawn. */
     private static final int SPAWN_MAX = 100;
+    /** At most this many blocks in a box to clear. */
+    private static final long CLEAR_MAX = 100_000;
 
     // The client Walker's numbers: they are tuned against a player's physics, which is
     // what a puppet has.
@@ -100,12 +109,12 @@ public final class Puppets {
     private static final double PRESS_DOOR = 2.3, DOOR_PASS = 0.9;
 
     /** A follower plans again this often, and stops this close to whom it follows. */
-    private static final int REPLAN_TICKS = 20;
+    static final int REPLAN_TICKS = 20;
     private static final double FOLLOW_GAP = 2.5;
     /** Standing, a follower this close does not set off again: the client Follower's hysteresis. */
     private static final double FOLLOW_FAR = 5.0;
     /** A follower searches again only once whom it follows, or itself, moved this much (flat). */
-    private static final double MOVED = 2.0;
+    static final double MOVED = 2.0;
     /** A route that comes back is joined at its point nearest the body, among its first these many. */
     private static final int JOIN_WITHIN = 16;
     /** A follower's goal: any tile this close to the ground under whom it follows. */
@@ -133,7 +142,7 @@ public final class Puppets {
     /** What the puppets cost the server's thread, per tick, and what their searches took. */
     private static final Stats STATS = new Stats();
 
-    private static final class Puppet {
+    static final class Puppet {
         final PuppetPlayer body;
         String doing = "standing";
 
@@ -155,6 +164,11 @@ public final class Puppets {
         /** The door it opened and has not closed yet, and which side of it it was on. */
         BlockPos doorOpen;
         double doorSide;
+
+        /** What it does beyond walking (hunting, clearing), or null. */
+        Job job;
+        /** Its last search found no way at all. */
+        boolean searchFailed;
 
         Puppet(PuppetPlayer body) {
             this.body = body;
@@ -222,6 +236,17 @@ public final class Puppets {
                                                 .executes(Puppets::follow))))
                         .then(Commands.literal("stop")
                                 .then(who().executes(Puppets::stop)))
+                        .then(Commands.literal("hunt")
+                                .then(who()
+                                        .then(Commands.argument("mob", ResourceArgument.resource(event.getBuildContext(), Registries.ENTITY_TYPE))
+                                                .executes(c -> hunt(c, 0))
+                                                .then(Commands.argument("count", IntegerArgumentType.integer(1, 10_000))
+                                                        .executes(c -> hunt(c, IntegerArgumentType.getInteger(c, "count")))))))
+                        .then(Commands.literal("clear")
+                                .then(who()
+                                        .then(Commands.argument("from", BlockPosArgument.blockPos())
+                                                .then(Commands.argument("to", BlockPosArgument.blockPos())
+                                                        .executes(Puppets::clear)))))
                         .then(Commands.literal("list").executes(Puppets::list))
                         .then(Commands.literal("stats")
                                 .executes(c -> say(c.getSource(), STATS.text(ALL.size())))
@@ -302,6 +327,7 @@ public final class Puppets {
         List<Puppet> them = find(c);
         BlockPos to = BlockPosArgument.getBlockPos(c, "pos");
         for (Puppet p : them) {
+            endJob(p);
             p.following = null;
             p.target = to;
             p.replans = 0;
@@ -316,6 +342,7 @@ public final class Puppets {
         // A puppet the pattern also takes in does not follow itself.
         List<Puppet> them = find(c).stream().filter(p -> p.body != leader).toList();
         for (Puppet p : them) {
+            endJob(p);
             p.following = leader;
             p.target = null;
             p.plannedAt = -REPLAN_TICKS;
@@ -325,9 +352,43 @@ public final class Puppets {
         return told(c, them, "following " + name);
     }
 
+    /** @param count how many each is to kill; 0: every one around */
+    private static int hunt(CommandContext<CommandSourceStack> c, int count) throws CommandSyntaxException {
+        List<Puppet> them = find(c);
+        Holder.Reference<EntityType<?>> mob = ResourceArgument.getEntityType(c, "mob");
+        String name = mob.key().location().getPath();
+        if (mob.value() == EntityType.PLAYER) return fail(c.getSource(), "players are never prey");
+        for (Puppet p : them) {
+            endJob(p);
+            p.following = null;
+            p.target = null;
+            halt(p, "hunting " + name);
+            p.job = new Hunt(mob.value(), name, count);
+        }
+        return told(c, them, "hunting " + name + (count > 0 ? ", " + count + " each" : ", every one around"));
+    }
+
+    private static int clear(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
+        List<Puppet> them = find(c);
+        BlockPos a = BlockPosArgument.getLoadedBlockPos(c, "from"), b = BlockPosArgument.getLoadedBlockPos(c, "to");
+        long volume = (long) (Math.abs(a.getX() - b.getX()) + 1) * (Math.abs(a.getY() - b.getY()) + 1)
+                * (Math.abs(a.getZ() - b.getZ()) + 1);
+        if (volume > CLEAR_MAX) return fail(c.getSource(), "a box of " + volume + " blocks: " + CLEAR_MAX + " at most");
+        Clear.Area area = new Clear.Area(c.getSource().getLevel(), a, b);
+        for (Puppet p : them) {
+            endJob(p);
+            p.following = null;
+            p.target = null;
+            halt(p, "clearing " + area.box());
+            p.job = new Clear(area);
+        }
+        return told(c, them, "clearing " + area.box() + " (" + volume + " blocks)");
+    }
+
     private static int stop(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
         List<Puppet> them = find(c);
         for (Puppet p : them) {
+            endJob(p);
             p.following = null;
             p.target = null;
             halt(p, "standing");
@@ -397,6 +458,7 @@ public final class Puppets {
 
     /** Its death, from the body: it leaves, as a disconnected player would. */
     static void died(PuppetPlayer body) {
+        for (Puppet p : ALL.values()) if (p.body == body) endJob(p);
         ALL.values().removeIf(p -> p.body == body);
         body.pilot = null;
         body.getServer().execute(() -> body.connection.onDisconnect(
@@ -404,6 +466,7 @@ public final class Puppets {
     }
 
     private static void leave(Puppet p, String why) {
+        endJob(p);
         if (p.pending != null) p.pending.cancel(true);
         p.body.pilot = null;
         p.body.connection.onDisconnect(new DisconnectionDetails(Component.literal(why), Optional.empty(), Optional.empty()));
@@ -441,9 +504,28 @@ public final class Puppets {
     /** Before each tick of its body: what it is doing, turned into keys. */
     private static void pilot(Puppet p) {
         if (!p.body.isAlive()) return;
-        follow(p, p.body.getServer().getTickCount());
+        long now = p.body.getServer().getTickCount();
+        follow(p, now);
+        if (p.job != null && !p.job.think(p, now)) endJob(p);
         adopt(p);
         steer(p);
+        if (p.job != null) {
+            p.job.act(p);
+            p.doing = p.job.status();
+        }
+    }
+
+    /** Its job, over: what its hands held is let go. */
+    static void endJob(Puppet p) {
+        if (p.job == null) return;
+        Job j = p.job;
+        p.job = null;
+        j.end(p);
+    }
+
+    /** Every puppet in the game, for a job that looks at what the others do. */
+    static Collection<Puppet> all() {
+        return ALL.values();
     }
 
     /** A search from where the body stands to {@code to}, on a routes thread. */
@@ -456,7 +538,16 @@ public final class Puppets {
      * the ground under {@code to}, as the client's Follower aims. Whom it follows may be
      * in the air (jumping, flying), where nobody can stand.
      */
-    private static void plan(Puppet p, BlockPos to, double near, String doing) {
+    static void plan(Puppet p, BlockPos to, double near, String doing) {
+        Route.Point b = new Route.Point(to.getX(), to.getY(), to.getZ());
+        plan(p, to, near > 0 ? world -> Route.Meta.near(ground(world, b), near) : null, doing);
+    }
+
+    /**
+     * A search toward a goal of a job's own, made with the snapshot the search reads
+     * (null: the tile {@code to} itself). {@code to} bounds the chunks read.
+     */
+    static void plan(Puppet p, BlockPos to, Function<SnapshotWorld, Route.Meta> goal, String doing) {
         if (p.pending != null) p.pending.cancel(true);
         long started = System.nanoTime();
         BlockPos from = new BlockPos(p.body.getBlockX(), floorY(p), p.body.getBlockZ());
@@ -478,8 +569,8 @@ public final class Puppets {
             // server's thread.)
             long t0 = System.currentTimeMillis();
             Route.Point a = whereAmI(world, at);
-            Route.Result r = near > 0
-                    ? Route.search(world, a, Route.Meta.near(ground(world, b), near), options)
+            Route.Result r = goal != null
+                    ? Route.search(world, a, goal.apply(world), options)
                     : Route.search(world, a, b, options);
             STATS.search(System.currentTimeMillis() - t0, r.looked());
             return r;
@@ -564,6 +655,7 @@ public final class Puppets {
             r = null;
         }
         p.pending = null;
+        p.searchFailed = r == null || !r.hasRoute();
         if (r != null && r.hasRoute() && r.steps().size() < 2) {       // already there
             if (p.target != null) {
                 String t = p.target.toShortString();
@@ -591,7 +683,7 @@ public final class Puppets {
     }
 
     /** It stops walking: keys released, a door it opened closed behind it. */
-    private static void halt(Puppet p, String doing) {
+    static void halt(Puppet p, String doing) {
         if (p.pending != null) p.pending.cancel(true);
         p.pending = null;
         p.path = null;
@@ -600,7 +692,7 @@ public final class Puppets {
         p.doing = doing;
     }
 
-    private static void release(PuppetPlayer body) {
+    static void release(PuppetPlayer body) {
         body.zza = 0;
         body.xxa = 0;
         body.setJumping(false);
@@ -810,7 +902,7 @@ public final class Puppets {
         return best;
     }
 
-    private static double horizontal(Vec3 a, Vec3 b) {
+    static double horizontal(Vec3 a, Vec3 b) {
         double dx = a.x - b.x, dz = a.z - b.z;
         return Math.sqrt(dx * dx + dz * dz);
     }
