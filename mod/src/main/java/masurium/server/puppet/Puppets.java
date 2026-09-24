@@ -48,6 +48,7 @@ import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -60,7 +61,7 @@ import java.util.stream.Collectors;
  * (it is in TAB, it is seen, it loads chunks), with a connection that goes nowhere. Its
  * body is a player's, with a player's physics, and it walks by pressing a player's keys
  * along the routes of the same path finder the client bots use, the way their
- * {@code Walker} does. The route is searched on a thread of its own over the loaded
+ * {@code Walker} does. The route is searched on threads of their own over the loaded
  * chunks, so that what the tick pays is the body and a look at where it goes.
  * {@code /masurium puppet stats} says what that costs, next to {@code /tick query}.
  *
@@ -101,6 +102,12 @@ public final class Puppets {
     /** A follower plans again this often, and stops this close to whom it follows. */
     private static final int REPLAN_TICKS = 20;
     private static final double FOLLOW_GAP = 2.5;
+    /** Standing, a follower this close does not set off again: the client Follower's hysteresis. */
+    private static final double FOLLOW_FAR = 5.0;
+    /** A follower searches again only once whom it follows, or itself, moved this much (flat). */
+    private static final double MOVED = 2.0;
+    /** A route that comes back is joined at its point nearest the body, among its first these many. */
+    private static final int JOIN_WITHIN = 16;
     /** A follower's goal: any tile this close to the ground under whom it follows. */
     private static final double FOLLOW_NEAR = 2.0;
     /** Half a player's box across: it is 0.6 wide. */
@@ -111,8 +118,14 @@ public final class Puppets {
     private static final long SEARCH_MS = 2000;
 
     private static final Map<String, Puppet> ALL = new LinkedHashMap<>();
-    private static final ExecutorService ROUTES = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "masurium-puppet-routes");
+    /**
+     * The searches' threads: a few, a quarter of the cores and at most 4. Each search
+     * reads a snapshot of its own, so they share nothing but the stats.
+     */
+    private static final int ROUTE_THREADS = Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 4));
+    private static final AtomicInteger ROUTE_THREAD_N = new AtomicInteger();
+    private static final ExecutorService ROUTES = Executors.newFixedThreadPool(ROUTE_THREADS, r -> {
+        Thread t = new Thread(r, "masurium-puppet-routes-" + ROUTE_THREAD_N.incrementAndGet());
         t.setDaemon(true);
         return t;
     });
@@ -133,6 +146,8 @@ public final class Puppets {
         BlockPos target;
         ServerPlayer following;
         long plannedAt = -REPLAN_TICKS;
+        /** Where whom it follows, and itself, stood at its last search (NaN: search anew). */
+        double leaderX = Double.NaN, leaderZ, selfX = Double.NaN, selfZ;
 
         // How the walk goes.
         int ticks, jumps, replans;
@@ -304,6 +319,7 @@ public final class Puppets {
             p.following = leader;
             p.target = null;
             p.plannedAt = -REPLAN_TICKS;
+            p.leaderX = Double.NaN;
             p.doing = "following " + name;
         }
         return told(c, them, "following " + name);
@@ -430,7 +446,7 @@ public final class Puppets {
         steer(p);
     }
 
-    /** A search from where the body stands to {@code to}, on the routes thread. */
+    /** A search from where the body stands to {@code to}, on a routes thread. */
     private static void plan(Puppet p, BlockPos to, String doing) {
         plan(p, to, 0, doing);
     }
@@ -481,11 +497,25 @@ public final class Puppets {
             return;
         }
         if (now - p.plannedAt < REPLAN_TICKS || p.pending != null) return;
-        p.plannedAt = now;
-        if (p.body.distanceTo(leader) <= FOLLOW_GAP) {
+        double d = p.body.distanceTo(leader);
+        if (d <= FOLLOW_GAP) {
             if (p.path != null) halt(p, doing);
             return;
         }
+        if (p.path == null && d <= FOLLOW_FAR) return;
+        // Again only if something changed: whom it follows moved or, standing, it did
+        // (pushed, or at the end of a stretch). The same search from the same place finds
+        // the same way, or the same none, and with hundreds of followers the searches
+        // queue up: one that comes back late was searched from where the body was.
+        boolean leaderMoved = Double.isNaN(p.leaderX)
+                || Math.abs(leader.getX() - p.leaderX) + Math.abs(leader.getZ() - p.leaderZ) > MOVED;
+        boolean selfMoved = Math.abs(p.body.getX() - p.selfX) + Math.abs(p.body.getZ() - p.selfZ) > MOVED;
+        if (!leaderMoved && (p.path != null || !selfMoved)) return;
+        p.plannedAt = now;
+        p.leaderX = leader.getX();
+        p.leaderZ = leader.getZ();
+        p.selfX = p.body.getX();
+        p.selfZ = p.body.getZ();
         p.replans = 0;
         plan(p, leader.blockPosition(), FOLLOW_NEAR, doing);
     }
@@ -550,7 +580,10 @@ public final class Puppets {
             return;
         }
         p.path = r.steps();
-        p.next = 1;                   // the first point is where it stands
+        // The first point is where the body stood when the search began, and it may have
+        // walked on while the search waited its turn: it joins the route where it is,
+        // instead of turning back to its start.
+        p.next = Math.min(nearest(p.path, p.body.position()) + 1, p.path.size() - 1);
         p.partial = r.isPartial();
         p.ticks = 0;
         p.jumps = 0;
@@ -655,6 +688,7 @@ public final class Puppets {
     private static boolean replan(Puppet p) {
         if (p.following != null) {
             p.plannedAt = -REPLAN_TICKS;       // the follower's next look searches again
+            p.leaderX = Double.NaN;
             p.jumps = 0;
             return true;
         }
@@ -758,6 +792,22 @@ public final class Puppets {
         if (!handheld(b, where)) return false;
         var state = b.level().getBlockState(where);
         return state.hasProperty(BlockStateProperties.OPEN) && !state.getValue(BlockStateProperties.OPEN);
+    }
+
+    /** The point, among the route's first {@link #JOIN_WITHIN}, nearest {@code at}; height weighs double. */
+    private static int nearest(List<Route.Point> path, Vec3 at) {
+        int best = 0;
+        double bestD = Double.MAX_VALUE;
+        for (int i = 0; i < Math.min(path.size(), JOIN_WITHIN); i++) {
+            Route.Point q = path.get(i);
+            double dx = q.x() + 0.5 - at.x, dy = 2 * (q.y() - at.y), dz = q.z() + 0.5 - at.z;
+            double d = dx * dx + dy * dy + dz * dz;
+            if (d < bestD) {
+                bestD = d;
+                best = i;
+            }
+        }
+        return best;
     }
 
     private static double horizontal(Vec3 a, Vec3 b) {
