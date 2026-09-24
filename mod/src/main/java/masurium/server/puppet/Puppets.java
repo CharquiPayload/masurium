@@ -1,15 +1,20 @@
 package masurium.server.puppet;
 
 import com.mojang.authlib.GameProfile;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.context.ParsedCommandNode;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.logging.LogUtils;
 import masurium.common.Route;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.commands.arguments.ScoreHolderArgument;
 import net.minecraft.commands.arguments.coordinates.BlockPosArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -25,6 +30,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.scores.ScoreHolder;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
@@ -32,6 +38,8 @@ import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -41,6 +49,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Bots that live on the server instead of in a client: EXPERIMENT (branch
@@ -56,18 +65,25 @@ import java.util.regex.Pattern;
  * {@code /masurium puppet stats} says what that costs, next to {@code /tick query}.
  *
  * <pre>
- *   /masurium puppet spawn &lt;name&gt;           a puppet where you stand
- *   /masurium puppet goto &lt;name&gt; &lt;x y z&gt;    walks there
- *   /masurium puppet follow &lt;name&gt; &lt;player&gt; walks after them
- *   /masurium puppet stop &lt;name&gt;            stands still
- *   /masurium puppet remove &lt;name&gt;          leaves
+ *   /masurium puppet spawn &lt;name&gt; [count]   a puppet where you stand; with a count,
+ *                                          that many: name1, name2...
+ *   /masurium puppet goto &lt;who&gt; &lt;x y z&gt;     walks there
+ *   /masurium puppet follow &lt;who&gt; &lt;player&gt;  walks after them
+ *   /masurium puppet stop &lt;who&gt;             stands still
+ *   /masurium puppet remove &lt;who&gt;           leaves
  *   /masurium puppet list | stats [reset]
  * </pre>
+ *
+ * <p>{@code <who>} is a puppet's name, or a pattern where {@code *} stands for any run
+ * of characters ({@code *} is every puppet, {@code Bot*} every one whose name starts so),
+ * or a selector ({@code @e[distance=..10]}): an order to many, for stress tests.
  */
 public final class Puppets {
 
     private static final Logger LOG = LogUtils.getLogger();
     private static final Pattern NAME = Pattern.compile("[A-Za-z0-9_]{3,16}");
+    /** At most this many puppets from one spawn. */
+    private static final int SPAWN_MAX = 100;
 
     // The client Walker's numbers: they are tuned against a player's physics, which is
     // what a puppet has.
@@ -85,6 +101,8 @@ public final class Puppets {
     /** A follower plans again this often, and stops this close to whom it follows. */
     private static final int REPLAN_TICKS = 20;
     private static final double FOLLOW_GAP = 2.5;
+    /** A follower's goal: any tile this close to the ground under whom it follows. */
+    private static final double FOLLOW_NEAR = 2.0;
     /** The chunks read around a search: this margin, at most these many. */
     private static final int MARGIN = 24, MAX_CHUNKS = 400;
     /** A search's budget on its own thread; past it, the stretch found is walked. */
@@ -172,21 +190,21 @@ public final class Puppets {
                         .requires(s -> s.hasPermission(2))
                         .then(Commands.literal("spawn")
                                 .then(Commands.argument("name", StringArgumentType.word())
-                                        .executes(Puppets::spawn)))
+                                        .executes(c -> spawn(c, 0))
+                                        .then(Commands.argument("count", IntegerArgumentType.integer(1, SPAWN_MAX))
+                                                .executes(c -> spawn(c, IntegerArgumentType.getInteger(c, "count"))))))
                         .then(Commands.literal("remove")
-                                .then(Commands.argument("name", StringArgumentType.word())
-                                        .executes(Puppets::remove)))
+                                .then(who().executes(Puppets::remove)))
                         .then(Commands.literal("goto")
-                                .then(Commands.argument("name", StringArgumentType.word())
+                                .then(who()
                                         .then(Commands.argument("pos", BlockPosArgument.blockPos())
                                                 .executes(Puppets::goTo))))
                         .then(Commands.literal("follow")
-                                .then(Commands.argument("name", StringArgumentType.word())
+                                .then(who()
                                         .then(Commands.argument("player", EntityArgument.player())
                                                 .executes(Puppets::follow))))
                         .then(Commands.literal("stop")
-                                .then(Commands.argument("name", StringArgumentType.word())
-                                        .executes(Puppets::stop)))
+                                .then(who().executes(Puppets::stop)))
                         .then(Commands.literal("list").executes(Puppets::list))
                         .then(Commands.literal("stats")
                                 .executes(c -> say(c.getSource(), STATS.text(ALL.size())))
@@ -196,12 +214,51 @@ public final class Puppets {
                                 })))));
     }
 
-    private static int spawn(CommandContext<CommandSourceStack> c) {
+    /**
+     * The puppets an order is for. Vanilla's score holder argument reads it, the one
+     * {@code /scoreboard} takes {@code *} with: it reads any word up to a space (a word
+     * argument refuses {@code *}) or a selector, and a client without the mod knows it.
+     */
+    private static RequiredArgumentBuilder<CommandSourceStack, ScoreHolderArgument.Result> who() {
+        return Commands.argument(WHO, ScoreHolderArgument.scoreHolders())
+                .suggests((c, b) -> {
+                    List<String> names = new ArrayList<>(List.of("*"));
+                    for (Puppet p : ALL.values()) names.add(p.name());
+                    return SharedSuggestionProvider.suggest(names, b);
+                });
+    }
+
+    private static final String WHO = "who";
+
+    /** @param count 0: one puppet, named {@code name}; else that many, name1 to nameN */
+    private static int spawn(CommandContext<CommandSourceStack> c, int count) {
         CommandSourceStack source = c.getSource();
         String name = StringArgumentType.getString(c, "name");
-        if (!NAME.matcher(name).matches()) return fail(source, name + " is no player name: 3 to 16 letters, digits or _");
+        if (count == 0) {
+            if (!spawn(source, name)) return 0;
+            return say(source, "puppet " + name + " is in, at " + ALL.get(key(name)).body.blockPosition().toShortString());
+        }
+        if (!NAME.matcher(name + count).matches()) {
+            return fail(source, name + count + " is no player name: 3 to 16 letters, digits or _");
+        }
+        int in = 0;
+        for (int i = 1; i <= count; i++) {
+            if (spawn(source, name + i)) in++;
+        }
+        return say(source, in + " of " + count + " puppets are in: " + name + "1 to " + name + count);
+    }
+
+    /** One puppet where the source stands; false, saying why, if it cannot come in. */
+    private static boolean spawn(CommandSourceStack source, String name) {
+        if (!NAME.matcher(name).matches()) {
+            fail(source, name + " is no player name: 3 to 16 letters, digits or _");
+            return false;
+        }
         MinecraftServer server = source.getServer();
-        if (server.getPlayerList().getPlayerByName(name) != null) return fail(source, name + " is already in the game");
+        if (server.getPlayerList().getPlayerByName(name) != null) {
+            fail(source, name + " is already in the game");
+            return false;
+        }
         ServerLevel level = source.getLevel();
         GameProfile profile = new GameProfile(UUIDUtil.createOfflinePlayerUUID(name), name);
         PuppetPlayer body = new PuppetPlayer(server, level, profile);
@@ -212,45 +269,52 @@ public final class Puppets {
         body.pilot = () -> pilot(p);
         ALL.put(key(name), p);
         LOG.info("[masurium] puppet {} spawned at {}", name, body.blockPosition());
-        return say(source, "puppet " + name + " is in, at " + body.blockPosition().toShortString());
+        return true;
     }
 
-    private static int remove(CommandContext<CommandSourceStack> c) {
-        Puppet p = find(c);
-        if (p == null) return 0;
-        ALL.remove(key(p.name()));
-        leave(p, "removed");
-        return say(c.getSource(), "puppet " + p.name() + " left");
+    private static int remove(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
+        List<Puppet> them = find(c);
+        for (Puppet p : them) {
+            ALL.remove(key(p.name()));
+            leave(p, "removed");
+        }
+        return told(c, them, "left");
     }
 
     private static int goTo(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
-        Puppet p = find(c);
-        if (p == null) return 0;
+        List<Puppet> them = find(c);
         BlockPos to = BlockPosArgument.getBlockPos(c, "pos");
-        p.following = null;
-        p.target = to;
-        p.replans = 0;
-        plan(p, to, "going to " + to.toShortString());
-        return say(c.getSource(), p.name() + " is searching a way to " + to.toShortString());
+        for (Puppet p : them) {
+            p.following = null;
+            p.target = to;
+            p.replans = 0;
+            plan(p, to, "going to " + to.toShortString());
+        }
+        return told(c, them, "searching a way to " + to.toShortString());
     }
 
     private static int follow(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
-        Puppet p = find(c);
-        if (p == null) return 0;
-        p.following = EntityArgument.getPlayer(c, "player");
-        p.target = null;
-        p.plannedAt = -REPLAN_TICKS;
-        p.doing = "following " + p.following.getGameProfile().getName();
-        return say(c.getSource(), p.name() + " follows " + p.following.getGameProfile().getName());
+        ServerPlayer leader = EntityArgument.getPlayer(c, "player");
+        String name = leader.getGameProfile().getName();
+        // A puppet the pattern also takes in does not follow itself.
+        List<Puppet> them = find(c).stream().filter(p -> p.body != leader).toList();
+        for (Puppet p : them) {
+            p.following = leader;
+            p.target = null;
+            p.plannedAt = -REPLAN_TICKS;
+            p.doing = "following " + name;
+        }
+        return told(c, them, "following " + name);
     }
 
-    private static int stop(CommandContext<CommandSourceStack> c) {
-        Puppet p = find(c);
-        if (p == null) return 0;
-        p.following = null;
-        p.target = null;
-        halt(p, "standing");
-        return say(c.getSource(), p.name() + " stands still");
+    private static int stop(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
+        List<Puppet> them = find(c);
+        for (Puppet p : them) {
+            p.following = null;
+            p.target = null;
+            halt(p, "standing");
+        }
+        return told(c, them, "standing still");
     }
 
     private static int list(CommandContext<CommandSourceStack> c) {
@@ -262,11 +326,39 @@ public final class Puppets {
         return say(c.getSource(), String.join("\n", lines));
     }
 
-    private static Puppet find(CommandContext<CommandSourceStack> c) {
-        String name = StringArgumentType.getString(c, "name");
-        Puppet p = ALL.get(key(name));
-        if (p == null) fail(c.getSource(), "no puppet " + name);
-        return p;
+    /**
+     * The puppets {@code <who>} names: a selector's, or those whose name the pattern
+     * matches, {@code *} being any run of characters, in any case. None is a failure,
+     * said.
+     */
+    private static List<Puppet> find(CommandContext<CommandSourceStack> c) throws CommandSyntaxException {
+        String typed = typed(c);
+        List<Puppet> them;
+        if (typed.startsWith("@")) {
+            Collection<ScoreHolder> chosen = ScoreHolderArgument.getNames(c, WHO, List::of);
+            them = ALL.values().stream().filter(p -> chosen.contains(p.body)).toList();
+        } else {
+            String regex = Arrays.stream(typed.split("\\*", -1)).map(Pattern::quote).collect(Collectors.joining(".*"));
+            Pattern glob = Pattern.compile(regex, Pattern.CASE_INSENSITIVE);
+            them = ALL.values().stream().filter(p -> glob.matcher(p.name()).matches()).toList();
+        }
+        if (them.isEmpty()) fail(c.getSource(), "no puppet " + (typed.equals("*") ? "in the game" : typed));
+        return them;
+    }
+
+    /** The words given for {@code <who>}, as typed. */
+    private static String typed(CommandContext<CommandSourceStack> c) {
+        for (ParsedCommandNode<CommandSourceStack> n : c.getNodes()) {
+            if (n.getNode().getName().equals(WHO)) return n.getRange().get(c.getInput());
+        }
+        return "";
+    }
+
+    /** What some puppets were told, in a line: by name when one, by count when more. */
+    private static int told(CommandContext<CommandSourceStack> c, List<Puppet> them, String doing) {
+        if (them.isEmpty()) return 0;
+        say(c.getSource(), (them.size() == 1 ? them.get(0).name() : them.size() + " puppets") + ": " + doing);
+        return them.size();
     }
 
     private static String key(String name) {
@@ -338,6 +430,15 @@ public final class Puppets {
 
     /** A search from where the body stands to {@code to}, on the routes thread. */
     private static void plan(Puppet p, BlockPos to, String doing) {
+        plan(p, to, 0, doing);
+    }
+
+    /**
+     * With {@code near} over 0 the goal is a ring and not a tile: within {@code near} of
+     * the ground under {@code to}, as the client's Follower aims. Whom it follows may be
+     * in the air (jumping, flying), where nobody can stand.
+     */
+    private static void plan(Puppet p, BlockPos to, double near, String doing) {
         if (p.pending != null) p.pending.cancel(true);
         long started = System.nanoTime();
         BlockPos from = new BlockPos(p.body.getBlockX(), floorY(p), p.body.getBlockZ());
@@ -355,8 +456,11 @@ public final class Puppets {
         Route.Options options = new Route.Options(3, Route.Options.byDefault().maxNodes(), false, true)
                 .withDeadline(SEARCH_MS);
         p.pending = ROUTES.submit(() -> {
+            // (ground() reads the snapshot, so it runs here, off the server's thread.)
             long t0 = System.currentTimeMillis();
-            Route.Result r = Route.search(world, a, b, options);
+            Route.Result r = near > 0
+                    ? Route.search(world, a, Route.Meta.near(ground(world, b), near), options)
+                    : Route.search(world, a, b, options);
             STATS.search(System.currentTimeMillis() - t0, r.looked());
             return r;
         });
@@ -379,7 +483,17 @@ public final class Puppets {
             return;
         }
         p.replans = 0;
-        plan(p, leader.blockPosition(), doing);
+        plan(p, leader.blockPosition(), FOLLOW_NEAR, doing);
+    }
+
+    /** The first tile one can stand on under {@code at} (24 down at most), else {@code at}. */
+    private static Route.Point ground(SnapshotWorld world, Route.Point at) {
+        for (int dy = 1; dy >= -24; dy--) {
+            if (world.canStand(at.x(), at.y() + dy, at.z())) {
+                return new Route.Point(at.x(), at.y() + dy, at.z());
+            }
+        }
+        return at;
     }
 
     /** A finished search becomes the route to walk. */
@@ -397,6 +511,8 @@ public final class Puppets {
                 String t = p.target.toShortString();
                 p.target = null;
                 halt(p, "arrived at " + t);
+            } else if (p.path != null) {
+                halt(p, p.doing);             // a follower already beside whom it follows
             }
             return;
         }
