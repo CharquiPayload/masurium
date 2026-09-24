@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Masurium Launcher has a repository of its own:**
+  [masurium-launcher](https://github.com/CharquiPayload/masurium-launcher), with the bridge, the MCP server, the installers and
+  their tests, and their history. This repository is the mod alone, and its
+  releases are the mod's jar; the launcher's releases bring it, pinned.
 - **A player's own world wakes nothing.** The server half is now
   `@Mod(dist = Dist.DEDICATED_SERVER)`: a client never constructs it. In 1.0.0 it
   woke in every single-player world of anyone who had the jar, opening a port on
@@ -11,28 +15,8 @@
   [masurium-veil](https://github.com/CharquiPayload/masurium-veil) and
   [masurium-watut](https://github.com/CharquiPayload/masurium-watut), with their
   history, their releases and their own tests on GitHub. They build against the
-  core's release, downloaded and checked. The launcher's releases still carry
-  them in `jars/`: `tools/release.sh` downloads the versions
-  `packaging/addons.txt` names, each checked against its checksum. A clone of
-  this repository brings the mod only.
-- **Every commit is tested on GitHub's machines**, the Python suites on Linux and
-  on Windows, the mod on Linux: the start of the Windows port.
-- **Windows, on its way:** `install.ps1`, the Windows twin of `install.sh`
-  (`irm .../install.ps1 | iex`), for one user and without administrator rights:
-  the program, its own Python environment with Qt, a `masurium` command and a
-  Start menu entry; Update now runs it the way it runs `install.sh`. And a
-  classic setup, `MasuriumLauncherSetup-<version>.exe` (Inno Setup,
-  `packaging/windows`): Next, Next, Install, for one user, bringing a Python of
-  its own with Qt so the machine needs nothing else, with its uninstaller in
-  Windows' list of programs. Javas installed under Program Files are found.
-  Tested on GitHub's Windows machine, not yet on a Windows desktop.
-- **Ctrl+C on `masurium start` stops the game it launched on every Python.** On
-  Python 3.12 and older (Ubuntu 24.04's, for one) a Ctrl+C that landed while the
-  command waited made it leave at once, exit code 0, with the game still loading.
-- The window shows a new, copied or moved instance at once: a refresh asked for
-  while another was under way was dropped until the next tick of the timer.
-- A lock names who holds it on Windows too, and a second bridge no longer wipes
-  the first one's pid from the lock it finds taken.
+  mod's release, downloaded and checked; Masurium Launcher's releases carry them.
+- **Every commit is built and tested on GitHub's machines.**
 
 ## 1.0.0 (2026-09-23)
 

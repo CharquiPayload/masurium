@@ -1,5 +1,9 @@
 # Architecture
 
+> After Masurium 1.0.0, Masurium Launcher, the bridge and the MCP server moved to
+> [their own repository](https://github.com/CharquiPayload/masurium-launcher); the paths below that start with `launcher/` or
+> `mcp/` are there.
+
 Every design decision with its reason, including the ones that were discarded,
 so they do not have to be argued again from scratch.
 

@@ -1,4 +1,4 @@
-<p align="center"><img src="launcher/gui/logo.png" width="160" alt="Masurium: element 43, Ma"></p>
+<p align="center"><img src="docs/logo.png" width="160" alt="Masurium: element 43, Ma"></p>
 
 # Masurium
 
@@ -17,12 +17,11 @@ them play alongside you.
 > tools answer when they *know*, not when they launched an order, and every
 > failure says *what happened*, with numbers.
 
-**To install it**: the mod jar goes in your server's `mods/` folder, and
-**Masurium Launcher** on the machine that runs the bots: a `.deb` for Ubuntu and
-Debian, a `PKGBUILD` for Arch and its family, or, for any Linux, one line:
-`curl -fsSL https://github.com/CharquiPayload/masurium/releases/latest/download/install.sh | sh`.
-The first time it opens, it sets the machine up. [docs/setup.md](docs/setup.md) has every step, and how to build it
-all yourself.
+**To install it**: the mod jar goes in your server's `mods/` folder
+([docs/setup.md](docs/setup.md)), and the bots run from
+**[Masurium Launcher](https://github.com/CharquiPayload/masurium-launcher)**, on the machine that runs them: it creates them,
+starts and stops them, and brings the same jar for them. Its repository has
+its installers (Linux and Windows) and its setup.
 
 ## How it works
 
@@ -31,10 +30,10 @@ all yourself.
 | **Server half** | the source of truth: what is where, who is online, did it happen; server-side crafting | `mod/src/main/java/masurium/server/` |
 | **Bot half** | the hands, inside a headless client: walk, dig, place, fight, eat, use chests and furnaces | `mod/src/main/java/masurium/bot/` |
 | **Shared half** | what both need and neither owns: the path finder, the logbook, the settings and the phrases | `mod/src/main/java/masurium/common/` |
-| **MCP server** | the catalog of tools the brain can call | `mcp/server.py` |
-| **Bridge** | reads the chat, wakes the brain when the bot is named, relays body notices | `mcp/bridge.py` |
+| **MCP server** | the catalog of tools the brain can call | [masurium-launcher](https://github.com/CharquiPayload/masurium-launcher): `mcp/server.py` |
+| **Bridge** | reads the chat, wakes the brain when the bot is named, relays body notices | [masurium-launcher](https://github.com/CharquiPayload/masurium-launcher): `mcp/bridge.py` |
 | **Claude Code** | thinking, only when needed | — |
-| **Masurium Launcher** | creates, starts, stops and watches bots; a keeper per bot holds the game's console | `launcher/` |
+| **Masurium Launcher** | creates, starts, stops and watches bots; a keeper per bot holds the game's console | [masurium-launcher](https://github.com/CharquiPayload/masurium-launcher) |
 | **Add-ons** | jars of their own, one per third-party mod the bot has to live with: one keeps Veil off a GPU that a headless bot does not have, another keeps WATUT from showing a working bot as away | repositories of their own: [masurium-veil](https://github.com/CharquiPayload/masurium-veil), [masurium-watut](https://github.com/CharquiPayload/masurium-watut) |
 
 The split is strict: **a question goes to the server, an action goes to the
@@ -79,14 +78,13 @@ because fighting is measured in ticks and a model round trip takes seconds.
 ## Tests
 
 ```bash
-./test.sh              # the MCP layer and the launcher in Python, then the mod: JUnit tests and the jar
-mcp/test_brain.sh      # the thinking layer against a fake bot (spends model calls)
+./test.sh              # the mod: its JUnit tests and the jar
 ```
 
 None of the tests need Minecraft running. The path finder, the logbook, the
-request parsing and most of the bridge and MCP logic are tested in milliseconds;
-the launcher's keeper is run for real against a fake game that echoes what it
-is told.
+request parsing and the rules are tested in milliseconds. The bridge, the MCP
+server and the launcher are tested in [their repository](https://github.com/CharquiPayload/masurium-launcher), which also
+holds the rules' shared cases and the settings table against this mod's.
 
 One of them is worth knowing about before changing anything: `BotSideTest` fails
 the build if anything in `masurium.server` or `masurium.common` so much as
@@ -98,8 +96,8 @@ inline, a lambda, or a return type that no `import` would reveal.
 
 ## Documentation
 
-- [docs/setup.md](docs/setup.md): requirements, installation, configuring a bot
-  and the in-game commands.
+- [docs/setup.md](docs/setup.md): the mod on the server, its configuration and the
+  in-game commands; the bots' side is in [Masurium Launcher's setup](https://github.com/CharquiPayload/masurium-launcher/blob/main/docs/setup.md).
 - [docs/architecture.md](docs/architecture.md): every design decision and why,
   including the ones that were discarded.
 - [docs/lessons.md](docs/lessons.md): what took nights to learn about the
@@ -110,29 +108,12 @@ inline, a lambda, or a return type that no `import` would reveal.
 
 - A per-bot configuration file generated on first start, with the behaviour
   toggles as `true`/`false`.
-- Release builds: `tools/release.sh` makes the jars, the launcher's `.deb`,
-  its `PKGBUILD` for Arch and its folder for any Linux. To do: a Windows
-  installer (and a portable zip), publishing the PKGBUILD in the AUR, and an
-  `.rpm`.
-- **Masurium Launcher**: the command line is done (`launcher/masurium.py`: bots,
-  each one an instance — a player on a server, with its name, account,
-  personality and settings — created, copied, started, stopped and watched;
-  each server with its own server mod; it compares the pack with the server's
-  `/mods` before joining, and refuses to run one player twice; offline, or
-  Microsoft accounts logged in once and shared through a link; a bot's rules —
-  toggles, food, blocks — kept on the server and editable from the launcher and
-  the game, live;
-  groups, plain ones that start together and a leader with its guards, nested,
-  with settings and rules that impose on what is inside them, and a global
-  config over all). A window on the same code (`masurium.py gui`, PySide6):
-  the instances by group, their actions, rules, settings and logs; it sets a
-  new machine up by itself (the downloads, the way to the server, the first
-  server), and installs as a desktop app. To do: a run on Windows.
+- **Masurium Launcher**: its roadmap is in [its repository](https://github.com/CharquiPayload/masurium-launcher).
 - **Add-ons**: separate jars that teach the bots one mod each, each in a
   repository of its own. Two are there, [masurium-veil](https://github.com/CharquiPayload/masurium-veil)
   (Veil without a GPU) and [masurium-watut](https://github.com/CharquiPayload/masurium-watut)
-  (a bot at work is not away, and it types while it thinks), and the launcher's
-  releases carry them; the next ones teach *abilities*
+  (a bot at work is not away, and it types while it thinks), and Masurium
+  Launcher's releases carry them; the next ones teach *abilities*
   (`masurium-create`...). To do for those: the
   core offers them a place to register their own `/masurium bot <bot> <add-on>
   ...` subcommands and their own per-bot settings, kept where the rest of the
@@ -178,9 +159,8 @@ ideally with a whitelist.
   HeadlessHQ (MIT), which make it possible to run the bots as real clients without a
   screen. They are used as external tools and are not bundled.
 - **[Prism Launcher](https://prismlauncher.org/)** (GPL-3.0). Masurium began as a
-  client mod run from Prism, one instance per bot, and its launcher follows Prism's
-  lead: instances in groups, a panel of actions for the one selected, settings per
-  instance over shared defaults. Nothing of Prism's code is used.
+  client mod run from Prism, one instance per bot; Masurium Launcher follows its
+  lead. Nothing of Prism's code is used.
 - [NeoForge](https://neoforged.net/) and the Minecraft modding community.
 - [Claude Code](https://claude.com/claude-code) by Anthropic, the brain.
 

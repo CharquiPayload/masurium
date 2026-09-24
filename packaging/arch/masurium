@@ -1,4 +1,0 @@
-#!/bin/sh
-# Masurium Launcher's command (the Arch package): the system's Python, with its
-# pyside6 for the window, runs the program.
-exec /usr/bin/python3 /usr/share/masurium-launcher/launcher/masurium.py "$@"

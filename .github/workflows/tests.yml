@@ -1,7 +1,6 @@
-# Every test of the project on GitHub's machines: the Python suites on Linux
-# and on Windows, the mod on Linux (a jar is the same jar everywhere).
-# tools/ci.py leaves a failure's lines as an annotation, readable without
-# logging in.
+# The mod built, with every test, on GitHub's machines, on every commit: the
+# jar a server and the bots load. Masurium Launcher is tested in its own
+# repository.
 name: tests
 
 on:
@@ -14,36 +13,6 @@ permissions:
   contents: read
 
 jobs:
-  python:
-    name: python ${{ matrix.python }} (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        # The oldest Python the installers take that GitHub still has, and a
-        # new one: a Ctrl+C that left `start` at once only happened on 3.12
-        # and older, never on the 3.13 the development machines run.
-        include:
-          - {os: ubuntu-latest, python: "3.10"}
-          - {os: ubuntu-latest, python: "3.13"}
-          - {os: windows-latest, python: "3.12"}
-    runs-on: ${{ matrix.os }}
-    # Windows is being ported to: its failures are said, and do not paint the
-    # commit red until it is done.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python }}
-      - name: what Qt needs from Linux, which a desktop has and a CI machine does not
-        if: runner.os == 'Linux'
-        run: sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
-      - name: Qt for the window's suite
-        run: python -m pip install --disable-pip-version-check "PySide6-Essentials>=6.7,<7"
-      - name: the suites
-        run: python tools/ci.py
-
   mod:
     name: mod (java)
     runs-on: ubuntu-latest
@@ -58,36 +27,3 @@ jobs:
       - name: build, and every test
         working-directory: mod
         run: ./gradlew build --console=plain
-
-  windows-setup:
-    name: Windows setup (.exe)
-    runs-on: windows-latest
-    # Being built: its failures are said, and do not paint the commit red.
-    continue-on-error: true
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-      - name: the jars of the latest release, for the setup to bring
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force release-jars | Out-Null
-          $release = Invoke-RestMethod -Headers @{ Authorization = "Bearer ${{ github.token }}" } `
-              "https://api.github.com/repos/${{ github.repository }}/releases/latest"
-          $release.assets | Where-Object name -like "masurium*.jar" | ForEach-Object {
-              Invoke-WebRequest $_.browser_download_url -OutFile "release-jars/$($_.name)" }
-          Get-ChildItem release-jars | ForEach-Object Name
-      - name: build the setup
-        shell: pwsh
-        run: ./packaging/windows/build.ps1 -Jars release-jars
-      - name: install it silently, use it, take it away
-        shell: pwsh
-        run: ./packaging/windows/check-setup.ps1
-      - name: keep the setup, to try by hand
-        uses: actions/upload-artifact@v7
-        with:
-          name: MasuriumLauncherSetup
-          path: dist/MasuriumLauncherSetup-*.exe
-          retention-days: 14
