@@ -103,6 +103,8 @@ public final class Puppets {
     private static final double FOLLOW_GAP = 2.5;
     /** A follower's goal: any tile this close to the ground under whom it follows. */
     private static final double FOLLOW_NEAR = 2.0;
+    /** Half a player's box across: it is 0.6 wide. */
+    private static final double HALF_WIDTH = 0.3;
     /** The chunks read around a search: this margin, at most these many. */
     private static final int MARGIN = 24, MAX_CHUNKS = 400;
     /** A search's budget on its own thread; past it, the stretch found is walked. */
@@ -449,15 +451,17 @@ public final class Puppets {
             STATS.snapshotNanos += took;
             STATS.maxSnapshotNanos = Math.max(STATS.maxSnapshotNanos, took);
         }
-        Route.Point a = new Route.Point(from.getX(), from.getY(), from.getZ());
+        Vec3 at = p.body.position();
         Route.Point b = new Route.Point(to.getX(), to.getY(), to.getZ());
         // Partial routes: a stretch that gets closer is walked and searched on from its
         // end, which is what a follower needs and a goto does too (see steer).
         Route.Options options = new Route.Options(3, Route.Options.byDefault().maxNodes(), false, true)
                 .withDeadline(SEARCH_MS);
         p.pending = ROUTES.submit(() -> {
-            // (ground() reads the snapshot, so it runs here, off the server's thread.)
+            // (whereAmI() and ground() read the snapshot, so they run here, off the
+            // server's thread.)
             long t0 = System.currentTimeMillis();
+            Route.Point a = whereAmI(world, at);
             Route.Result r = near > 0
                     ? Route.search(world, a, Route.Meta.near(ground(world, b), near), options)
                     : Route.search(world, a, b, options);
@@ -484,6 +488,30 @@ public final class Puppets {
         }
         p.replans = 0;
         plan(p, leader.blockPosition(), FOLLOW_NEAR, doing);
+    }
+
+    /**
+     * The tile a search starts from, found as the client's {@code MasuriumBot.whereAmI}
+     * finds it, and NOT the one under the centre. A body stands on its box, one foot on
+     * the next block holds it up: at a block's edge the centre is over an empty column,
+     * and a search from there fails with "where I am is not a spot where one can stand",
+     * again each second, which a follower walks as a stutter. The tile under the centre
+     * first, then those under the box's corners; one up (the feet are inside a partial
+     * block's cell: a path, a slab) and one down (in a jump, or pushed off an edge).
+     */
+    private static Route.Point whereAmI(SnapshotWorld world, Vec3 at) {
+        int y0 = (int) Math.floor(at.y);
+        double[] offsets = {0, -HALF_WIDTH, HALF_WIDTH};
+        for (int y : new int[]{y0, y0 + 1, y0 - 1}) {
+            for (double dx : offsets) {
+                for (double dz : offsets) {
+                    int x = (int) Math.floor(at.x + dx), z = (int) Math.floor(at.z + dz);
+                    if (world.canStand(x, y, z)) return new Route.Point(x, y, z);
+                }
+            }
+        }
+        // None: the tile under the centre, so the search says what is really wrong.
+        return new Route.Point((int) Math.floor(at.x), y0, (int) Math.floor(at.z));
     }
 
     /** The first tile one can stand on under {@code at} (24 down at most), else {@code at}. */
